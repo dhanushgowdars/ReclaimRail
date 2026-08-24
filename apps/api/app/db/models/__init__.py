@@ -1,4 +1,10 @@
 from app.db.base import Base
+from app.db.models.incident import (
+    IncidentDetectionObservation,
+    IncidentObservationOutcome,
+    RevenueIncident,
+    RevenueIncidentStatus,
+)
 from app.db.models.outbox import (
     OutboxMessage,
     OutboxMessageStatus,
@@ -17,10 +23,14 @@ from app.db.models.webhook import (
 
 __all__ = [
     "Base",
+    "IncidentDetectionObservation",
+    "IncidentObservationOutcome",
     "OutboxMessage",
     "OutboxMessageStatus",
     "PaymentAttempt",
     "PaymentStateTransition",
+    "RevenueIncident",
+    "RevenueIncidentStatus",
     "WebhookDelivery",
     "WebhookDeliveryStatus",
     "WebhookEvent",

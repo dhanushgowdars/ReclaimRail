@@ -1,4 +1,8 @@
 from app.db.base import Base
+from app.db.models.outbox import (
+    OutboxMessage,
+    OutboxMessageStatus,
+)
 from app.db.models.webhook import (
     WebhookDelivery,
     WebhookDeliveryStatus,
@@ -9,6 +13,8 @@ from app.db.models.webhook import (
 
 __all__ = [
     "Base",
+    "OutboxMessage",
+    "OutboxMessageStatus",
     "WebhookDelivery",
     "WebhookDeliveryStatus",
     "WebhookEvent",

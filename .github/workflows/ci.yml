@@ -78,9 +78,6 @@ jobs:
       - name: Run type checking
         run: uv run --frozen mypy app
 
-      - name: Run tests
-        run: uv run --frozen pytest -v
-
       - name: Verify PostgreSQL connectivity
         run: >
           uv run --frozen python -c
@@ -96,11 +93,12 @@ jobs:
           asyncio.run(check_redis())"
 
       - name: Apply database migrations
-        working-directory: apps/api
         run: uv run --frozen alembic upgrade head
 
+      - name: Run tests
+        run: uv run --frozen pytest -v
+
       - name: Check migration state
-        working-directory: apps/api
         run: uv run --frozen alembic check
 
   frontend:

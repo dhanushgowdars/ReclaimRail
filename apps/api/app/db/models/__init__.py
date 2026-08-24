@@ -6,7 +6,6 @@ from app.db.models.outbox import (
 from app.db.models.payment import (
     PaymentAttempt,
     PaymentStateTransition,
-    PaymentTransitionOutcome,
 )
 from app.db.models.webhook import (
     WebhookDelivery,
@@ -22,7 +21,6 @@ __all__ = [
     "OutboxMessageStatus",
     "PaymentAttempt",
     "PaymentStateTransition",
-    "PaymentTransitionOutcome",
     "WebhookDelivery",
     "WebhookDeliveryStatus",
     "WebhookEvent",

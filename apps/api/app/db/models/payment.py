@@ -1,5 +1,4 @@
 from datetime import datetime
-from enum import StrEnum
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -20,13 +19,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
 
-class PaymentTransitionOutcome(StrEnum):
-    APPLIED = "applied"
-    IGNORED_DUPLICATE = "ignored_duplicate"
-    IGNORED_OUT_OF_ORDER = "ignored_out_of_order"
-    IGNORED_TERMINAL = "ignored_terminal"
-
-
 class PaymentAttempt(Base):
     """Current provider-independent projection of a payment."""
 
@@ -40,7 +32,8 @@ class PaymentAttempt(Base):
         CheckConstraint(
             (
                 "current_state IN "
-                "('unknown', 'created', 'failed', 'authorized', 'captured', 'refunded')"
+                "('unknown', 'created', 'failed', 'authorized', "
+                "'captured', 'refunded')"
             ),
             name="ck_payment_attempts_current_state",
         ),
@@ -101,9 +94,14 @@ class PaymentAttempt(Base):
         nullable=False,
     )
     method: Mapped[str | None] = mapped_column(
-        String(32),
+        String(64),
         nullable=True,
     )
+    payment_created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
     current_state: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
@@ -138,15 +136,15 @@ class PaymentAttempt(Base):
         nullable=True,
     )
     error_description: Mapped[str | None] = mapped_column(
-        String(512),
+        String(1000),
         nullable=True,
     )
     error_source: Mapped[str | None] = mapped_column(
-        String(64),
+        String(128),
         nullable=True,
     )
     error_step: Mapped[str | None] = mapped_column(
-        String(64),
+        String(128),
         nullable=True,
     )
     error_reason: Mapped[str | None] = mapped_column(
@@ -197,30 +195,29 @@ class PaymentStateTransition(Base):
         CheckConstraint(
             (
                 "previous_state IN "
-                "('unknown', 'created', 'failed', 'authorized', 'captured', 'refunded')"
+                "('unknown', 'created', 'failed', 'authorized', "
+                "'captured', 'refunded')"
             ),
             name="ck_payment_state_transitions_previous_state",
         ),
         CheckConstraint(
             (
                 "incoming_state IN "
-                "('unknown', 'created', 'failed', 'authorized', 'captured', 'refunded')"
+                "('unknown', 'created', 'failed', 'authorized', "
+                "'captured', 'refunded')"
             ),
             name="ck_payment_state_transitions_incoming_state",
         ),
         CheckConstraint(
             (
                 "resulting_state IN "
-                "('unknown', 'created', 'failed', 'authorized', 'captured', 'refunded')"
+                "('unknown', 'created', 'failed', 'authorized', "
+                "'captured', 'refunded')"
             ),
             name="ck_payment_state_transitions_resulting_state",
         ),
         CheckConstraint(
-            (
-                "outcome IN "
-                "('applied', 'ignored_duplicate', "
-                "'ignored_out_of_order', 'ignored_terminal')"
-            ),
+            "outcome IN ('applied', 'ignored')",
             name="ck_payment_state_transitions_outcome",
         ),
         CheckConstraint(
@@ -287,7 +284,7 @@ class PaymentStateTransition(Base):
         nullable=False,
     )
     outcome: Mapped[str] = mapped_column(
-        String(32),
+        String(16),
         nullable=False,
     )
     reason: Mapped[str] = mapped_column(

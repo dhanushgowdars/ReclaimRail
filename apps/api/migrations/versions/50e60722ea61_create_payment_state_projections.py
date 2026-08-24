@@ -11,7 +11,6 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-# revision identifiers, used by Alembic.
 revision: str = "50e60722ea61"
 down_revision: str | Sequence[str] | None = "81959b025796"
 branch_labels: str | Sequence[str] | None = None
@@ -19,7 +18,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
+    """Create payment projections and their immutable transition history."""
     op.create_table(
         "payment_attempts",
         sa.Column(
@@ -60,8 +59,13 @@ def upgrade() -> None:
         ),
         sa.Column(
             "method",
-            sa.String(length=32),
+            sa.String(length=64),
             nullable=True,
+        ),
+        sa.Column(
+            "payment_created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
         ),
         sa.Column(
             "current_state",
@@ -97,17 +101,17 @@ def upgrade() -> None:
         ),
         sa.Column(
             "error_description",
-            sa.String(length=512),
+            sa.String(length=1000),
             nullable=True,
         ),
         sa.Column(
             "error_source",
-            sa.String(length=64),
+            sa.String(length=128),
             nullable=True,
         ),
         sa.Column(
             "error_step",
-            sa.String(length=64),
+            sa.String(length=128),
             nullable=True,
         ),
         sa.Column(
@@ -253,7 +257,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "outcome",
-            sa.String(length=32),
+            sa.String(length=16),
             nullable=False,
         ),
         sa.Column(
@@ -293,11 +297,7 @@ def upgrade() -> None:
             name="ck_payment_state_transitions_incoming_state",
         ),
         sa.CheckConstraint(
-            (
-                "outcome IN "
-                "('applied', 'ignored_duplicate', "
-                "'ignored_out_of_order', 'ignored_terminal')"
-            ),
+            "outcome IN ('applied', 'ignored')",
             name="ck_payment_state_transitions_outcome",
         ),
         sa.CheckConstraint(
@@ -363,7 +363,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
+    """Remove payment projections and transition history."""
     op.drop_index(
         op.f("ix_payment_state_transitions_payment_attempt_id"),
         table_name="payment_state_transitions",

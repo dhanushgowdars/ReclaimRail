@@ -75,6 +75,32 @@ class Settings(BaseSettings):
         le=1_000_000,
     )
 
+    incident_payment_methods: tuple[str, ...] = (
+        "upi",
+        "card",
+        "netbanking",
+        "wallet",
+    )
+    incident_currency: str = Field(
+        default="INR",
+        min_length=3,
+        max_length=3,
+    )
+    incident_window_minutes: int = Field(
+        default=5,
+        ge=1,
+        le=60,
+    )
+    incident_baseline_window_count: int = Field(
+        default=12,
+        ge=6,
+        le=288,
+    )
+    incident_poll_interval_seconds: float = Field(
+        default=60.0,
+        ge=1.0,
+        le=3600.0,
+    )
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

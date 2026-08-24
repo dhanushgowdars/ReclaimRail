@@ -95,7 +95,12 @@ jobs:
           from app.core.cache import check_redis;
           asyncio.run(check_redis())"
 
+      - name: Apply database migrations
+        working-directory: apps/api
+        run: uv run --frozen alembic upgrade head
+
       - name: Check migration state
+        working-directory: apps/api
         run: uv run --frozen alembic check
 
   frontend:

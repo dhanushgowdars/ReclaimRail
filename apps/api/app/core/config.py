@@ -47,6 +47,34 @@ class Settings(BaseSettings):
         le=1_000_000,
     )
 
+    payment_consumer_group_name: str = "reclaimrail:payment-projectors:v1"
+    payment_consumer_batch_size: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+    )
+    payment_consumer_block_milliseconds: int = Field(
+        default=1000,
+        ge=1,
+        le=60_000,
+    )
+    payment_consumer_claim_idle_milliseconds: int = Field(
+        default=60_000,
+        ge=1000,
+        le=3_600_000,
+    )
+    payment_consumer_error_retry_seconds: float = Field(
+        default=2.0,
+        ge=0.1,
+        le=300.0,
+    )
+    payment_consumer_dead_letter_stream_name: str = "reclaimrail:payment-events:dead-letter:v1"
+    payment_consumer_dead_letter_stream_max_length: int = Field(
+        default=10_000,
+        ge=100,
+        le=1_000_000,
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

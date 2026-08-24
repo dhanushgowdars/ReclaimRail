@@ -620,8 +620,17 @@ class RecoveryAuditEvent(Base):
     __tablename__ = "recovery_audit_events"
     __table_args__ = (
         UniqueConstraint(
+            "recovery_case_id",
+            "sequence_number",
+            name="uq_recovery_audit_events_case_sequence",
+        ),
+        UniqueConstraint(
             "event_hash",
             name="uq_recovery_audit_events_hash",
+        ),
+        CheckConstraint(
+            "sequence_number >= 1",
+            name="ck_recovery_audit_events_sequence",
         ),
         CheckConstraint(
             ("actor_type IN ('system', 'agent', 'policy', 'worker', 'operator', 'razorpay')"),
@@ -675,6 +684,10 @@ class RecoveryAuditEvent(Base):
             ondelete="SET NULL",
         ),
         nullable=True,
+    )
+    sequence_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
     )
 
     event_type: Mapped[str] = mapped_column(

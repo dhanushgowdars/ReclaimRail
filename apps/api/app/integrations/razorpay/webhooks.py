@@ -17,7 +17,10 @@ class RazorpayWebhookEnvelope(BaseModel):
     event: str = Field(min_length=1, max_length=128)
     contains: list[str] = Field(default_factory=list)
     payload: dict[str, object]
-    created_at: int = Field(ge=0)
+    created_at: int = Field(
+        ge=0,
+        le=253_402_300_799,
+    )
 
 
 def compute_payload_sha256(raw_body: bytes) -> str:

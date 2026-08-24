@@ -1,7 +1,24 @@
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.api.routes.health import router as health_router
+from app.core.cache import close_redis
 from app.core.config import get_settings
+from app.core.database import close_database
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        await asyncio.gather(
+            close_database(),
+            close_redis(),
+        )
 
 
 def create_app() -> FastAPI:
@@ -10,7 +27,8 @@ def create_app() -> FastAPI:
     application = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description=("Incident-aware, policy-bounded payment recovery orchestrator."),
+        description="Incident-aware, policy-bounded payment recovery orchestrator.",
+        lifespan=lifespan,
     )
 
     application.include_router(health_router)

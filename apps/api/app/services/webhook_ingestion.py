@@ -6,6 +6,10 @@ from sqlalchemy import update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.outbox import (
+    OutboxMessage,
+    OutboxMessageStatus,
+)
 from app.db.models.webhook import (
     WebhookDelivery,
     WebhookDeliveryStatus,
@@ -20,6 +24,8 @@ from app.integrations.razorpay.webhooks import (
 )
 
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+WEBHOOK_RECEIVED_TOPIC = "webhook.received"
+OUTBOX_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +48,9 @@ async def ingest_verified_webhook(
     envelope: RazorpayWebhookEnvelope,
 ) -> WebhookIngestionResult:
     received_at = datetime.now(UTC)
+    provider_created_at = provider_timestamp_to_datetime(
+        envelope.created_at,
+    )
     payload_sha256 = compute_payload_sha256(raw_body)
     signature_sha256 = compute_signature_sha256(signature)
     payload: dict[str, object] = envelope.model_dump(mode="json")
@@ -54,9 +63,7 @@ async def ingest_verified_webhook(
                 provider_event_id=provider_event_id,
                 event_type=envelope.event,
                 account_id=envelope.account_id,
-                provider_created_at=provider_timestamp_to_datetime(
-                    envelope.created_at,
-                ),
+                provider_created_at=provider_created_at,
                 payload=payload,
                 payload_sha256=payload_sha256,
                 processing_status=WebhookProcessingStatus.RECEIVED.value,
@@ -96,27 +103,50 @@ async def ingest_verified_webhook(
                 "Unable to resolve canonical webhook event",
             )
 
-        delivery = WebhookDelivery(
-            canonical_event_id=canonical_event_id,
-            provider="razorpay",
-            provider_event_id=provider_event_id,
-            event_type=envelope.event,
-            raw_payload=raw_body,
-            payload_sha256=payload_sha256,
-            payload_size_bytes=len(raw_body),
-            signature_sha256=signature_sha256,
-            signature_status=WebhookSignatureStatus.VERIFIED.value,
-            delivery_status=(
-                WebhookDeliveryStatus.DUPLICATE.value
-                if duplicate
-                else WebhookDeliveryStatus.ACCEPTED.value
+        if not duplicate:
+            outbox_payload: dict[str, object] = {
+                "schema_version": OUTBOX_SCHEMA_VERSION,
+                "webhook_event_id": str(canonical_event_id),
+                "provider": "razorpay",
+                "provider_event_id": provider_event_id,
+                "event_type": envelope.event,
+                "provider_created_at": provider_created_at.isoformat(),
+            }
+
+            session.add(
+                OutboxMessage(
+                    webhook_event_id=canonical_event_id,
+                    topic=WEBHOOK_RECEIVED_TOPIC,
+                    payload=outbox_payload,
+                    status=OutboxMessageStatus.PENDING.value,
+                    attempt_count=0,
+                    available_at=received_at,
+                    created_at=received_at,
+                ),
+            )
+
+        session.add(
+            WebhookDelivery(
+                canonical_event_id=canonical_event_id,
+                provider="razorpay",
+                provider_event_id=provider_event_id,
+                event_type=envelope.event,
+                raw_payload=raw_body,
+                payload_sha256=payload_sha256,
+                payload_size_bytes=len(raw_body),
+                signature_sha256=signature_sha256,
+                signature_status=WebhookSignatureStatus.VERIFIED.value,
+                delivery_status=(
+                    WebhookDeliveryStatus.DUPLICATE.value
+                    if duplicate
+                    else WebhookDeliveryStatus.ACCEPTED.value
+                ),
+                is_duplicate=duplicate,
+                response_status_code=200 if duplicate else 202,
+                received_at=received_at,
             ),
-            is_duplicate=duplicate,
-            response_status_code=200 if duplicate else 202,
-            received_at=received_at,
         )
 
-        session.add(delivery)
         await session.commit()
     except Exception:
         await session.rollback()

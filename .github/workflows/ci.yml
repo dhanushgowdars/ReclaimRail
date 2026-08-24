@@ -1,0 +1,127 @@
+name: Continuous Integration
+
+on:
+  push:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      RECLAIMRAIL_APP_ENV: test
+      RECLAIMRAIL_DATABASE_URL: postgresql+asyncpg://reclaimrail:reclaimrail_ci@127.0.0.1:5432/reclaimrail
+      RECLAIMRAIL_REDIS_URL: redis://127.0.0.1:6379/0
+
+    services:
+      postgres:
+        image: postgres:17.11-alpine
+        env:
+          POSTGRES_DB: reclaimrail
+          POSTGRES_USER: reclaimrail
+          POSTGRES_PASSWORD: reclaimrail_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reclaimrail -d reclaimrail"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:8.10.1-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.11.28"
+          python-version: "3.11"
+          working-directory: apps/api
+          enable-cache: false
+
+      - name: Synchronize locked dependencies
+        run: uv sync --locked --group dev
+
+      - name: Check formatting
+        run: uv run --frozen ruff format --check .
+
+      - name: Run linting
+        run: uv run --frozen ruff check .
+
+      - name: Run type checking
+        run: uv run --frozen mypy app
+
+      - name: Run tests
+        run: uv run --frozen pytest -v
+
+      - name: Verify PostgreSQL connectivity
+        run: >
+          uv run --frozen python -c
+          "import asyncio;
+          from app.core.database import check_database;
+          asyncio.run(check_database())"
+
+      - name: Verify Redis connectivity
+        run: >
+          uv run --frozen python -c
+          "import asyncio;
+          from app.core.cache import check_redis;
+          asyncio.run(check_redis())"
+
+      - name: Check migration state
+        run: uv run --frozen alembic check
+
+  frontend:
+    name: Frontend quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Build production application
+        run: npm run build

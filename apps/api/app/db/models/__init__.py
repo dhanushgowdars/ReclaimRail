@@ -13,6 +13,16 @@ from app.db.models.payment import (
     PaymentAttempt,
     PaymentStateTransition,
 )
+from app.db.models.recovery import (
+    RecoveryAction,
+    RecoveryActionStatus,
+    RecoveryAgentRun,
+    RecoveryAgentRunStatus,
+    RecoveryAuditActor,
+    RecoveryAuditEvent,
+    RecoveryCase,
+    RecoveryPlannerProvider,
+)
 from app.db.models.webhook import (
     WebhookDelivery,
     WebhookDeliveryStatus,
@@ -29,6 +39,14 @@ __all__ = [
     "OutboxMessageStatus",
     "PaymentAttempt",
     "PaymentStateTransition",
+    "RecoveryAction",
+    "RecoveryActionStatus",
+    "RecoveryAgentRun",
+    "RecoveryAgentRunStatus",
+    "RecoveryAuditActor",
+    "RecoveryAuditEvent",
+    "RecoveryCase",
+    "RecoveryPlannerProvider",
     "RevenueIncident",
     "RevenueIncidentStatus",
     "WebhookDelivery",

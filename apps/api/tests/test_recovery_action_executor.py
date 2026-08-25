@@ -161,6 +161,7 @@ def create_prepared() -> PreparedPaymentLinkAction:
         action_id=ACTION_ID,
         recovery_case_id=CASE_ID,
         provider_payment_id=("pay_action_executor_test"),
+        customer_contact_allowed=False,
         attempt_number=1,
         reference_id=reference_id,
         request=RazorpayPaymentLinkRequest(

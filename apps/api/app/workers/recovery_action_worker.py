@@ -8,6 +8,9 @@ from app.core.database import (
     close_database,
     get_session_factory,
 )
+from app.integrations.razorpay.payment_customers import (
+    create_razorpay_payment_customer_provider,
+)
 from app.integrations.razorpay.payment_links import (
     create_razorpay_payment_link_provider,
 )
@@ -60,19 +63,22 @@ async def run_recovery_action_worker(
 ) -> None:
     settings = get_settings()
 
-    provider = create_razorpay_payment_link_provider(
+    payment_link_provider = create_razorpay_payment_link_provider(
+        settings,
+    )
+    customer_provider = create_razorpay_payment_customer_provider(
         settings,
     )
 
-    if provider is None:
+    if payment_link_provider is None or customer_provider is None:
         raise RuntimeError(
-            "Razorpay Key ID and Key Secret are required for the recovery action worker",
+            ("Razorpay Key ID and Key Secret are required for the recovery action worker"),
         )
 
     session_factory = get_session_factory()
 
     claim_timeout = timedelta(
-        seconds=(settings.recovery_action_claim_timeout_seconds),
+        seconds=settings.recovery_action_claim_timeout_seconds,
     )
 
     LOGGER.info(
@@ -83,7 +89,7 @@ async def run_recovery_action_worker(
             "maximum_attempts=%d mode=%s"
         ),
         settings.recovery_action_batch_size,
-        (settings.recovery_action_claim_timeout_seconds),
+        settings.recovery_action_claim_timeout_seconds,
         settings.recovery_action_max_attempts,
         "once" if run_once else "continuous",
     )
@@ -93,11 +99,12 @@ async def run_recovery_action_worker(
             try:
                 result = await run_recovery_action_batch(
                     session_factory,
-                    provider=provider,
+                    provider=payment_link_provider,
+                    customer_provider=customer_provider,
                     reference_time=utc_now(),
-                    batch_size=(settings.recovery_action_batch_size),
+                    batch_size=settings.recovery_action_batch_size,
                     claim_timeout=claim_timeout,
-                    maximum_attempts=(settings.recovery_action_max_attempts),
+                    maximum_attempts=settings.recovery_action_max_attempts,
                 )
             except asyncio.CancelledError:
                 raise
@@ -136,13 +143,13 @@ async def run_recovery_action_worker(
 
 def parse_run_once() -> bool:
     parser = argparse.ArgumentParser(
-        description=("Execute ReclaimRail bounded recovery actions."),
+        description="Execute ReclaimRail bounded recovery actions.",
     )
 
     parser.add_argument(
         "--once",
         action="store_true",
-        help=("Process at most one recovery-action batch and exit."),
+        help="Process at most one recovery-action batch and exit.",
     )
 
     arguments = parser.parse_args()
@@ -155,7 +162,7 @@ def parse_run_once() -> bool:
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
-        format=("%(asctime)s %(levelname)s %(name)s %(message)s"),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
     try:

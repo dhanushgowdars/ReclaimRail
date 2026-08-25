@@ -23,6 +23,12 @@ from app.db.models.recovery import (
     RecoveryCase,
     RecoveryPlannerProvider,
 )
+from app.db.models.recovery_outcome import (
+    RecoveryOutcome,
+    RecoveryOutcomeAttribution,
+    RecoveryOutcomeObservation,
+    RecoveryOutcomeStatus,
+)
 from app.db.models.webhook import (
     WebhookDelivery,
     WebhookDeliveryStatus,
@@ -46,6 +52,10 @@ __all__ = [
     "RecoveryAuditActor",
     "RecoveryAuditEvent",
     "RecoveryCase",
+    "RecoveryOutcome",
+    "RecoveryOutcomeAttribution",
+    "RecoveryOutcomeObservation",
+    "RecoveryOutcomeStatus",
     "RecoveryPlannerProvider",
     "RevenueIncident",
     "RevenueIncidentStatus",

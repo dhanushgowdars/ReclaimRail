@@ -153,7 +153,7 @@ CIRCUIT_BREAKER_SEVERITIES: Final = frozenset(
 )
 
 
-def _failure_evidence_codes(
+def build_recovery_evidence_codes(
     context: RecoveryPlanningContext,
 ) -> tuple[str, ...]:
     evidence = [
@@ -186,7 +186,7 @@ def _bounded_plan(
         decision=decision,
         reasoning_summary=reasoning_summary,
         proposals=proposals[: policy.maximum_plan_actions],
-        evidence_codes=_failure_evidence_codes(context),
+        evidence_codes=build_recovery_evidence_codes(context),
         generated_at=context.planned_at,
     )
 

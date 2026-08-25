@@ -34,6 +34,91 @@ Deterministic server-side policy will independently approve or reject every prop
 Keep the reasoning summary concise and operational."""
 
 
+GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "decision": {
+            "type": "string",
+            "enum": ["recover", "wait", "escalate", "stop"],
+        },
+        "reasoning_summary": {
+            "type": "string",
+        },
+        "proposals": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "action_type": {
+                        "type": "string",
+                        "enum": [
+                            "create_payment_link",
+                            "send_recovery_message",
+                            "offer_alternate_method",
+                            "wait",
+                            "escalate_human",
+                            "stop_recovery",
+                        ],
+                    },
+                    "reason": {
+                        "type": "string",
+                    },
+                    "amount_minor": {
+                        "anyOf": [
+                            {"type": "integer", "minimum": 1},
+                            {"type": "null"},
+                        ],
+                    },
+                    "currency": {
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "null"},
+                        ],
+                    },
+                    "channel": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "enum": ["email", "sms", "whatsapp"],
+                            },
+                            {"type": "null"},
+                        ],
+                    },
+                    "target_payment_method": {
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "null"},
+                        ],
+                    },
+                    "execute_after": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "format": "date-time",
+                            },
+                            {"type": "null"},
+                        ],
+                    },
+                },
+                "required": [
+                    "action_type",
+                    "reason",
+                ],
+            },
+        },
+    },
+    "required": [
+        "decision",
+        "reasoning_summary",
+        "proposals",
+    ],
+}
+
+
 class GeminiPlannerFallbackReason(StrEnum):
     NOT_CONFIGURED = "not_configured"
     PROVIDER_ERROR = "provider_error"
@@ -251,19 +336,22 @@ class GoogleGenAIRecoveryPlanProvider:
                     temperature=self._temperature,
                     candidate_count=1,
                     max_output_tokens=self._max_output_tokens,
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level=types.ThinkingLevel.MINIMAL,
+                    ),
                     response_mime_type="application/json",
-                    response_schema=GeminiRecoveryPlanPayload,
+                    response_json_schema=GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA,
                 ),
             )
 
-            if response.parsed is None:
+            if not response.text:
                 raise GeminiPlannerProviderError(
                     "Gemini response did not contain a structured recovery plan",
                 )
 
             usage = response.usage_metadata
             return GeminiProviderResponse(
-                structured_plan=response.parsed,
+                structured_plan=response.text,
                 model_name=self.model_name,
                 input_token_count=(usage.prompt_token_count if usage is not None else None),
                 output_token_count=(usage.candidates_token_count if usage is not None else None),
@@ -358,7 +446,14 @@ async def plan_with_gemini_fallback(
         )
 
     try:
-        payload = GeminiRecoveryPlanPayload.model_validate(response.structured_plan)
+        if isinstance(response.structured_plan, str):
+            payload = GeminiRecoveryPlanPayload.model_validate_json(
+                response.structured_plan,
+            )
+        else:
+            payload = GeminiRecoveryPlanPayload.model_validate(
+                response.structured_plan,
+            )
         plan = _convert_gemini_plan(payload, context=context)
     except (TypeError, ValueError, ValidationError):
         return _deterministic_fallback(

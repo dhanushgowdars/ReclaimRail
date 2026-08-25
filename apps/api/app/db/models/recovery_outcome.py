@@ -248,13 +248,13 @@ class RecoveryOutcome(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=func.now,
+        default=func.now(),
         server_default=func.now(),
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=func.now,
+        default=func.now(),
         server_default=func.now(),
         onupdate=func.now(),
     )
@@ -406,6 +406,6 @@ class RecoveryOutcomeObservation(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=func.now,
+        default=func.now(),
         server_default=func.now(),
     )

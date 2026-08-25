@@ -35,6 +35,11 @@ from app.domain.recovery import (
     build_deterministic_recovery_plan,
     evaluate_recovery_proposal,
 )
+from app.integrations.gemini import (
+    BoundedRecoveryPlannerResult,
+    GeminiPlannerFallbackReason,
+    RecoveryPlannerSource,
+)
 from app.services.recovery_audit_store import (
     RecoveryAuditAppendRequest,
     append_recovery_audit_event,
@@ -65,6 +70,10 @@ class RecoveryPlanningPaymentNotFoundError(LookupError):
 
 
 class RecoveryCaseNotPlannableError(ValueError):
+    pass
+
+
+class RecoveryPlannerResultMismatchError(ValueError):
     pass
 
 
@@ -147,6 +156,7 @@ def _build_planning_context(
 
 def _input_snapshot(context: RecoveryPlanningContext) -> dict[str, object]:
     case = context.case
+
     return {
         "case_id": str(case.case_id),
         "payment_attempt_id": str(case.payment_attempt_id),
@@ -158,7 +168,9 @@ def _input_snapshot(context: RecoveryPlanningContext) -> dict[str, object]:
         "case_status": case.status.value,
         "recovery_attempt_count": case.recovery_attempt_count,
         "customer_contact_allowed": case.customer_contact_allowed,
-        "last_customer_contact_at": _serialize_timestamp(case.last_customer_contact_at),
+        "last_customer_contact_at": _serialize_timestamp(
+            case.last_customer_contact_at,
+        ),
         "active_payment_link_id": case.active_payment_link_id,
         "active_incident_severity": (
             case.active_incident_severity.value
@@ -174,8 +186,10 @@ def _input_snapshot(context: RecoveryPlanningContext) -> dict[str, object]:
 def _planning_evidence(
     context: RecoveryPlanningContext,
     plan: RecoveryPlan,
+    planner_result: BoundedRecoveryPlannerResult,
 ) -> dict[str, object]:
     failure = context.failure
+
     return {
         "evidence_codes": list(plan.evidence_codes),
         "failure": {
@@ -188,7 +202,21 @@ def _planning_evidence(
             "last_failed_at": failure.last_failed_at.isoformat(),
         },
         "available_channels": [channel.value for channel in context.available_channels],
-        "alternate_payment_methods": list(context.alternate_payment_methods),
+        "alternate_payment_methods": list(
+            context.alternate_payment_methods,
+        ),
+        "planner": {
+            "source": planner_result.source.value,
+            "model_name": planner_result.model_name,
+            "fallback_used": planner_result.fallback_used,
+            "fallback_reason": (
+                planner_result.fallback_reason.value
+                if planner_result.fallback_reason is not None
+                else None
+            ),
+            "input_token_count": planner_result.input_token_count,
+            "output_token_count": planner_result.output_token_count,
+        },
     }
 
 
@@ -200,12 +228,16 @@ def _action_status(
 ) -> RecoveryActionStatus:
     if decision.outcome is RecoveryPolicyOutcome.BLOCK:
         return RecoveryActionStatus.BLOCKED
+
     if decision.outcome is RecoveryPolicyOutcome.ESCALATE:
         return RecoveryActionStatus.ESCALATED
+
     if decision.outcome is RecoveryPolicyOutcome.STOP:
         return RecoveryActionStatus.STOPPED
+
     if proposal.execute_after is not None and proposal.execute_after > planned_at:
         return RecoveryActionStatus.SCHEDULED
+
     return RecoveryActionStatus.ALLOWED
 
 
@@ -217,7 +249,10 @@ def _action_idempotency_key(
     proposal: RecoveryActionProposal,
 ) -> str:
     material = f"{recovery_case_id}:{run_number}:{sequence_number}:{proposal.action_type.value}"
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+    return hashlib.sha256(
+        material.encode("utf-8"),
+    ).hexdigest()
 
 
 def _apply_case_projection(
@@ -227,25 +262,26 @@ def _apply_case_projection(
     actions: Sequence[RecoveryAction],
     planned_at: datetime,
 ) -> None:
-    if plan.decision is RecoveryPlanDecision.STOP:
+    if any(action.status == RecoveryActionStatus.STOPPED.value for action in actions):
         recovery_case.status = RecoveryCaseStatus.CANCELLED.value
         recovery_case.next_action_at = None
         recovery_case.closed_at = planned_at
         recovery_case.close_reason = "bounded_plan_stop"
-    elif plan.decision is RecoveryPlanDecision.ESCALATE:
+
+    elif any(action.status == RecoveryActionStatus.ESCALATED.value for action in actions):
         recovery_case.status = RecoveryCaseStatus.ESCALATED.value
         recovery_case.next_action_at = None
+
     elif plan.decision is RecoveryPlanDecision.WAIT:
         recovery_case.status = RecoveryCaseStatus.WAITING.value
         recovery_case.next_action_at = min(
             action.execute_after for action in actions if action.execute_after is not None
         )
+
     elif any(action.status == RecoveryActionStatus.ALLOWED.value for action in actions):
         recovery_case.status = RecoveryCaseStatus.READY.value
         recovery_case.next_action_at = planned_at
-    elif any(action.status == RecoveryActionStatus.ESCALATED.value for action in actions):
-        recovery_case.status = RecoveryCaseStatus.ESCALATED.value
-        recovery_case.next_action_at = None
+
     else:
         recovery_case.status = RecoveryCaseStatus.WAITING.value
         recovery_case.next_action_at = None
@@ -262,7 +298,9 @@ async def _load_active_incident_severity(
         return None
 
     incident_result = await session.execute(
-        select(RevenueIncident).where(RevenueIncident.id == source_incident_id),
+        select(RevenueIncident).where(
+            RevenueIncident.id == source_incident_id,
+        ),
     )
     incident = incident_result.scalar_one_or_none()
 
@@ -272,18 +310,22 @@ async def _load_active_incident_severity(
     return IncidentSeverity(incident.severity)
 
 
-async def plan_and_persist_recovery_case(
+async def load_recovery_planning_context(
     session: AsyncSession,
     *,
     recovery_case_id: UUID,
     available_channels: Sequence[RecoveryChannel],
     alternate_payment_methods: Sequence[str],
     planned_at: datetime,
-) -> PersistedRecoveryPlan:
+) -> RecoveryPlanningContext:
+    """Load a read-only planning snapshot without holding row locks."""
+
     _require_timezone_aware(planned_at)
 
     case_result = await session.execute(
-        select(RecoveryCase).where(RecoveryCase.id == recovery_case_id).with_for_update(),
+        select(RecoveryCase).where(
+            RecoveryCase.id == recovery_case_id,
+        ),
     )
     recovery_case = case_result.scalar_one_or_none()
 
@@ -292,7 +334,85 @@ async def plan_and_persist_recovery_case(
             f"Recovery case {recovery_case_id} does not exist",
         )
 
-    case_status = RecoveryCaseStatus(recovery_case.status)
+    case_status = RecoveryCaseStatus(
+        recovery_case.status,
+    )
+
+    if case_status not in PLANNABLE_CASE_STATUSES:
+        raise RecoveryCaseNotPlannableError(
+            f"Recovery case {recovery_case_id} cannot be planned from {case_status.value}",
+        )
+
+    payment_result = await session.execute(
+        select(PaymentAttempt).where(
+            PaymentAttempt.id == recovery_case.payment_attempt_id,
+        ),
+    )
+    payment_attempt = payment_result.scalar_one_or_none()
+
+    if payment_attempt is None:
+        raise RecoveryPlanningPaymentNotFoundError(
+            f"Payment attempt {recovery_case.payment_attempt_id} does not exist",
+        )
+
+    incident_severity = await _load_active_incident_severity(
+        session,
+        source_incident_id=recovery_case.source_incident_id,
+    )
+
+    return _build_planning_context(
+        recovery_case,
+        payment_attempt,
+        incident_severity=incident_severity,
+        available_channels=available_channels,
+        alternate_payment_methods=alternate_payment_methods,
+        planned_at=planned_at,
+    )
+
+
+def _deterministic_planner_result(
+    context: RecoveryPlanningContext,
+) -> BoundedRecoveryPlannerResult:
+    return BoundedRecoveryPlannerResult(
+        plan=build_deterministic_recovery_plan(
+            context,
+        ),
+        source=RecoveryPlannerSource.DETERMINISTIC,
+        model_name=None,
+        fallback_used=True,
+        fallback_reason=(GeminiPlannerFallbackReason.NOT_CONFIGURED),
+    )
+
+
+async def plan_and_persist_recovery_case(
+    session: AsyncSession,
+    *,
+    recovery_case_id: UUID,
+    available_channels: Sequence[RecoveryChannel],
+    alternate_payment_methods: Sequence[str],
+    planned_at: datetime,
+    planner_result: BoundedRecoveryPlannerResult | None = None,
+) -> PersistedRecoveryPlan:
+    _require_timezone_aware(planned_at)
+
+    case_result = await session.execute(
+        select(RecoveryCase)
+        .where(
+            RecoveryCase.id == recovery_case_id,
+        )
+        .with_for_update(),
+    )
+    recovery_case = case_result.scalar_one_or_none()
+
+    if recovery_case is None:
+        raise RecoveryPlanningCaseNotFoundError(
+            f"Recovery case {recovery_case_id} does not exist",
+        )
+
+    case_status = RecoveryCaseStatus(
+        recovery_case.status,
+    )
+
     if case_status not in PLANNABLE_CASE_STATUSES:
         raise RecoveryCaseNotPlannableError(
             f"Recovery case {recovery_case_id} cannot be planned from {case_status.value}",
@@ -316,6 +436,7 @@ async def plan_and_persist_recovery_case(
         session,
         source_incident_id=recovery_case.source_incident_id,
     )
+
     context = _build_planning_context(
         recovery_case,
         payment_attempt,
@@ -324,47 +445,90 @@ async def plan_and_persist_recovery_case(
         alternate_payment_methods=alternate_payment_methods,
         planned_at=planned_at,
     )
-    plan = build_deterministic_recovery_plan(context)
+
+    if planner_result is None:
+        planner_result = _deterministic_planner_result(
+            context,
+        )
+
+    plan = planner_result.plan
+
+    if plan.generated_at != planned_at:
+        raise RecoveryPlannerResultMismatchError(
+            "Planner result timestamp does not match the persistence attempt",
+        )
 
     run_number_result = await session.execute(
-        select(func.coalesce(func.max(RecoveryAgentRun.run_number), 0)).where(
+        select(
+            func.coalesce(
+                func.max(
+                    RecoveryAgentRun.run_number,
+                ),
+                0,
+            ),
+        ).where(
             RecoveryAgentRun.recovery_case_id == recovery_case_id,
         ),
     )
-    run_number = int(run_number_result.scalar_one()) + 1
+    run_number = (
+        int(
+            run_number_result.scalar_one(),
+        )
+        + 1
+    )
 
     agent_run = RecoveryAgentRun(
         id=uuid4(),
         recovery_case_id=recovery_case_id,
         run_number=run_number,
         status=RecoveryAgentRunStatus.SUCCEEDED.value,
-        planner_provider=RecoveryPlannerProvider.DETERMINISTIC.value,
-        model_name=None,
+        planner_provider=RecoveryPlannerProvider(
+            planner_result.source.value,
+        ).value,
+        model_name=planner_result.model_name,
         prompt_version=plan.planner_version,
-        input_snapshot=_input_snapshot(context),
-        evidence=_planning_evidence(context, plan),
+        input_snapshot=_input_snapshot(
+            context,
+        ),
+        evidence=_planning_evidence(
+            context,
+            plan,
+            planner_result,
+        ),
         reasoning_summary=plan.reasoning_summary,
-        proposed_action_count=len(plan.proposals),
+        proposed_action_count=len(
+            plan.proposals,
+        ),
+        input_token_count=(planner_result.input_token_count),
+        output_token_count=(planner_result.output_token_count),
         started_at=planned_at,
         completed_at=planned_at,
     )
-    session.add(agent_run)
+
+    session.add(
+        agent_run,
+    )
     await session.flush()
 
     actions: list[RecoveryAction] = []
     action_audit_data: list[dict[str, object]] = []
 
-    for sequence_number, proposal in enumerate(plan.proposals, start=1):
+    for sequence_number, proposal in enumerate(
+        plan.proposals,
+        start=1,
+    ):
         policy_decision = evaluate_recovery_proposal(
             context.case,
             proposal,
             evaluated_at=planned_at,
         )
+
         status = _action_status(
             proposal,
             policy_decision,
             planned_at=planned_at,
         )
+
         action = RecoveryAction(
             id=uuid4(),
             recovery_case_id=recovery_case_id,
@@ -381,30 +545,37 @@ async def plan_and_persist_recovery_case(
             proposal_reason=proposal.reason,
             amount_minor=proposal.amount_minor,
             currency=proposal.currency,
-            channel=proposal.channel.value if proposal.channel is not None else None,
-            target_payment_method=proposal.target_payment_method,
+            channel=(proposal.channel.value if proposal.channel is not None else None),
+            target_payment_method=(proposal.target_payment_method),
             execute_after=proposal.execute_after,
-            policy_outcome=policy_decision.outcome.value,
+            policy_outcome=(policy_decision.outcome.value),
             policy_guardrails=[guardrail.value for guardrail in policy_decision.guardrails],
-            policy_explanation=policy_decision.explanation,
+            policy_explanation=(policy_decision.explanation),
             policy_version="deterministic-v1",
-            policy_evaluated_at=policy_decision.evaluated_at,
+            policy_evaluated_at=(policy_decision.evaluated_at),
             execution_attempt_count=0,
         )
-        session.add(action)
-        actions.append(action)
+
+        session.add(
+            action,
+        )
+        actions.append(
+            action,
+        )
+
         action_audit_data.append(
             {
                 "action_id": action.id,
                 "sequence_number": sequence_number,
                 "action_type": action.action_type,
                 "status": action.status,
-                "policy_outcome": action.policy_outcome,
-                "policy_guardrails": action.policy_guardrails,
+                "policy_outcome": (action.policy_outcome),
+                "policy_guardrails": (action.policy_guardrails),
             },
         )
 
     await session.flush()
+
     _apply_case_projection(
         recovery_case,
         plan=plan,
@@ -421,10 +592,19 @@ async def plan_and_persist_recovery_case(
             agent_run_id=agent_run.id,
             event_data={
                 "run_number": run_number,
-                "planner_provider": agent_run.planner_provider,
-                "planner_version": plan.planner_version,
+                "planner_provider": (agent_run.planner_provider),
+                "model_name": agent_run.model_name,
+                "planner_version": (plan.planner_version),
+                "fallback_used": (planner_result.fallback_used),
+                "fallback_reason": (
+                    planner_result.fallback_reason.value
+                    if planner_result.fallback_reason is not None
+                    else None
+                ),
+                "input_token_count": (planner_result.input_token_count),
+                "output_token_count": (planner_result.output_token_count),
                 "plan_decision": plan.decision,
-                "reasoning_summary": plan.reasoning_summary,
+                "reasoning_summary": (plan.reasoning_summary),
                 "actions": action_audit_data,
             },
             occurred_at=planned_at,
@@ -434,6 +614,8 @@ async def plan_and_persist_recovery_case(
     return PersistedRecoveryPlan(
         plan=plan,
         agent_run=agent_run,
-        actions=tuple(actions),
+        actions=tuple(
+            actions,
+        ),
         audit_event=audit_event,
     )

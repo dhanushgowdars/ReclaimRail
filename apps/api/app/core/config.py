@@ -108,6 +108,26 @@ class Settings(BaseSettings):
         ge=1.0,
         le=3600.0,
     )
+    recovery_action_batch_size: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+    )
+    recovery_action_poll_interval_seconds: float = Field(
+        default=2.0,
+        ge=0.1,
+        le=300.0,
+    )
+    recovery_action_claim_timeout_seconds: int = Field(
+        default=120,
+        ge=10,
+        le=3600,
+    )
+    recovery_action_max_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+    )
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

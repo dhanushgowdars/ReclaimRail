@@ -22,11 +22,23 @@ class Settings(BaseSettings):
         min_length=1,
         max_length=128,
     )
-    gemini_temperature: float = Field(default=0.1, ge=0.0, le=1.0)
-    gemini_max_output_tokens: int = Field(default=4096, ge=256, le=4096)
+    gemini_temperature: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+    )
+    gemini_max_output_tokens: int = Field(
+        default=4096,
+        ge=256,
+        le=4096,
+    )
 
     outbox_stream_name: str = "reclaimrail:webhook-events:v1"
-    outbox_batch_size: int = Field(default=25, ge=1, le=100)
+    outbox_batch_size: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+    )
     outbox_poll_interval_seconds: float = Field(
         default=1.0,
         ge=0.1,
@@ -37,7 +49,11 @@ class Settings(BaseSettings):
         ge=5,
         le=3600,
     )
-    outbox_max_attempts: int = Field(default=5, ge=1, le=20)
+    outbox_max_attempts: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+    )
     outbox_retry_base_seconds: float = Field(
         default=2.0,
         ge=0.1,
@@ -108,6 +124,7 @@ class Settings(BaseSettings):
         ge=1.0,
         le=3600.0,
     )
+
     recovery_action_batch_size: int = Field(
         default=25,
         ge=1,
@@ -128,6 +145,18 @@ class Settings(BaseSettings):
         ge=1,
         le=20,
     )
+
+    recovery_outcome_batch_size: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+    )
+    recovery_outcome_poll_interval_seconds: float = Field(
+        default=30.0,
+        ge=5.0,
+        le=3600.0,
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

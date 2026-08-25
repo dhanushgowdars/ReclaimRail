@@ -255,3 +255,147 @@ def test_factory_does_not_expose_key_secret() -> None:
 
     assert provider is not None
     assert "test-secret" not in repr(provider)
+
+
+@pytest.mark.asyncio
+async def test_finds_payment_link_by_reference() -> None:
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        assert request.method == "GET"
+        assert request.url.params["reference_id"] == "recovery-action-001"
+
+        return httpx2.Response(
+            200,
+            request=request,
+            json={"payment_links": [success_payload()]},
+        )
+
+    provider = RazorpayPaymentLinkProvider(
+        key_id="rzp_test_key",
+        key_secret="test-secret",
+        base_url="https://api.razorpay.test",
+        transport=httpx2.MockTransport(handler),
+    )
+
+    result = await provider.find_payment_link_by_reference(
+        " recovery-action-001 ",
+    )
+
+    assert result is not None
+    assert result.payment_link_id == "plink_test_001"
+
+
+@pytest.mark.asyncio
+async def test_missing_payment_link_reference_returns_none() -> None:
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            200,
+            request=request,
+            json={"payment_links": []},
+        )
+
+    provider = RazorpayPaymentLinkProvider(
+        key_id="rzp_test_key",
+        key_secret="test-secret",
+        base_url="https://api.razorpay.test",
+        transport=httpx2.MockTransport(handler),
+    )
+
+    result = await provider.find_payment_link_by_reference(
+        "recovery-action-001",
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_duplicate_reference_matches_are_rejected() -> None:
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        duplicate = {
+            **success_payload(),
+            "id": "plink_test_002",
+        }
+
+        return httpx2.Response(
+            200,
+            request=request,
+            json={
+                "payment_links": [
+                    success_payload(),
+                    duplicate,
+                ],
+            },
+        )
+
+    provider = RazorpayPaymentLinkProvider(
+        key_id="rzp_test_key",
+        key_secret="test-secret",
+        base_url="https://api.razorpay.test",
+        transport=httpx2.MockTransport(handler),
+    )
+
+    with pytest.raises(
+        RazorpayPaymentLinkProviderError,
+        match="duplicate",
+    ):
+        await provider.find_payment_link_by_reference(
+            "recovery-action-001",
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancels_payment_link_by_provider_id() -> None:
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        assert request.method == "POST"
+        assert str(request.url) == (
+            "https://api.razorpay.test/v1/payment_links/plink_test_001/cancel"
+        )
+
+        return httpx2.Response(
+            200,
+            request=request,
+            json={
+                **success_payload(),
+                "status": "cancelled",
+            },
+        )
+
+    provider = RazorpayPaymentLinkProvider(
+        key_id="rzp_test_key",
+        key_secret="test-secret",
+        base_url="https://api.razorpay.test",
+        transport=httpx2.MockTransport(handler),
+    )
+
+    result = await provider.cancel_payment_link(
+        " plink_test_001 ",
+    )
+
+    assert result.payment_link_id == "plink_test_001"
+    assert result.status is RazorpayPaymentLinkStatus.CANCELLED
+
+
+@pytest.mark.parametrize(
+    ("method_name", "value"),
+    [
+        ("find", " "),
+        ("find", "x" * 41),
+        ("cancel", " "),
+        ("cancel", "x" * 129),
+    ],
+)
+@pytest.mark.asyncio
+async def test_rejects_invalid_provider_identifiers(
+    method_name: str,
+    value: str,
+) -> None:
+    provider = RazorpayPaymentLinkProvider(
+        key_id="rzp_test_key",
+        key_secret="test-secret",
+        base_url="https://api.razorpay.test",
+    )
+
+    with pytest.raises(ValueError):
+        if method_name == "find":
+            await provider.find_payment_link_by_reference(value)
+        else:
+            await provider.cancel_payment_link(value)

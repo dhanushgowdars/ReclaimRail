@@ -128,6 +128,20 @@ def _canonicalize(value: object) -> object:
     raise TypeError(f"Unsupported audit event-data value: {type(value).__name__}")
 
 
+def normalize_recovery_audit_event_data(
+    event_data: Mapping[str, object],
+) -> dict[str, object]:
+    normalized: dict[str, object] = {}
+
+    for key, value in event_data.items():
+        if not isinstance(key, str):
+            raise TypeError("Audit event-data keys must be strings")
+
+        normalized[key] = _canonicalize(value)
+
+    return normalized
+
+
 def canonicalize_recovery_audit_material(
     *,
     recovery_case_id: UUID,
@@ -155,7 +169,7 @@ def canonicalize_recovery_audit_material(
     material = {
         "actor_type": normalized_actor_type,
         "agent_run_id": str(agent_run_id) if agent_run_id is not None else None,
-        "event_data": _canonicalize(event_data),
+        "event_data": normalize_recovery_audit_event_data(event_data),
         "event_type": normalized_event_type,
         "occurred_at": _normalize_timestamp(occurred_at),
         "previous_event_hash": _normalize_optional_hash(previous_event_hash),

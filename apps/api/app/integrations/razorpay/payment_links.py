@@ -11,6 +11,7 @@ from pydantic import (
     Field,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from app.core.config import Settings
@@ -28,6 +29,12 @@ class RazorpayPaymentLinkStatus(StrEnum):
 
 
 class RazorpayPaymentLinkRequest(BaseModel):
+    """A bounded Razorpay Payment Link request.
+
+    Customer contact fields are transient. They are excluded from normal
+    representation and serialization so callers must not persist or log them.
+    """
+
     model_config = ConfigDict(
         extra="forbid",
         str_strip_whitespace=True,
@@ -52,6 +59,21 @@ class RazorpayPaymentLinkRequest(BaseModel):
         max_length=15,
     )
 
+    customer_email: str | None = Field(
+        default=None,
+        max_length=320,
+        repr=False,
+        exclude=True,
+    )
+    customer_contact: str | None = Field(
+        default=None,
+        max_length=32,
+        repr=False,
+        exclude=True,
+    )
+    notify_email: bool = False
+    notify_sms: bool = False
+
     @field_validator("currency")
     @classmethod
     def normalize_currency(
@@ -71,6 +93,22 @@ class RazorpayPaymentLinkRequest(BaseModel):
     ) -> str:
         if not value:
             raise ValueError("Value cannot be empty")
+
+        return value
+
+    @field_validator(
+        "customer_email",
+        "customer_contact",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_customer_value(
+        cls,
+        value: object,
+    ) -> object:
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
 
         return value
 
@@ -101,11 +139,29 @@ class RazorpayPaymentLinkRequest(BaseModel):
                 raise ValueError("Payment-link notes cannot contain empty keys or values")
 
             if len(key) > 256 or len(note_value) > 256:
-                raise ValueError("Payment-link note keys and values cannot exceed 256 characters")
+                raise ValueError(
+                    "Payment-link note keys and values cannot exceed 256 characters",
+                )
 
             normalized[key] = note_value
 
         return normalized
+
+    @model_validator(mode="after")
+    def validate_notification_targets(
+        self,
+    ) -> "RazorpayPaymentLinkRequest":
+        if self.notify_email and self.customer_email is None:
+            raise ValueError(
+                "Email notification requires a transient customer email",
+            )
+
+        if self.notify_sms and self.customer_contact is None:
+            raise ValueError(
+                "SMS notification requires a transient customer contact",
+            )
+
+        return self
 
     def to_provider_payload(
         self,
@@ -118,6 +174,23 @@ class RazorpayPaymentLinkRequest(BaseModel):
             "description": self.description,
             "reminder_enable": False,
         }
+
+        customer: dict[str, str] = {}
+
+        if self.customer_email is not None:
+            customer["email"] = self.customer_email
+
+        if self.customer_contact is not None:
+            customer["contact"] = self.customer_contact
+
+        if customer:
+            payload["customer"] = customer
+
+        if self.notify_email or self.notify_sms:
+            payload["notify"] = {
+                "email": self.notify_email,
+                "sms": self.notify_sms,
+            }
 
         if self.expire_by is not None:
             payload["expire_by"] = int(self.expire_by.timestamp())

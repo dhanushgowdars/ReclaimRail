@@ -14,6 +14,9 @@ from app.db.models.recovery import (
     RecoveryActionStatus,
 )
 from app.domain.recovery import RecoveryActionType
+from app.integrations.razorpay.payment_customers import (
+    RazorpayPaymentCustomerProvider,
+)
 from app.integrations.razorpay.payment_links import (
     RazorpayPaymentLinkProvider,
 )
@@ -174,6 +177,7 @@ async def run_recovery_action_batch(
     session_factory: SessionFactory,
     *,
     provider: RazorpayPaymentLinkProvider,
+    customer_provider: RazorpayPaymentCustomerProvider | None = None,
     reference_time: datetime,
     batch_size: int = 25,
     claim_timeout: timedelta = (DEFAULT_ACTION_CLAIM_TIMEOUT),
@@ -204,6 +208,7 @@ async def run_recovery_action_batch(
                 session_factory,
                 action_id=action_id,
                 provider=provider,
+                customer_provider=customer_provider,
                 executed_at=reference_time,
                 claim_timeout=claim_timeout,
                 maximum_attempts=maximum_attempts,

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from uuid import UUID
@@ -24,6 +24,10 @@ from app.domain.recovery import (
     RecoveryChannel,
     RecoveryPolicyOutcome,
     evaluate_recovery_proposal,
+)
+from app.integrations.razorpay.payment_customers import (
+    RazorpayPaymentCustomerProvider,
+    RazorpayPaymentCustomerProviderError,
 )
 from app.integrations.razorpay.payment_links import (
     RazorpayPaymentLink,
@@ -100,6 +104,7 @@ class PreparedPaymentLinkAction:
     action_id: UUID
     recovery_case_id: UUID
     provider_payment_id: str
+    customer_contact_allowed: bool
     attempt_number: int
     reference_id: str
     request: RazorpayPaymentLinkRequest
@@ -459,6 +464,7 @@ async def prepare_recovery_payment_link_action(
             action_id=action.id,
             recovery_case_id=recovery_case.id,
             provider_payment_id=(payment_attempt.provider_payment_id),
+            customer_contact_allowed=recovery_case.customer_contact_allowed,
             attempt_number=(action.execution_attempt_count),
             reference_id=reference_id,
             request=request,
@@ -664,11 +670,51 @@ async def fail_recovery_payment_link_action(
     return retryable
 
 
+async def attach_transient_customer_to_payment_link_request(
+    prepared: PreparedPaymentLinkAction,
+    *,
+    customer_provider: RazorpayPaymentCustomerProvider | None,
+) -> PreparedPaymentLinkAction:
+    """Attach transient Razorpay contact data without persisting it locally."""
+
+    if not prepared.customer_contact_allowed or customer_provider is None:
+        return prepared
+
+    try:
+        customer = await customer_provider.fetch_payment_customer(
+            prepared.provider_payment_id,
+        )
+    except RazorpayPaymentCustomerProviderError as error:
+        raise RazorpayPaymentLinkProviderError(
+            "Razorpay payment customer lookup failed",
+            retryable=error.retryable,
+            status_code=error.status_code,
+        ) from error
+
+    if customer.email is None and customer.contact is None:
+        return prepared
+
+    request = prepared.request.model_copy(
+        update={
+            "customer_email": customer.email,
+            "customer_contact": customer.contact,
+            "notify_email": False,
+            "notify_sms": False,
+        },
+    )
+
+    return replace(
+        prepared,
+        request=request,
+    )
+
+
 async def execute_recovery_payment_link_action(
     session_factory: SessionFactory,
     *,
     action_id: UUID,
     provider: RazorpayPaymentLinkProvider,
+    customer_provider: RazorpayPaymentCustomerProvider | None = None,
     executed_at: datetime,
     claim_timeout: timedelta = DEFAULT_ACTION_CLAIM_TIMEOUT,
     maximum_attempts: int = (DEFAULT_MAXIMUM_EXECUTION_ATTEMPTS),
@@ -696,6 +742,11 @@ async def execute_recovery_payment_link_action(
         )
 
     try:
+        prepared = await attach_transient_customer_to_payment_link_request(
+            prepared,
+            customer_provider=customer_provider,
+        )
+
         payment_link = await provider.find_payment_link_by_reference(
             prepared.reference_id,
         )

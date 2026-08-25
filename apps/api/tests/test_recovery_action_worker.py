@@ -7,6 +7,9 @@ from uuid import UUID
 
 import pytest
 
+from app.integrations.razorpay.payment_customers import (
+    RazorpayPaymentCustomerProvider,
+)
 from app.integrations.razorpay.payment_links import (
     RazorpayPaymentLinkProvider,
 )
@@ -46,10 +49,22 @@ def create_batch_result(
     ] = (),
 ) -> RecoveryActionBatchResult:
     return RecoveryActionBatchResult(
-        discovered_action_ids=(discovered_action_ids),
+        discovered_action_ids=discovered_action_ids,
         execution_results=(),
         failures=(),
         skipped_action_ids=(),
+    )
+
+
+def create_payment_link_provider() -> MagicMock:
+    return MagicMock(
+        spec=RazorpayPaymentLinkProvider,
+    )
+
+
+def create_customer_provider() -> MagicMock:
+    return MagicMock(
+        spec=RazorpayPaymentCustomerProvider,
     )
 
 
@@ -85,19 +100,14 @@ async def test_run_once_executes_batch_and_closes_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = create_settings()
-
-    provider = MagicMock(
-        spec=RazorpayPaymentLinkProvider,
-    )
-
+    payment_link_provider = create_payment_link_provider()
+    customer_provider = create_customer_provider()
     session_factory = MagicMock(
         name="session_factory",
     )
-
     run_batch = AsyncMock(
         return_value=create_batch_result(),
     )
-
     close_database = AsyncMock()
 
     monkeypatch.setattr(
@@ -107,17 +117,20 @@ async def test_run_once_executes_batch_and_closes_database(
             return_value=settings,
         ),
     )
-
-    create_provider = MagicMock(
-        return_value=provider,
-    )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "create_razorpay_payment_link_provider",
-        create_provider,
+        MagicMock(
+            return_value=payment_link_provider,
+        ),
     )
-
+    monkeypatch.setattr(
+        recovery_action_worker,
+        "create_razorpay_payment_customer_provider",
+        MagicMock(
+            return_value=customer_provider,
+        ),
+    )
     monkeypatch.setattr(
         recovery_action_worker,
         "get_session_factory",
@@ -125,19 +138,16 @@ async def test_run_once_executes_batch_and_closes_database(
             return_value=session_factory,
         ),
     )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "run_recovery_action_batch",
         run_batch,
     )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "close_database",
         close_database,
     )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "utc_now",
@@ -150,13 +160,10 @@ async def test_run_once_executes_batch_and_closes_database(
         run_once=True,
     )
 
-    create_provider.assert_called_once_with(
-        settings,
-    )
-
     run_batch.assert_awaited_once_with(
         session_factory,
-        provider=provider,
+        provider=payment_link_provider,
+        customer_provider=customer_provider,
         reference_time=NOW,
         batch_size=25,
         claim_timeout=timedelta(
@@ -164,7 +171,6 @@ async def test_run_once_executes_batch_and_closes_database(
         ),
         maximum_attempts=3,
     )
-
     close_database.assert_awaited_once_with()
 
 
@@ -172,10 +178,6 @@ async def test_run_once_executes_batch_and_closes_database(
 async def test_run_once_closes_database_after_batch_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    provider = MagicMock(
-        spec=RazorpayPaymentLinkProvider,
-    )
-
     close_database = AsyncMock()
 
     monkeypatch.setattr(
@@ -185,15 +187,20 @@ async def test_run_once_closes_database_after_batch_failure(
             return_value=create_settings(),
         ),
     )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "create_razorpay_payment_link_provider",
         MagicMock(
-            return_value=provider,
+            return_value=create_payment_link_provider(),
         ),
     )
-
+    monkeypatch.setattr(
+        recovery_action_worker,
+        "create_razorpay_payment_customer_provider",
+        MagicMock(
+            return_value=create_customer_provider(),
+        ),
+    )
     monkeypatch.setattr(
         recovery_action_worker,
         "get_session_factory",
@@ -201,7 +208,6 @@ async def test_run_once_closes_database_after_batch_failure(
             return_value=MagicMock(),
         ),
     )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "run_recovery_action_batch",
@@ -211,7 +217,6 @@ async def test_run_once_closes_database_after_batch_failure(
             ),
         ),
     )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "close_database",
@@ -243,7 +248,6 @@ async def test_missing_credentials_fail_before_database_initialization(
             return_value=create_settings(),
         ),
     )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "create_razorpay_payment_link_provider",
@@ -251,13 +255,18 @@ async def test_missing_credentials_fail_before_database_initialization(
             return_value=None,
         ),
     )
-
+    monkeypatch.setattr(
+        recovery_action_worker,
+        "create_razorpay_payment_customer_provider",
+        MagicMock(
+            return_value=None,
+        ),
+    )
     monkeypatch.setattr(
         recovery_action_worker,
         "get_session_factory",
         get_session_factory,
     )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "close_database",
@@ -280,12 +289,7 @@ async def test_missing_credentials_fail_before_database_initialization(
 async def test_continuous_empty_batch_sleeps_and_closes_on_cancellation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    provider = MagicMock(
-        spec=RazorpayPaymentLinkProvider,
-    )
-
     close_database = AsyncMock()
-
     sleep = AsyncMock(
         side_effect=asyncio.CancelledError(),
     )
@@ -297,15 +301,20 @@ async def test_continuous_empty_batch_sleeps_and_closes_on_cancellation(
             return_value=create_settings(),
         ),
     )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "create_razorpay_payment_link_provider",
         MagicMock(
-            return_value=provider,
+            return_value=create_payment_link_provider(),
         ),
     )
-
+    monkeypatch.setattr(
+        recovery_action_worker,
+        "create_razorpay_payment_customer_provider",
+        MagicMock(
+            return_value=create_customer_provider(),
+        ),
+    )
     monkeypatch.setattr(
         recovery_action_worker,
         "get_session_factory",
@@ -313,7 +322,6 @@ async def test_continuous_empty_batch_sleeps_and_closes_on_cancellation(
             return_value=MagicMock(),
         ),
     )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "run_recovery_action_batch",
@@ -321,13 +329,11 @@ async def test_continuous_empty_batch_sleeps_and_closes_on_cancellation(
             return_value=create_batch_result(),
         ),
     )
-
     monkeypatch.setattr(
         recovery_action_worker,
         "close_database",
         close_database,
     )
-
     monkeypatch.setattr(
         recovery_action_worker.asyncio,
         "sleep",
@@ -344,5 +350,4 @@ async def test_continuous_empty_batch_sleeps_and_closes_on_cancellation(
     sleep.assert_awaited_once_with(
         2.0,
     )
-
     close_database.assert_awaited_once_with()

@@ -63,6 +63,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "fastapi", extra = ["standard-no-fastapi-cloud-cli"] },
     { name = "google-genai" },
+    { name = "httpx2" },
     { name = "pydantic-settings" },
     { name = "redis" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -70,7 +71,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx2" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -84,6 +84,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "fastapi", extras = ["standard-no-fastapi-cloud-cli"], specifier = ">=0.141.1" },
     { name = "google-genai", specifier = ">=2.18.1,<3.0.0" },
+    { name = "httpx2", specifier = ">=2.12.0" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
     { name = "redis", specifier = ">=8.1.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.52" },
@@ -91,7 +92,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx2", specifier = ">=2.12.0" },
     { name = "mypy", specifier = ">=2.3.1" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },

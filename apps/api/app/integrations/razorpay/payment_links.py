@@ -119,7 +119,9 @@ class RazorpayPaymentLinkRequest(BaseModel):
         value: datetime | None,
     ) -> datetime | None:
         if value is not None and (value.tzinfo is None or value.utcoffset() is None):
-            raise ValueError("Payment-link expiry must be timezone-aware")
+            raise ValueError(
+                "Payment-link expiry must be timezone-aware",
+            )
 
         return value
 
@@ -136,11 +138,13 @@ class RazorpayPaymentLinkRequest(BaseModel):
             note_value = raw_value.strip()
 
             if not key or not note_value:
-                raise ValueError("Payment-link notes cannot contain empty keys or values")
+                raise ValueError(
+                    "Payment-link notes cannot contain empty keys or values",
+                )
 
             if len(key) > 256 or len(note_value) > 256:
                 raise ValueError(
-                    "Payment-link note keys and values cannot exceed 256 characters",
+                    ("Payment-link note keys and values cannot exceed 256 characters"),
                 )
 
             normalized[key] = note_value
@@ -202,6 +206,13 @@ class RazorpayPaymentLinkRequest(BaseModel):
 
 
 class RazorpayPaymentLink(BaseModel):
+    """Sanitised Payment Link state from Razorpay.
+
+    We intentionally parse only recovery evidence. Customer details and the
+    provider's full payment objects are ignored, so this model cannot carry
+    persistent customer PII.
+    """
+
     model_config = ConfigDict(
         extra="ignore",
         populate_by_name=True,
@@ -222,6 +233,11 @@ class RazorpayPaymentLink(BaseModel):
         alias="amount",
         gt=0,
     )
+    amount_paid_minor: int = Field(
+        default=0,
+        alias="amount_paid",
+        ge=0,
+    )
     currency: str = Field(
         min_length=3,
         max_length=3,
@@ -229,6 +245,11 @@ class RazorpayPaymentLink(BaseModel):
     reference_id: str = Field(
         min_length=1,
         max_length=40,
+    )
+    provider_updated_at: int | None = Field(
+        default=None,
+        alias="updated_at",
+        ge=0,
     )
 
     @field_validator("currency")
@@ -238,6 +259,17 @@ class RazorpayPaymentLink(BaseModel):
         value: str,
     ) -> str:
         return value.upper()
+
+    @model_validator(mode="after")
+    def validate_paid_amount(
+        self,
+    ) -> "RazorpayPaymentLink":
+        if self.amount_paid_minor > self.amount_minor:
+            raise ValueError(
+                "Razorpay Payment Link paid amount cannot exceed link amount",
+            )
+
+        return self
 
 
 class RazorpayPaymentLinkCollection(BaseModel):
@@ -270,7 +302,7 @@ class RazorpayPaymentLinkProvider:
         key_secret: str,
         base_url: str = RAZORPAY_API_BASE_URL,
         timeout_seconds: float = 10.0,
-        transport: (httpx2.AsyncBaseTransport | None) = None,
+        transport: httpx2.AsyncBaseTransport | None = None,
     ) -> None:
         normalized_key_id = key_id.strip()
         normalized_key_secret = key_secret.strip()
@@ -301,10 +333,14 @@ class RazorpayPaymentLinkProvider:
         normalized = reference_id.strip()
 
         if not normalized:
-            raise ValueError("Razorpay Payment Link reference ID cannot be empty")
+            raise ValueError(
+                "Razorpay Payment Link reference ID cannot be empty",
+            )
 
         if len(normalized) > 40:
-            raise ValueError("Razorpay Payment Link reference ID cannot exceed 40 characters")
+            raise ValueError(
+                "Razorpay Payment Link reference ID cannot exceed 40 characters",
+            )
 
         return normalized
 
@@ -315,10 +351,14 @@ class RazorpayPaymentLinkProvider:
         normalized = payment_link_id.strip()
 
         if not normalized:
-            raise ValueError("Razorpay Payment Link ID cannot be empty")
+            raise ValueError(
+                "Razorpay Payment Link ID cannot be empty",
+            )
 
         if len(normalized) > 128:
-            raise ValueError("Razorpay Payment Link ID cannot exceed 128 characters")
+            raise ValueError(
+                "Razorpay Payment Link ID cannot exceed 128 characters",
+            )
 
         return normalized
 
@@ -327,7 +367,7 @@ class RazorpayPaymentLinkProvider:
         method: str,
         path: str,
         *,
-        payload: (dict[str, object] | None) = None,
+        payload: dict[str, object] | None = None,
         params: dict[str, str] | None = None,
     ) -> httpx2.Response:
         try:
@@ -356,22 +396,18 @@ class RazorpayPaymentLinkProvider:
                         headers={"Accept": "application/json"},
                     )
         except httpx2.RequestError as error:
-            raise (
-                RazorpayPaymentLinkProviderError(
-                    f"Razorpay Payment Links request failed: {type(error).__name__}",
-                    retryable=True,
-                )
+            raise RazorpayPaymentLinkProviderError(
+                (f"Razorpay Payment Links request failed: {type(error).__name__}"),
+                retryable=True,
             ) from error
 
         if response.status_code >= 400:
             retryable = response.status_code == 429 or response.status_code >= 500
 
-            raise (
-                RazorpayPaymentLinkProviderError(
-                    "Razorpay Payment Links API rejected the request",
-                    retryable=retryable,
-                    status_code=(response.status_code),
-                )
+            raise RazorpayPaymentLinkProviderError(
+                "Razorpay Payment Links API rejected the request",
+                retryable=retryable,
+                status_code=response.status_code,
             )
 
         return response
@@ -389,12 +425,10 @@ class RazorpayPaymentLinkProvider:
             ValidationError,
             TypeError,
         ) as error:
-            raise (
-                RazorpayPaymentLinkProviderError(
-                    "Razorpay Payment Links API returned an invalid response",
-                    retryable=False,
-                    status_code=(response.status_code),
-                )
+            raise RazorpayPaymentLinkProviderError(
+                "Razorpay Payment Links API returned an invalid response",
+                retryable=False,
+                status_code=response.status_code,
             ) from error
 
     async def create_payment_link(
@@ -404,7 +438,27 @@ class RazorpayPaymentLinkProvider:
         response = await self._request(
             "POST",
             RAZORPAY_PAYMENT_LINK_PATH,
-            payload=(request.to_provider_payload()),
+            payload=request.to_provider_payload(),
+        )
+
+        return self._parse_payment_link(response)
+
+    async def fetch_payment_link(
+        self,
+        payment_link_id: str,
+    ) -> RazorpayPaymentLink:
+        """Fetch current provider state using a known Payment Link ID."""
+        normalized_payment_link_id = self._normalize_payment_link_id(
+            payment_link_id,
+        )
+        encoded_payment_link_id = quote(
+            normalized_payment_link_id,
+            safe="",
+        )
+
+        response = await self._request(
+            "GET",
+            f"{RAZORPAY_PAYMENT_LINK_PATH}/{encoded_payment_link_id}",
         )
 
         return self._parse_payment_link(response)
@@ -413,7 +467,9 @@ class RazorpayPaymentLinkProvider:
         self,
         reference_id: str,
     ) -> RazorpayPaymentLink | None:
-        normalized_reference_id = self._normalize_reference_id(reference_id)
+        normalized_reference_id = self._normalize_reference_id(
+            reference_id,
+        )
 
         response = await self._request(
             "GET",
@@ -424,27 +480,25 @@ class RazorpayPaymentLinkProvider:
         try:
             response_payload = json.loads(response.content)
 
-            collection = RazorpayPaymentLinkCollection.model_validate(response_payload)
+            collection = RazorpayPaymentLinkCollection.model_validate(
+                response_payload,
+            )
         except (
             json.JSONDecodeError,
             ValidationError,
             TypeError,
         ) as error:
-            raise (
-                RazorpayPaymentLinkProviderError(
-                    "Razorpay Payment Links API returned an invalid collection response",
-                    retryable=False,
-                    status_code=(response.status_code),
-                )
+            raise RazorpayPaymentLinkProviderError(
+                ("Razorpay Payment Links API returned an invalid collection response"),
+                retryable=False,
+                status_code=response.status_code,
             ) from error
 
         if len(collection.payment_links) > 1:
-            raise (
-                RazorpayPaymentLinkProviderError(
-                    "Razorpay Payment Links API returned duplicate reference matches",
-                    retryable=False,
-                    status_code=(response.status_code),
-                )
+            raise RazorpayPaymentLinkProviderError(
+                "Razorpay Payment Links API returned duplicate reference matches",
+                retryable=False,
+                status_code=response.status_code,
             )
 
         if not collection.payment_links:
@@ -456,8 +510,9 @@ class RazorpayPaymentLinkProvider:
         self,
         payment_link_id: str,
     ) -> RazorpayPaymentLink:
-        normalized_payment_link_id = self._normalize_payment_link_id(payment_link_id)
-
+        normalized_payment_link_id = self._normalize_payment_link_id(
+            payment_link_id,
+        )
         encoded_payment_link_id = quote(
             normalized_payment_link_id,
             safe="",
@@ -465,7 +520,7 @@ class RazorpayPaymentLinkProvider:
 
         response = await self._request(
             "POST",
-            (f"{RAZORPAY_PAYMENT_LINK_PATH}/{encoded_payment_link_id}/cancel"),
+            f"{RAZORPAY_PAYMENT_LINK_PATH}/{encoded_payment_link_id}/cancel",
         )
 
         return self._parse_payment_link(response)
@@ -474,7 +529,7 @@ class RazorpayPaymentLinkProvider:
 def create_razorpay_payment_link_provider(
     settings: Settings,
     *,
-    transport: (httpx2.AsyncBaseTransport | None) = None,
+    transport: httpx2.AsyncBaseTransport | None = None,
 ) -> RazorpayPaymentLinkProvider | None:
     if settings.razorpay_key_id is None or settings.razorpay_key_secret is None:
         return None

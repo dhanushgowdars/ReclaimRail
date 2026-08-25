@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     razorpay_key_secret: SecretStr | None = None
     razorpay_webhook_secret: SecretStr | None = None
     gemini_api_key: SecretStr | None = None
+    gemini_model_name: str = Field(
+        default="gemini-3.6-flash",
+        min_length=1,
+        max_length=128,
+    )
+    gemini_temperature: float = Field(default=0.1, ge=0.0, le=1.0)
+    gemini_max_output_tokens: int = Field(default=4096, ge=256, le=4096)
 
     outbox_stream_name: str = "reclaimrail:webhook-events:v1"
     outbox_batch_size: int = Field(default=25, ge=1, le=100)
@@ -100,6 +107,26 @@ class Settings(BaseSettings):
         default=60.0,
         ge=1.0,
         le=3600.0,
+    )
+    recovery_action_batch_size: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+    )
+    recovery_action_poll_interval_seconds: float = Field(
+        default=2.0,
+        ge=0.1,
+        le=300.0,
+    )
+    recovery_action_claim_timeout_seconds: int = Field(
+        default=120,
+        ge=10,
+        le=3600,
+    )
+    recovery_action_max_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=20,
     )
     model_config = SettingsConfigDict(
         env_file=".env",

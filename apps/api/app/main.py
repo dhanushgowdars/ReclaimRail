@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from app.api.routes.health import router as health_router
 from app.api.routes.recovery_case_detail import router as recovery_case_detail_router
 from app.api.routes.recovery_dashboard import router as recovery_dashboard_router
+from app.api.routes.recovery_incidents import router as recovery_incidents_router
+from app.api.routes.recovery_outcomes import router as recovery_outcomes_router
 from app.api.routes.webhooks import router as webhook_router
 from app.core.cache import close_redis
 from app.core.config import get_settings
@@ -37,6 +39,8 @@ def create_app() -> FastAPI:
     application.include_router(health_router)
     application.include_router(recovery_dashboard_router)
     application.include_router(recovery_case_detail_router)
+    application.include_router(recovery_incidents_router)
+    application.include_router(recovery_outcomes_router)
     application.include_router(webhook_router)
 
     return application

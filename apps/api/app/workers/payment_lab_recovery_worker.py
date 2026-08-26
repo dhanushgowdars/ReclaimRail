@@ -1,0 +1,129 @@
+import argparse
+import asyncio
+import logging
+from datetime import UTC, datetime
+
+from app.core.config import get_settings
+from app.core.database import close_database, get_session_factory
+from app.integrations.gemini import create_gemini_recovery_plan_provider
+from app.services.payment_lab_recovery_batch import (
+    PaymentLabRecoveryBatchResult,
+    run_payment_lab_recovery_batch,
+)
+
+LOGGER = logging.getLogger("reclaimrail.payment-lab-recovery-worker")
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def log_batch_result(result: PaymentLabRecoveryBatchResult) -> None:
+    LOGGER.info(
+        (
+            "Payment Lab recovery batch completed: "
+            "discovered=%d started=%d already_running=%d "
+            "already_planned=%d gemini_plans=%d "
+            "deterministic_plans=%d fallback_plans=%d "
+            "retryable_failures=%d permanent_failures=%d skipped=%d"
+        ),
+        result.discovered,
+        result.started,
+        result.already_running,
+        result.already_planned,
+        result.gemini_plans,
+        result.deterministic_plans,
+        result.fallback_plans,
+        result.retryable_failures,
+        result.permanent_failures,
+        result.skipped,
+    )
+
+    for failure in result.failures:
+        LOGGER.warning(
+            ("Payment Lab recovery failed: run_id=%s error_type=%s retryable=%s"),
+            failure.payment_lab_run_id,
+            failure.error_type,
+            failure.retryable,
+        )
+
+
+async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
+    settings = get_settings()
+    provider = create_gemini_recovery_plan_provider(settings)
+    session_factory = get_session_factory()
+
+    LOGGER.info(
+        (
+            "Payment Lab recovery worker started: batch_size=%d "
+            "poll_interval_seconds=%s planner=%s mode=%s"
+        ),
+        settings.payment_lab_recovery_batch_size,
+        settings.payment_lab_recovery_poll_interval_seconds,
+        "gemini_with_deterministic_fallback" if provider is not None else "deterministic",
+        "once" if run_once else "continuous",
+    )
+
+    try:
+        while True:
+            try:
+                result = await run_payment_lab_recovery_batch(
+                    session_factory,
+                    reference_time=utc_now(),
+                    provider=provider,
+                    batch_size=settings.payment_lab_recovery_batch_size,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                LOGGER.exception("Payment Lab recovery batch failed")
+
+                if run_once:
+                    raise
+
+                await asyncio.sleep(
+                    settings.payment_lab_recovery_poll_interval_seconds,
+                )
+                continue
+
+            if result.discovered > 0:
+                log_batch_result(result)
+
+            if run_once:
+                return
+
+            if result.discovered == 0:
+                await asyncio.sleep(
+                    settings.payment_lab_recovery_poll_interval_seconds,
+                )
+    finally:
+        await close_database()
+        LOGGER.info("Payment Lab recovery worker stopped")
+
+
+def parse_run_once() -> bool:
+    parser = argparse.ArgumentParser(
+        description="Start bounded recovery for verified Payment Lab failures.",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Process at most one Payment Lab recovery batch and exit.",
+    )
+    return bool(parser.parse_args().once)
+
+
+def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+
+    try:
+        asyncio.run(run_payment_lab_recovery_worker(run_once=parse_run_once()))
+    except KeyboardInterrupt:
+        LOGGER.info("Payment Lab recovery worker interrupted")
+
+
+if __name__ == "__main__":
+    main()

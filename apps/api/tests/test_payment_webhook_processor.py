@@ -15,6 +15,9 @@ from app.domain.payments import (
     PaymentTransitionReason,
 )
 from app.services import payment_webhook_processor
+from app.services.payment_lab_webhook_correlation import (
+    PaymentLabWebhookCorrelationError,
+)
 from app.services.payment_projector import PaymentProjectionResult
 from app.services.payment_webhook_processor import (
     PaymentWebhookDisposition,
@@ -111,6 +114,17 @@ def optional_scalar_result(
     result = MagicMock()
     result.scalar_one_or_none.return_value = value
     return result
+
+
+@pytest.fixture(autouse=True)
+def no_payment_lab_correlation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        payment_webhook_processor,
+        "prepare_payment_lab_webhook_correlation",
+        AsyncMock(return_value=None),
+    )
 
 
 @pytest.mark.asyncio
@@ -281,6 +295,46 @@ async def test_invalid_payment_payload_is_marked_failed(
 
     projector.assert_not_awaited()
     session.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_payment_lab_identity_conflict_fails_before_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    webhook_event = make_webhook_event()
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(
+        webhook_event,
+    )
+    projector = AsyncMock()
+
+    monkeypatch.setattr(
+        payment_webhook_processor,
+        "prepare_payment_lab_webhook_correlation",
+        AsyncMock(
+            side_effect=PaymentLabWebhookCorrelationError(
+                "Payment Lab webhook amount does not match the provider Order",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        payment_webhook_processor,
+        "project_payment_lifecycle_event",
+        projector,
+    )
+
+    result = await process_canonical_payment_webhook(
+        session,
+        WEBHOOK_ID,
+        processed_at=PROCESSED_AT,
+    )
+
+    assert result.disposition is PaymentWebhookDisposition.FAILED
+    assert result.projection is None
+    assert result.error is not None
+    assert "amount" in result.error
+    assert webhook_event.processing_status == WebhookProcessingStatus.FAILED.value
+    projector.assert_not_awaited()
 
 
 @pytest.mark.asyncio

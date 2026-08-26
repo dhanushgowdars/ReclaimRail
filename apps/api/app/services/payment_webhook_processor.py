@@ -19,6 +19,11 @@ from app.integrations.razorpay.payment_events import (
 from app.integrations.razorpay.webhooks import (
     RazorpayWebhookEnvelope,
 )
+from app.services.payment_lab_webhook_correlation import (
+    PaymentLabWebhookCorrelationError,
+    apply_payment_lab_webhook_correlation,
+    prepare_payment_lab_webhook_correlation,
+)
 from app.services.payment_projector import (
     PaymentProjectionConflictError,
     PaymentProjectionResult,
@@ -156,6 +161,20 @@ async def process_canonical_payment_webhook(
         )
 
     try:
+        payment_lab_correlation = await prepare_payment_lab_webhook_correlation(
+            session,
+            lifecycle_event,
+        )
+    except PaymentLabWebhookCorrelationError as error:
+        return await complete_without_projection(
+            session,
+            webhook_event,
+            disposition=PaymentWebhookDisposition.FAILED,
+            processed_at=processed_at,
+            error=str(error),
+        )
+
+    try:
         projection = await project_payment_lifecycle_event(
             session,
             lifecycle_event,
@@ -168,6 +187,14 @@ async def process_canonical_payment_webhook(
             disposition=PaymentWebhookDisposition.FAILED,
             processed_at=processed_at,
             error=str(error),
+        )
+
+    if payment_lab_correlation is not None:
+        apply_payment_lab_webhook_correlation(
+            payment_lab_correlation,
+            lifecycle_event,
+            projection,
+            observed_at=processed_at,
         )
 
     webhook_event.processing_status = WebhookProcessingStatus.PROCESSED.value

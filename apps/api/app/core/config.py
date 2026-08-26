@@ -188,6 +188,16 @@ class Settings(BaseSettings):
         ge=60,
         le=1800,
     )
+    payment_lab_recovery_batch_size: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+    )
+    payment_lab_recovery_poll_interval_seconds: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=300.0,
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

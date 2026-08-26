@@ -13,6 +13,12 @@ from app.db.models.payment import (
     PaymentAttempt,
     PaymentStateTransition,
 )
+from app.db.models.payment_lab import (
+    PaymentLabRun,
+    PaymentLabRunMode,
+    PaymentLabRunProvenance,
+    PaymentLabRunStatus,
+)
 from app.db.models.recovery import (
     RecoveryAction,
     RecoveryActionStatus,
@@ -44,6 +50,10 @@ __all__ = [
     "OutboxMessage",
     "OutboxMessageStatus",
     "PaymentAttempt",
+    "PaymentLabRun",
+    "PaymentLabRunMode",
+    "PaymentLabRunProvenance",
+    "PaymentLabRunStatus",
     "PaymentStateTransition",
     "RecoveryAction",
     "RecoveryActionStatus",

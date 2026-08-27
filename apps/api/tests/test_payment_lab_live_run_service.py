@@ -64,10 +64,10 @@ def build_payment() -> MagicMock:
     return payment
 
 
-def build_case() -> MagicMock:
+def build_case(*, status: str = "ready") -> MagicMock:
     recovery_case = MagicMock(spec=RecoveryCase)
     recovery_case.id = CASE_ID
-    recovery_case.status = "ready"
+    recovery_case.status = status
     return recovery_case
 
 
@@ -100,6 +100,18 @@ def build_action() -> MagicMock:
     action.provider_action_id = "plink_live_status"
     action.provider_action_status = "created"
     action.completed_at = NOW + timedelta(seconds=8)
+    return action
+
+
+def build_escalated_action() -> MagicMock:
+    action = build_action()
+    action.action_type = "create_payment_link"
+    action.status = "escalated"
+    action.policy_outcome = "escalate"
+    action.policy_guardrails = ["automatic_amount_limit"]
+    action.policy_explanation = "Automatic amount limit requires human review"
+    action.provider_action_id = None
+    action.provider_action_status = None
     return action
 
 
@@ -181,6 +193,43 @@ async def test_completed_run_exposes_provider_agent_policy_and_outcome_evidence(
     assert result.outcome.gross_recovered_minor == 349_900
     assert result.outcome.evidence_event_count == 2
     assert all(step.status is PaymentLabLiveStepStatus.COMPLETED for step in result.steps)
+
+
+@pytest.mark.asyncio
+async def test_policy_escalation_is_a_terminal_safe_disposition() -> None:
+    run = build_run(status=PaymentLabRunStatus.RECOVERY_RUNNING.value)
+    run.payment_attempt_id = ATTEMPT_ID
+    payment = build_payment()
+    recovery_case = build_case(status="escalated")
+    agent = build_agent()
+    action = build_escalated_action()
+
+    action_result = MagicMock()
+    action_result.scalars.return_value.all.return_value = [action]
+    session = AsyncMock(spec=AsyncSession)
+    session.get.side_effect = (run, payment)
+    session.execute.side_effect = (
+        scalar_result(recovery_case),
+        scalar_result(agent),
+        action_result,
+        scalar_result(None),
+    )
+
+    result = await load_payment_lab_live_run(
+        session,
+        payment_lab_run_id=RUN_ID,
+    )
+
+    assert result.current_stage is PaymentLabLiveStage.COMPLETED
+    assert result.terminal is True
+    assert result.poll_after_milliseconds is None
+    assert result.outcome is None
+    assert result.agent is not None
+    assert result.agent.recovery_case_status == "escalated"
+    assert result.actions[0].policy_outcome == "escalate"
+    assert result.steps[-1].label == "Safe disposition"
+    assert result.steps[-1].status is PaymentLabLiveStepStatus.COMPLETED
+    assert result.steps[-1].detail == ("Policy required human review; no financial action executed")
 
 
 @pytest.mark.asyncio

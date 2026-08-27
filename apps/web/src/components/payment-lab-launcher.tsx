@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Script from "next/script";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   type PaymentLabLiveRun,
@@ -56,6 +56,7 @@ type RazorpayOptions = {
   order_id: string;
   timeout: number;
   theme: { color: string };
+  retry: { enabled: boolean };
   modal: { ondismiss: () => void; confirm_close: boolean };
   handler: (response: RazorpaySuccess) => void;
 };
@@ -131,6 +132,13 @@ function liveStateCopy(liveRun: PaymentLabLiveRun): {
   detail: string;
 } {
   if (liveRun.current_stage === "completed") {
+    if (!liveRun.outcome && liveRun.agent?.recovery_case_status === "escalated") {
+      return {
+        title: "Safe escalation recorded",
+        detail:
+          "Deterministic policy stopped automated action and routed the case to human review.",
+      };
+    }
     if (liveRun.outcome?.status === "recovered") {
       return {
         title: "Revenue recovery verified",
@@ -188,6 +196,7 @@ function liveStateCopy(liveRun: PaymentLabLiveRun): {
 }
 
 export function PaymentLabLauncher() {
+  const failureObservedRef = useRef(false);
   const [checkoutLoaded, setCheckoutLoaded] = useState(false);
   const [mode, setMode] = useState<PaymentLabMode>("guided");
   const [reviewerCode, setReviewerCode] = useState("");
@@ -212,6 +221,7 @@ export function PaymentLabLauncher() {
     : null;
 
   async function startRun() {
+    failureObservedRef.current = false;
     setSafeError(null);
     setRun(null);
     setPollReviewerCode("");
@@ -289,14 +299,21 @@ export function PaymentLabLauncher() {
         order_id: responseBody.checkout.order_id,
         timeout: responseBody.checkout.timeout_seconds,
         theme: { color: responseBody.checkout.theme_color },
+        retry: { enabled: false },
         modal: {
           confirm_close: true,
-          ondismiss: () => setRunState("dismissed"),
+          ondismiss: () =>
+            setRunState(
+              failureObservedRef.current ? "awaiting_webhook" : "dismissed",
+            ),
         },
         handler: () => setRunState("browser_success"),
       });
 
-      checkout.on("payment.failed", () => setRunState("awaiting_webhook"));
+      checkout.on("payment.failed", () => {
+        failureObservedRef.current = true;
+        setRunState("awaiting_webhook");
+      });
       checkout.open();
     } catch (error) {
       setRunState("error");
@@ -462,9 +479,13 @@ export function PaymentLabLauncher() {
                 <dd>{run.checkout.order_id}</dd>
               </div>
               <div>
-                <dt>Persisted state</dt>
+                <dt>Control state</dt>
                 <dd>
-                  {liveRun ? humanize(liveRun.persisted_status) : "checkout ready"}
+                  {liveRun?.terminal && liveRun.agent
+                    ? humanize(liveRun.agent.recovery_case_status)
+                    : liveRun
+                      ? humanize(liveRun.persisted_status)
+                      : "checkout ready"}
                 </dd>
               </div>
               <div>

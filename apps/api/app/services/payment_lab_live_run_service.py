@@ -10,6 +10,7 @@ from app.db.models.payment import PaymentAttempt
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
 from app.db.models.recovery import RecoveryAction, RecoveryAgentRun, RecoveryCase
 from app.db.models.recovery_outcome import RecoveryOutcome
+from app.domain.recovery import RecoveryCaseStatus
 
 
 class PaymentLabLiveRunNotFoundError(LookupError):
@@ -46,6 +47,13 @@ TERMINAL_RUN_STATUSES = frozenset(
         PaymentLabRunStatus.COMPLETED.value,
         PaymentLabRunStatus.PROVIDER_FAILED.value,
         PaymentLabRunStatus.EXPIRED.value,
+    },
+)
+TERMINAL_CASE_STATUSES = frozenset(
+    {
+        RecoveryCaseStatus.CANCELLED.value,
+        RecoveryCaseStatus.ESCALATED.value,
+        RecoveryCaseStatus.EXHAUSTED.value,
     },
 )
 
@@ -226,10 +234,13 @@ def _build_outcome_evidence(
 
 def _derive_terminal(
     run: PaymentLabRun,
+    recovery_case: RecoveryCase | None,
     outcome: RecoveryOutcome | None,
 ) -> bool:
-    return run.status in TERMINAL_RUN_STATUSES or (
-        outcome is not None and outcome.status in TERMINAL_OUTCOME_STATUSES
+    return (
+        run.status in TERMINAL_RUN_STATUSES
+        or (recovery_case is not None and recovery_case.status in TERMINAL_CASE_STATUSES)
+        or (outcome is not None and outcome.status in TERMINAL_OUTCOME_STATUSES)
     )
 
 
@@ -237,6 +248,7 @@ def _derive_stage(
     run: PaymentLabRun,
     *,
     payment_attempt: PaymentAttempt | None,
+    recovery_case: RecoveryCase | None,
     agent_run: RecoveryAgentRun | None,
     actions: tuple[RecoveryAction, ...],
     outcome: RecoveryOutcome | None,
@@ -247,6 +259,8 @@ def _derive_stage(
     }:
         return PaymentLabLiveStage.FAILED
     if outcome is not None and outcome.status in TERMINAL_OUTCOME_STATUSES:
+        return PaymentLabLiveStage.COMPLETED
+    if recovery_case is not None and recovery_case.status in TERMINAL_CASE_STATUSES:
         return PaymentLabLiveStage.COMPLETED
     if outcome is not None or any(action.status == "succeeded" for action in actions):
         return PaymentLabLiveStage.OUTCOME
@@ -261,6 +275,7 @@ def _build_steps(
     run: PaymentLabRun,
     *,
     payment_attempt: PaymentAttempt | None,
+    recovery_case: RecoveryCase | None,
     agent_run: RecoveryAgentRun | None,
     actions: tuple[RecoveryAction, ...],
     outcome: RecoveryOutcome | None,
@@ -290,8 +305,15 @@ def _build_steps(
         agent_status = PaymentLabLiveStepStatus.ACTIVE
 
     successful_actions = tuple(action for action in actions if action.status == "succeeded")
+    safe_disposition = (
+        recovery_case.status
+        if recovery_case is not None and recovery_case.status in TERMINAL_CASE_STATUSES
+        else None
+    )
     outcome_status = PaymentLabLiveStepStatus.PENDING
-    if outcome is not None and outcome.status in TERMINAL_OUTCOME_STATUSES:
+    if (
+        outcome is not None and outcome.status in TERMINAL_OUTCOME_STATUSES
+    ) or safe_disposition is not None:
         outcome_status = PaymentLabLiveStepStatus.COMPLETED
     elif outcome is not None or successful_actions:
         outcome_status = PaymentLabLiveStepStatus.ACTIVE
@@ -334,16 +356,30 @@ def _build_steps(
         ),
         PaymentLabLiveStep(
             key="measured_outcome",
-            label="Measured outcome",
+            label="Safe disposition" if safe_disposition is not None else "Measured outcome",
             status=outcome_status,
             occurred_at=(
                 outcome.occurred_at
                 if outcome is not None
-                else (successful_actions[-1].completed_at if successful_actions else None)
+                else (
+                    actions[-1].completed_at
+                    if safe_disposition is not None and actions
+                    else (
+                        agent_run.completed_at
+                        if safe_disposition is not None and agent_run is not None
+                        else (successful_actions[-1].completed_at if successful_actions else None)
+                    )
+                )
             ),
             detail=(
                 "Evidence-backed outcome recorded"
-                if outcome_status is PaymentLabLiveStepStatus.COMPLETED
+                if outcome is not None and outcome_status is PaymentLabLiveStepStatus.COMPLETED
+                else (
+                    "Policy required human review; no financial action executed"
+                    if safe_disposition == RecoveryCaseStatus.ESCALATED.value
+                    else "Recovery stopped safely; no financial result was invented"
+                )
+                if safe_disposition is not None
                 else "Waiting for provider reconciliation"
             ),
         ),
@@ -402,7 +438,7 @@ async def load_payment_lab_live_run(
         )
         outcome = outcome_result.scalar_one_or_none()
 
-    terminal = _derive_terminal(run, outcome)
+    terminal = _derive_terminal(run, recovery_case, outcome)
     return PaymentLabLiveRun(
         payment_lab_run_id=run.id,
         client_request_id=run.client_request_id,
@@ -412,6 +448,7 @@ async def load_payment_lab_live_run(
         current_stage=_derive_stage(
             run,
             payment_attempt=payment_attempt,
+            recovery_case=recovery_case,
             agent_run=agent_run,
             actions=actions,
             outcome=outcome,
@@ -430,6 +467,7 @@ async def load_payment_lab_live_run(
         steps=_build_steps(
             run,
             payment_attempt=payment_attempt,
+            recovery_case=recovery_case,
             agent_run=agent_run,
             actions=actions,
             outcome=outcome,

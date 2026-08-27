@@ -263,7 +263,7 @@ async def test_agent_persists_gemini_plan_through_real_policy_transaction() -> N
 
         assert stored_run.planner_provider == "gemini"
         assert stored_run.model_name == "gemini-integration-test"
-        assert stored_run.prompt_version == "gemini-structured-v1"
+        assert stored_run.prompt_version == "gemini-structured-v2"
         assert stored_run.input_token_count == 240
         assert stored_run.output_token_count == 61
         assert stored_run.evidence["planner"]["fallback_used"] is False

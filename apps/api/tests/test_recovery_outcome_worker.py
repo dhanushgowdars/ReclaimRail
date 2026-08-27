@@ -244,8 +244,16 @@ async def test_missing_credentials_fail_before_database_initialization(
 
 
 @pytest.mark.asyncio
-async def test_continuous_empty_batch_sleeps_and_closes_on_cancellation(
+@pytest.mark.parametrize(
+    "discovered_action_ids",
+    [
+        (),
+        (UUID("97000000-0000-0000-0000-000000000001"),),
+    ],
+)
+async def test_continuous_batch_sleeps_and_closes_on_cancellation(
     monkeypatch: pytest.MonkeyPatch,
+    discovered_action_ids: tuple[UUID, ...],
 ) -> None:
     provider = MagicMock(
         spec=RazorpayPaymentLinkProvider,
@@ -280,7 +288,9 @@ async def test_continuous_empty_batch_sleeps_and_closes_on_cancellation(
         recovery_outcome_worker,
         "run_recovery_outcome_batch",
         AsyncMock(
-            return_value=create_batch_result(),
+            return_value=create_batch_result(
+                discovered_action_ids=discovered_action_ids,
+            ),
         ),
     )
     monkeypatch.setattr(

@@ -286,12 +286,12 @@ def _build_steps(
 ) -> tuple[PaymentLabLiveStep, ...]:
     provider_failed = run.status == PaymentLabRunStatus.PROVIDER_FAILED.value
     run_expired = run.status == PaymentLabRunStatus.EXPIRED.value
-
     checkout_status = (
         PaymentLabLiveStepStatus.COMPLETED
         if run.provider_order_id is not None
         else PaymentLabLiveStepStatus.ACTIVE
     )
+
     failure_status = PaymentLabLiveStepStatus.PENDING
     if payment_attempt is not None:
         failure_status = PaymentLabLiveStepStatus.COMPLETED
@@ -300,13 +300,37 @@ def _build_steps(
     elif run.status == PaymentLabRunStatus.CHECKOUT_READY.value:
         failure_status = PaymentLabLiveStepStatus.ACTIVE
 
+    case_status = PaymentLabLiveStepStatus.PENDING
+    if recovery_case is not None:
+        case_status = PaymentLabLiveStepStatus.COMPLETED
+    elif payment_attempt is not None:
+        case_status = PaymentLabLiveStepStatus.ACTIVE
+
     agent_status = PaymentLabLiveStepStatus.PENDING
     if agent_run is not None and agent_run.status == "succeeded":
         agent_status = PaymentLabLiveStepStatus.COMPLETED
     elif agent_run is not None and agent_run.status == "failed":
         agent_status = PaymentLabLiveStepStatus.FAILED
-    elif run.status == PaymentLabRunStatus.RECOVERY_RUNNING.value:
+    elif recovery_case is not None:
         agent_status = PaymentLabLiveStepStatus.ACTIVE
+
+    latest_action = actions[-1] if actions else None
+    policy_status = PaymentLabLiveStepStatus.PENDING
+    if latest_action is not None:
+        policy_status = PaymentLabLiveStepStatus.COMPLETED
+    elif agent_run is not None and agent_run.status == "succeeded":
+        policy_status = PaymentLabLiveStepStatus.ACTIVE
+
+    provider_status = PaymentLabLiveStepStatus.PENDING
+    if latest_action is not None:
+        if latest_action.status == "succeeded":
+            provider_status = PaymentLabLiveStepStatus.COMPLETED
+        elif latest_action.status == "failed":
+            provider_status = PaymentLabLiveStepStatus.FAILED
+        elif latest_action.policy_outcome in {"block", "escalate", "stop"}:
+            provider_status = PaymentLabLiveStepStatus.COMPLETED
+        else:
+            provider_status = PaymentLabLiveStepStatus.ACTIVE
 
     successful_actions = tuple(action for action in actions if action.status == "succeeded")
     safe_disposition = (
@@ -346,21 +370,66 @@ def _build_steps(
             ),
         ),
         PaymentLabLiveStep(
-            key="bounded_agent",
-            label="Bounded agent",
+            key="recovery_case",
+            label="Recovery case opened",
+            status=case_status,
+            occurred_at=(recovery_case.opened_at if recovery_case is not None else None),
+            detail=(
+                "Failure promoted into a bounded recovery case"
+                if recovery_case is not None
+                else "Opening an idempotent recovery case"
+            ),
+        ),
+        PaymentLabLiveStep(
+            key="agent_recommendation",
+            label="Agent recommendation",
             status=agent_status,
             occurred_at=(
                 agent_run.completed_at or agent_run.started_at if agent_run is not None else None
             ),
             detail=(
-                "Proposal persisted through deterministic policy"
+                "Gemini proposal persisted with decision evidence"
                 if agent_status is PaymentLabLiveStepStatus.COMPLETED
-                else "Waiting for bounded planning"
+                else "Gemini is preparing a bounded proposal"
+            ),
+        ),
+        PaymentLabLiveStep(
+            key="policy_decision",
+            label="Policy decision",
+            status=policy_status,
+            occurred_at=(latest_action.policy_evaluated_at if latest_action is not None else None),
+            detail=(
+                f"Deterministic policy: {latest_action.policy_outcome}"
+                if latest_action is not None
+                else "Waiting for deterministic guardrails"
+            ),
+        ),
+        PaymentLabLiveStep(
+            key="provider_action",
+            label=(
+                "Safe disposition"
+                if latest_action is not None
+                and latest_action.policy_outcome in {"block", "escalate", "stop"}
+                else "Provider action"
+            ),
+            status=provider_status,
+            occurred_at=(
+                latest_action.completed_at or latest_action.started_at or latest_action.created_at
+                if latest_action is not None
+                else None
+            ),
+            detail=(
+                "Razorpay payment link created"
+                if latest_action is not None and latest_action.provider_action_id is not None
+                else "Policy stopped money-facing execution"
+                if latest_action is not None
+                and latest_action.policy_outcome in {"block", "escalate", "stop"}
+                else "Waiting for idempotent provider execution"
             ),
         ),
         PaymentLabLiveStep(
             key="measured_outcome",
-            label="Safe disposition" if safe_disposition is not None else "Measured outcome",
+            label="Measured outcome",
             status=outcome_status,
             occurred_at=(
                 outcome.occurred_at

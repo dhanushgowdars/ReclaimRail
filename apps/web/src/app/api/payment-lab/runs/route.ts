@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 
 const MAX_REQUEST_BYTES = 4096;
+const PAYMENT_LAB_RUN_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function apiBaseUrl(): string {
   return (
@@ -19,17 +21,21 @@ function safeEqual(left: string, right: string): boolean {
   );
 }
 
-export async function POST(request: Request): Promise<Response> {
+function getPaymentLabAccess(request: Request):
+  | { backendAccessToken: string }
+  | { response: Response } {
   const configuredReviewerCode =
     process.env.RECLAIMRAIL_PAYMENT_LAB_REVIEWER_CODE?.trim();
   const backendAccessToken =
     process.env.RECLAIMRAIL_PAYMENT_LAB_ACCESS_TOKEN?.trim();
 
   if (!configuredReviewerCode || !backendAccessToken) {
-    return Response.json(
-      { detail: "Payment Lab access is not configured" },
-      { status: 503 },
-    );
+    return {
+      response: Response.json(
+        { detail: "Payment Lab access is not configured" },
+        { status: 503 },
+      ),
+    };
   }
 
   const reviewerCode = request.headers
@@ -37,10 +43,73 @@ export async function POST(request: Request): Promise<Response> {
     ?.trim();
 
   if (!reviewerCode || !safeEqual(reviewerCode, configuredReviewerCode)) {
+    return {
+      response: Response.json(
+        { detail: "Payment Lab access denied" },
+        { status: 401 },
+      ),
+    };
+  }
+
+  return { backendAccessToken };
+}
+
+function upstreamResponse(upstream: Response, body: string): Response {
+  return new Response(body, {
+    status: upstream.status,
+    headers: {
+      "Cache-Control": "no-store",
+      "Content-Type":
+        upstream.headers.get("content-type") ?? "application/json",
+    },
+  });
+}
+
+export async function GET(request: Request): Promise<Response> {
+  const access = getPaymentLabAccess(request);
+
+  if ("response" in access) {
+    return access.response;
+  }
+
+  const paymentLabRunId = new URL(request.url).searchParams
+    .get("payment_lab_run_id")
+    ?.trim();
+
+  if (!paymentLabRunId || !PAYMENT_LAB_RUN_ID_PATTERN.test(paymentLabRunId)) {
     return Response.json(
-      { detail: "Payment Lab access denied" },
-      { status: 401 },
+      { detail: "A valid Payment Lab run ID is required" },
+      { status: 400 },
     );
+  }
+
+  try {
+    const upstream = await fetch(
+      `${apiBaseUrl()}/payment-lab/runs/${encodeURIComponent(paymentLabRunId)}`,
+      {
+        cache: "no-store",
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          Accept: "application/json",
+          "X-ReclaimRail-Lab-Token": access.backendAccessToken,
+        },
+      },
+    );
+
+    return upstreamResponse(upstream, await upstream.text());
+  } catch {
+    return Response.json(
+      { detail: "ReclaimRail API is currently unavailable" },
+      { status: 503 },
+    );
+  }
+}
+
+export async function POST(request: Request): Promise<Response> {
+  const access = getPaymentLabAccess(request);
+
+  if ("response" in access) {
+    return access.response;
   }
 
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
@@ -78,21 +147,12 @@ export async function POST(request: Request): Promise<Response> {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        "X-ReclaimRail-Lab-Token": backendAccessToken,
+        "X-ReclaimRail-Lab-Token": access.backendAccessToken,
       },
       body,
     });
 
-    const responseBody = await upstream.text();
-    const contentType = upstream.headers.get("content-type") ?? "application/json";
-
-    return new Response(responseBody, {
-      status: upstream.status,
-      headers: {
-        "Cache-Control": "no-store",
-        "Content-Type": contentType,
-      },
-    });
+    return upstreamResponse(upstream, await upstream.text());
   } catch {
     return Response.json(
       { detail: "ReclaimRail API is currently unavailable" },

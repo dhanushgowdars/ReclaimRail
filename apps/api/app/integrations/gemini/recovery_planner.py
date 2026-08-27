@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from app.core.config import Settings
 from app.domain.recovery import (
+    CUSTOMER_CONTACT_ACTIONS,
+    DEFAULT_RECOVERY_PLANNER_POLICY,
     RecoveryActionProposal,
     RecoveryActionType,
     RecoveryChannel,
@@ -20,7 +22,7 @@ from app.domain.recovery import (
     build_recovery_evidence_codes,
 )
 
-GEMINI_RECOVERY_PROMPT_VERSION = "gemini-structured-v1"
+GEMINI_RECOVERY_PROMPT_VERSION = "gemini-structured-v2"
 
 GEMINI_RECOVERY_SYSTEM_INSTRUCTION = """You are ReclaimRail's bounded payment-recovery planner.
 You only propose actions; you never execute actions or contact customers.
@@ -30,6 +32,13 @@ Return at most three actions from the response schema.
 Use stop_recovery when payment-completion evidence exists.
 Use wait during a high or critical payment incident.
 Use escalate_human when automation limits are reached.
+Treat the supplied policy_contract as a hard decision envelope.
+When required_decision is recover and create_payment_link is a baseline action,
+propose create_payment_link for the exact original amount and currency.
+Missing customer-contact consent forbids contact actions, but it does not forbid
+creating an unshared Payment Link for an authorised merchant reviewer.
+Do not escalate an otherwise eligible recovery merely because no contact channel
+is approved.
 Deterministic server-side policy will independently approve or reject every proposal.
 Keep the reasoning summary concise and operational."""
 
@@ -123,6 +132,7 @@ class GeminiPlannerFallbackReason(StrEnum):
     NOT_CONFIGURED = "not_configured"
     PROVIDER_ERROR = "provider_error"
     INVALID_RESPONSE = "invalid_response"
+    POLICY_CONFLICT = "policy_conflict"
 
 
 class RecoveryPlannerSource(StrEnum):
@@ -252,6 +262,7 @@ def build_recovery_planning_prompt(
 ) -> str:
     case = context.case
     failure = context.failure
+    deterministic_baseline = build_deterministic_recovery_plan(context)
     evidence = {
         "case": {
             "case_id": str(case.case_id),
@@ -285,6 +296,21 @@ def build_recovery_planning_prompt(
         },
         "approved_channels": [channel.value for channel in context.available_channels],
         "alternate_payment_methods": list(context.alternate_payment_methods),
+        "policy_contract": {
+            "automatic_amount_limit_minor": (
+                DEFAULT_RECOVERY_PLANNER_POLICY.automatic_amount_limit_minor
+            ),
+            "maximum_recovery_attempts": (
+                DEFAULT_RECOVERY_PLANNER_POLICY.maximum_recovery_attempts
+            ),
+            "required_decision": deterministic_baseline.decision.value,
+            "baseline_action_types": [
+                proposal.action_type.value for proposal in deterministic_baseline.proposals
+            ],
+            "customer_contact_actions_allowed": bool(
+                case.customer_contact_allowed and context.available_channels,
+            ),
+        },
         "planned_at": context.planned_at.isoformat(),
     }
     return "Plan the next bounded recovery step from this evidence:\n" + json.dumps(
@@ -426,6 +452,42 @@ def _deterministic_fallback(
     )
 
 
+def _violates_policy_contract(
+    plan: RecoveryPlan,
+    *,
+    context: RecoveryPlanningContext,
+) -> bool:
+    baseline = build_deterministic_recovery_plan(context)
+
+    if plan.decision is not baseline.decision:
+        return True
+
+    if (not context.case.customer_contact_allowed or not context.available_channels) and any(
+        proposal.action_type in CUSTOMER_CONTACT_ACTIONS for proposal in plan.proposals
+    ):
+        return True
+
+    baseline_requires_link = any(
+        proposal.action_type is RecoveryActionType.CREATE_PAYMENT_LINK
+        for proposal in baseline.proposals
+    )
+    if not baseline_requires_link:
+        return False
+
+    payment_link_proposal = next(
+        (
+            proposal
+            for proposal in plan.proposals
+            if proposal.action_type is RecoveryActionType.CREATE_PAYMENT_LINK
+        ),
+        None,
+    )
+    return payment_link_proposal is None or (
+        payment_link_proposal.amount_minor != context.case.amount_minor
+        or payment_link_proposal.currency != context.case.currency
+    )
+
+
 async def plan_with_gemini_fallback(
     context: RecoveryPlanningContext,
     *,
@@ -459,6 +521,12 @@ async def plan_with_gemini_fallback(
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.INVALID_RESPONSE,
+        )
+
+    if _violates_policy_contract(plan, context=context):
+        return _deterministic_fallback(
+            context,
+            reason=GeminiPlannerFallbackReason.POLICY_CONFLICT,
         )
 
     return BoundedRecoveryPlannerResult(

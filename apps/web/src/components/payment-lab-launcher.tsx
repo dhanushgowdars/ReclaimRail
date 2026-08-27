@@ -88,6 +88,15 @@ function formatEvidenceTime(value: string): string {
   }).format(new Date(value));
 }
 
+function formatEvidenceDateTime(value: string): string {
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 function humanize(value: string): string {
   return value.replaceAll("_", " ");
 }
@@ -207,6 +216,7 @@ export function PaymentLabLauncher() {
   const [run, setRun] = useState<PaymentLabResponse | null>(null);
   const [pollReviewerCode, setPollReviewerCode] = useState("");
   const [safeError, setSafeError] = useState<string | null>(null);
+  const [copiedActionId, setCopiedActionId] = useState<string | null>(null);
   const { liveRun, polling, pollError } = usePaymentLabLiveRun({
     paymentLabRunId: run?.payment_lab_run_id ?? null,
     reviewerCode: pollReviewerCode,
@@ -219,10 +229,36 @@ export function PaymentLabLauncher() {
   const latestAction = liveRun?.actions.length
     ? liveRun.actions[liveRun.actions.length - 1]
     : null;
+  const paymentLinkAction = [...(liveRun?.actions ?? [])].reverse().find(
+    (action) =>
+      action.action_type === "create_payment_link" &&
+      action.provider_action_url !== null,
+  );
+  const paymentLinkIsActionable = Boolean(
+    paymentLinkAction &&
+      !liveRun?.outcome &&
+      !["paid", "expired", "cancelled"].includes(
+        paymentLinkAction.provider_action_status ?? "",
+      ),
+  );
+
+  async function copyRecoveryLink(): Promise<void> {
+    if (!paymentLinkAction?.provider_action_url) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(paymentLinkAction.provider_action_url);
+      setCopiedActionId(paymentLinkAction.recovery_action_id);
+    } catch {
+      setSafeError("The recovery link could not be copied. Open it directly instead.");
+    }
+  }
 
   async function startRun() {
     failureObservedRef.current = false;
     setSafeError(null);
+    setCopiedActionId(null);
     setRun(null);
     setPollReviewerCode("");
 
@@ -530,6 +566,62 @@ export function PaymentLabLauncher() {
                 </p>
               ) : null}
             </div>
+          ) : null}
+
+          {paymentLinkAction ? (
+            <section className="lab-recovery-link" aria-label="Recovery link">
+              <div className="lab-recovery-link__heading">
+                <div>
+                  <span>Provider recovery action</span>
+                  <strong>
+                    {paymentLinkIsActionable
+                      ? "Recovery link ready"
+                      : liveRun?.outcome?.status === "recovered"
+                        ? "Recovery link paid"
+                        : `Recovery link ${humanize(paymentLinkAction.provider_action_status ?? "recorded")}`}
+                  </strong>
+                </div>
+                <span className="lab-recovery-link__status">
+                  {humanize(paymentLinkAction.provider_action_status ?? "created")}
+                </span>
+              </div>
+              <dl>
+                <div>
+                  <dt>Link ID</dt>
+                  <dd>{paymentLinkAction.provider_action_id ?? "Pending"}</dd>
+                </div>
+                <div>
+                  <dt>Expires</dt>
+                  <dd>
+                    {paymentLinkAction.provider_action_expires_at
+                      ? formatEvidenceDateTime(
+                          paymentLinkAction.provider_action_expires_at,
+                        )
+                      : "Provider managed"}
+                  </dd>
+                </div>
+              </dl>
+              {paymentLinkIsActionable ? (
+                <div className="lab-recovery-link__actions">
+                  <a
+                    href={paymentLinkAction.provider_action_url ?? undefined}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                  >
+                    Open Razorpay Test Link
+                  </a>
+                  <button type="button" onClick={() => void copyRecoveryLink()}>
+                    {copiedActionId === paymentLinkAction.recovery_action_id
+                      ? "Copied"
+                      : "Copy link"}
+                  </button>
+                </div>
+              ) : null}
+              <p>
+                ReclaimRail counts recovery only after server-side Razorpay
+                reconciliation—not when this link is opened.
+              </p>
+            </section>
           ) : null}
 
           <div className="lab-truth-rule">

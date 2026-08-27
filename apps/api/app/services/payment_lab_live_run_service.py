@@ -103,6 +103,8 @@ class PaymentLabActionEvidence:
     policy_explanation: str
     provider_action_id: str | None
     provider_action_status: str | None
+    provider_action_url: str | None
+    provider_action_expires_at: datetime | None
     completed_at: datetime | None
 
 
@@ -210,6 +212,8 @@ def _build_action_evidence(
             policy_explanation=action.policy_explanation,
             provider_action_id=action.provider_action_id,
             provider_action_status=action.provider_action_status,
+            provider_action_url=action.provider_action_url,
+            provider_action_expires_at=action.provider_action_expires_at,
             completed_at=action.completed_at,
         )
         for action in actions

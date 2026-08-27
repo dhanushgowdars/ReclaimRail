@@ -114,6 +114,8 @@ def build_detail() -> RecoveryCaseDetail:
                 execution_attempt_count=1,
                 provider_action_id="plink_demo",
                 provider_action_status="paid",
+                provider_action_url="https://rzp.io/i/case-detail",
+                provider_action_expires_at=NOW,
                 started_at=NOW,
                 completed_at=NOW,
             ),

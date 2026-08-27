@@ -163,6 +163,7 @@ async def test_payment_link_action_is_executed_and_replayed_idempotently() -> No
                 "amount": payload["amount"],
                 "currency": payload["currency"],
                 "reference_id": (payload["reference_id"]),
+                "expire_by": payload["expire_by"],
             },
         )
 
@@ -273,6 +274,8 @@ async def test_payment_link_action_is_executed_and_replayed_idempotently() -> No
         assert stored_action.execution_attempt_count == 1
         assert stored_action.provider_action_id == (f"plink_{unique_suffix}")
         assert stored_action.provider_action_status == "created"
+        assert stored_action.provider_action_url == ("https://rzp.io/i/integration-test")
+        assert stored_action.provider_action_expires_at == (EXECUTED_AT + timedelta(hours=24))
         assert stored_action.last_error is None
         assert stored_action.completed_at == EXECUTED_AT
 

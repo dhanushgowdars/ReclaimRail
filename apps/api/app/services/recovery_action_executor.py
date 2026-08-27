@@ -44,6 +44,7 @@ SessionFactory = async_sessionmaker[AsyncSession]
 
 DEFAULT_ACTION_CLAIM_TIMEOUT = timedelta(minutes=2)
 DEFAULT_MAXIMUM_EXECUTION_ATTEMPTS = 3
+DEFAULT_PAYMENT_LINK_LIFETIME = timedelta(hours=24)
 
 ACTIVE_INCIDENT_STATUSES = frozenset(
     {
@@ -435,6 +436,7 @@ async def prepare_recovery_payment_link_action(
         currency=action.currency,
         reference_id=reference_id,
         description=(f"ReclaimRail recovery for payment {payment_attempt.provider_payment_id}"),
+        expire_by=executed_at + DEFAULT_PAYMENT_LINK_LIFETIME,
         notes={
             "recovery_case_id": str(recovery_case.id),
             "recovery_action_id": str(action.id),
@@ -554,6 +556,10 @@ async def complete_recovery_payment_link_action(
     action.status = RecoveryActionStatus.SUCCEEDED.value
     action.provider_action_id = payment_link.payment_link_id
     action.provider_action_status = payment_link.status.value
+    action.provider_action_url = payment_link.short_url
+    action.provider_action_expires_at = (
+        payment_link.provider_expires_at or prepared.request.expire_by
+    )
     action.completed_at = completed_at
     action.last_error = None
 
@@ -575,6 +581,11 @@ async def complete_recovery_payment_link_action(
                 "attempt_number": (action.execution_attempt_count),
                 "provider_action_id": (payment_link.payment_link_id),
                 "provider_action_status": (payment_link.status.value),
+                "provider_action_expires_at": (
+                    action.provider_action_expires_at.isoformat()
+                    if action.provider_action_expires_at is not None
+                    else None
+                ),
                 "reference_id": (payment_link.reference_id),
                 "recovered_existing_link": (recovered_existing_link),
             },

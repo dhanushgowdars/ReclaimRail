@@ -68,6 +68,8 @@ class PaymentLabActionEvidenceResponse(ResponseModel):
     policy_explanation: str
     provider_action_id: str | None
     provider_action_status: str | None
+    provider_action_url: str | None
+    provider_action_expires_at: datetime | None
     completed_at: datetime | None
 
 

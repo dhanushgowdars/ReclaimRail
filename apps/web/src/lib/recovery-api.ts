@@ -145,6 +145,8 @@ export type RecoveryCaseDetail = {
     execution_attempt_count: number;
     provider_action_id: string | null;
     provider_action_status: string | null;
+    provider_action_url: string | null;
+    provider_action_expires_at: string | null;
     started_at: string | null;
     completed_at: string | null;
   }>;
@@ -223,18 +225,10 @@ export async function loadRecoveryDashboard(): Promise<{
   outcomes: RecoveryOutcomePage;
 }> {
   const [summary, incidents, cases, outcomes] = await Promise.all([
-    getRecoveryApiJson<RecoveryDashboardSummary>(
-      "/recovery/dashboard/summary",
-    ),
-    getRecoveryApiJson<RecoveryIncident[]>(
-      "/recovery/dashboard/incidents?limit=5",
-    ),
-    getRecoveryApiJson<RecoveryCaseQueuePage>(
-      "/recovery/dashboard/cases?limit=8",
-    ),
-    getRecoveryApiJson<RecoveryOutcomePage>(
-      "/recovery/dashboard/outcomes?limit=6",
-    ),
+    getRecoveryApiJson<RecoveryDashboardSummary>("/recovery/dashboard/summary"),
+    getRecoveryApiJson<RecoveryIncident[]>("/recovery/dashboard/incidents?limit=5"),
+    getRecoveryApiJson<RecoveryCaseQueuePage>("/recovery/dashboard/cases?limit=8"),
+    getRecoveryApiJson<RecoveryOutcomePage>("/recovery/dashboard/outcomes?limit=6"),
   ]);
 
   return { summary, incidents, cases, outcomes };

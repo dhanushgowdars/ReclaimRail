@@ -24,6 +24,9 @@ class PaymentLabWebhookCorrelationDisposition(StrEnum):
     ALREADY_CURRENT = "already_current"
 
 
+SUPPORTED_PAYMENT_LAB_METHODS = frozenset({"upi", "card", "netbanking", "wallet"})
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedPaymentLabWebhookCorrelation:
     payment_lab_run: PaymentLabRun
@@ -56,10 +59,10 @@ def _validate_run_identity(
             "Payment Lab webhook currency does not match the provider Order",
         )
 
-    if event.method is not None and payment_lab_run.payment_method != event.method:
-        raise PaymentLabWebhookCorrelationError(
-            "Payment Lab webhook method does not match the bounded run input",
-        )
+    # Checkout's method is a presentation hint, not an enforceable identity
+    # boundary. Razorpay may expose several Test Mode methods even when the
+    # launcher suggested one. Amount, currency, Order ID, and provider evidence
+    # remain the correlation boundary; the verified method is persisted below.
 
 
 async def _validate_existing_payment_attempt(
@@ -197,6 +200,13 @@ def apply_payment_lab_webhook_correlation(
 
     if payment_lab_run.failure_code != target_failure_code:
         payment_lab_run.failure_code = target_failure_code
+        changed = True
+
+    if (
+        event.method in SUPPORTED_PAYMENT_LAB_METHODS
+        and payment_lab_run.payment_method != event.method
+    ):
+        payment_lab_run.payment_method = event.method
         changed = True
 
     if changed:

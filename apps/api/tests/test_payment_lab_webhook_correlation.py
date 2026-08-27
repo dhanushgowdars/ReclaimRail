@@ -59,6 +59,7 @@ def build_run() -> PaymentLabRun:
 def build_event(
     *,
     amount_minor: int = 349_900,
+    method: str = "netbanking",
 ) -> PaymentLifecycleEvent:
     return PaymentLifecycleEvent(
         webhook_event_id=WEBHOOK_ID,
@@ -71,7 +72,7 @@ def build_event(
         state=PaymentState.FAILED,
         amount_minor=amount_minor,
         currency="INR",
-        method="netbanking",
+        method=method,
         event_created_at=OBSERVED_AT,
         payment_created_at=OBSERVED_AT - timedelta(seconds=10),
         error_code="BAD_REQUEST_ERROR",
@@ -133,6 +134,49 @@ async def test_signed_failure_links_payment_lab_run_to_projection() -> None:
     assert payment_lab_run.failure_code == "BAD_REQUEST_ERROR"
     assert payment_lab_run.updated_at == OBSERVED_AT
     assert payment_lab_run.version == 2
+
+
+@pytest.mark.asyncio
+async def test_provider_verified_method_replaces_checkout_hint() -> None:
+    payment_lab_run = build_run()
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(payment_lab_run)
+    event = build_event(method="card")
+
+    prepared = await prepare_payment_lab_webhook_correlation(session, event)
+
+    assert prepared is not None
+    result = apply_payment_lab_webhook_correlation(
+        prepared,
+        event,
+        build_projection(),
+        observed_at=OBSERVED_AT,
+    )
+
+    assert result.status is PaymentLabRunStatus.PAYMENT_ATTEMPTED
+    assert payment_lab_run.payment_method == "card"
+    assert payment_lab_run.payment_attempt_id == ATTEMPT_ID
+
+
+@pytest.mark.asyncio
+async def test_unmodelled_provider_method_does_not_break_run_correlation() -> None:
+    payment_lab_run = build_run()
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(payment_lab_run)
+    event = build_event(method="paylater")
+
+    prepared = await prepare_payment_lab_webhook_correlation(session, event)
+
+    assert prepared is not None
+    result = apply_payment_lab_webhook_correlation(
+        prepared,
+        event,
+        build_projection(),
+        observed_at=OBSERVED_AT,
+    )
+
+    assert result.status is PaymentLabRunStatus.PAYMENT_ATTEMPTED
+    assert payment_lab_run.payment_method == "netbanking"
 
 
 @pytest.mark.asyncio

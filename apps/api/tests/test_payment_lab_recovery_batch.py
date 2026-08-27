@@ -109,6 +109,10 @@ async def test_discovers_verified_failure_candidates_in_query_order() -> None:
         PaymentLabRecoveryCandidate(RUN_ID_TWO, "card"),
     )
     session.execute.assert_awaited_once()
+    statement = session.execute.await_args.args[0]
+    assert REFERENCE_TIME - payment_lab_recovery_batch.SIGNED_FAILURE_STABILIZATION_DELAY in (
+        statement.compile().params.values()
+    )
 
 
 @pytest.mark.asyncio

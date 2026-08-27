@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
@@ -30,6 +30,11 @@ DEFAULT_ALTERNATE_PAYMENT_METHODS = (
     "netbanking",
     "wallet",
 )
+
+# Give signed failure projection a short, real stabilization window before the
+# agent claims the run. This keeps provider evidence and recovery execution as
+# distinct persisted states and avoids racing duplicate/out-of-order webhooks.
+SIGNED_FAILURE_STABILIZATION_DELAY = timedelta(seconds=5)
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +148,7 @@ async def discover_payment_lab_recovery_candidates(
         .where(
             PaymentLabRun.status == PaymentLabRunStatus.PAYMENT_ATTEMPTED.value,
             PaymentLabRun.payment_attempt_id.is_not(None),
+            PaymentLabRun.updated_at <= reference_time - SIGNED_FAILURE_STABILIZATION_DELAY,
         )
         .order_by(
             PaymentLabRun.updated_at,

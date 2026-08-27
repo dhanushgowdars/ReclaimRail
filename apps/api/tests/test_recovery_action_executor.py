@@ -148,6 +148,7 @@ def create_payment_link() -> RazorpayPaymentLink:
                     ACTION_ID,
                 )
             ),
+            "expire_by": int((NOW + timedelta(hours=24)).timestamp()),
         },
     )
 
@@ -226,6 +227,7 @@ async def test_prepares_allowed_payment_link_action(
         )
     )
     assert result.prepared.request.amount_minor == 125_000
+    assert result.prepared.request.expire_by == NOW + timedelta(hours=24)
     assert action.status == RecoveryActionStatus.EXECUTING.value
     assert action.execution_attempt_count == 1
     assert action.started_at == NOW
@@ -383,6 +385,8 @@ async def test_completion_persists_provider_result_and_case_projection(
     assert action.status == RecoveryActionStatus.SUCCEEDED.value
     assert action.provider_action_id == (payment_link.payment_link_id)
     assert action.provider_action_status == (RazorpayPaymentLinkStatus.CREATED.value)
+    assert action.provider_action_url == payment_link.short_url
+    assert action.provider_action_expires_at == payment_link.provider_expires_at
     assert action.completed_at == NOW
     assert recovery_case.active_payment_link_id == payment_link.payment_link_id
     assert recovery_case.recovery_attempt_count == 1

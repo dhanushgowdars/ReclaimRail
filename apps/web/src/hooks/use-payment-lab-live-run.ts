@@ -70,6 +70,8 @@ export type PaymentLabLiveRun = {
     policy_explanation: string;
     provider_action_id: string | null;
     provider_action_status: string | null;
+    provider_action_url: string | null;
+    provider_action_expires_at: string | null;
     completed_at: string | null;
   }>;
   outcome: {

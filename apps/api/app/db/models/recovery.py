@@ -589,6 +589,14 @@ class RecoveryAction(Base):
         String(64),
         nullable=True,
     )
+    provider_action_url: Mapped[str | None] = mapped_column(
+        String(2048),
+        nullable=True,
+    )
+    provider_action_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     last_error: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,

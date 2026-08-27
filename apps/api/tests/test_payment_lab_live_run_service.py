@@ -99,6 +99,8 @@ def build_action() -> MagicMock:
     action.policy_explanation = "All deterministic checks passed"
     action.provider_action_id = "plink_live_status"
     action.provider_action_status = "created"
+    action.provider_action_url = "https://rzp.io/i/live-status"
+    action.provider_action_expires_at = NOW + timedelta(hours=24)
     action.completed_at = NOW + timedelta(seconds=8)
     return action
 
@@ -112,6 +114,8 @@ def build_escalated_action() -> MagicMock:
     action.policy_explanation = "Automatic amount limit requires human review"
     action.provider_action_id = None
     action.provider_action_status = None
+    action.provider_action_url = None
+    action.provider_action_expires_at = None
     return action
 
 
@@ -189,6 +193,8 @@ async def test_completed_run_exposes_provider_agent_policy_and_outcome_evidence(
     assert result.agent.fallback_used is False
     assert result.actions[0].policy_outcome == "allow"
     assert result.actions[0].provider_action_id == "plink_live_status"
+    assert result.actions[0].provider_action_url == "https://rzp.io/i/live-status"
+    assert result.actions[0].provider_action_expires_at == NOW + timedelta(hours=24)
     assert result.outcome is not None
     assert result.outcome.gross_recovered_minor == 349_900
     assert result.outcome.evidence_event_count == 2

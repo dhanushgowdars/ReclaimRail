@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from enum import StrEnum
 from typing import Final
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx2
 from pydantic import (
@@ -251,6 +251,35 @@ class RazorpayPaymentLink(BaseModel):
         alias="updated_at",
         ge=0,
     )
+    provider_expires_at: datetime | None = Field(
+        default=None,
+        alias="expire_by",
+    )
+
+    @field_validator("short_url")
+    @classmethod
+    def require_https_short_url(
+        cls,
+        value: str,
+    ) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError(
+                "Razorpay Payment Link URL must use HTTPS",
+            )
+        return value
+
+    @field_validator("provider_expires_at")
+    @classmethod
+    def require_aware_provider_expiry(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError(
+                "Razorpay Payment Link expiry must be timezone-aware",
+            )
+        return value
 
     @field_validator("currency")
     @classmethod

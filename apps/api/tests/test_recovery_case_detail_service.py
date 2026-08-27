@@ -24,11 +24,7 @@ OUTCOME_ID = UUID("50000000-0000-0000-0000-000000000001")
 NOW = datetime(2026, 8, 26, 5, 30, tzinfo=UTC)
 
 
-def build_result(
-    *,
-    row: object | None = None,
-    values: list[object] | None = None,
-) -> MagicMock:
+def build_result(*, row: object | None = None, values: list[object] | None = None) -> MagicMock:
     result = MagicMock()
     result.one_or_none.return_value = row
     result.scalars.return_value.all.return_value = values or []
@@ -110,6 +106,8 @@ def build_action() -> MagicMock:
     value.execution_attempt_count = 1
     value.provider_action_id = "plink_demo"
     value.provider_action_status = "paid"
+    value.provider_action_url = "https://rzp.io/i/case-detail"
+    value.provider_action_expires_at = NOW
     value.started_at = NOW
     value.completed_at = NOW
     return value
@@ -166,19 +164,12 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
 ) -> None:
     session = AsyncMock(spec=AsyncSession)
     session.execute.side_effect = (
-        build_result(
-            row=(
-                build_case(),
-                build_payment_attempt(),
-                build_outcome(),
-            ),
-        ),
+        build_result(row=(build_case(), build_payment_attempt(), build_outcome())),
         build_result(values=[build_agent_run()]),
         build_result(values=[build_action()]),
         build_result(values=[build_transition()]),
     )
     audit_entries = (build_audit_entry(),)
-
     monkeypatch.setattr(
         recovery_case_detail_service,
         "load_recovery_audit_chain",
@@ -205,6 +196,7 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
     assert detail.payment_lifecycle.current_state == "failed"
     assert detail.agent_runs[0].planner_provider == "gemini"
     assert detail.actions[0].policy_outcome == "allow"
+    assert detail.actions[0].provider_action_url == "https://rzp.io/i/case-detail"
     assert detail.outcome is not None
     assert detail.outcome.gross_recovered_minor == 349_900
     assert detail.payment_transitions[0].event_type == "payment.failed"
@@ -238,13 +230,7 @@ async def test_audit_timeline_is_bounded_without_changing_chain_verification(
 ) -> None:
     session = AsyncMock(spec=AsyncSession)
     session.execute.side_effect = (
-        build_result(
-            row=(
-                build_case(),
-                build_payment_attempt(),
-                None,
-            ),
-        ),
+        build_result(row=(build_case(), build_payment_attempt(), None)),
         build_result(),
         build_result(),
         build_result(),
@@ -262,7 +248,6 @@ async def test_audit_timeline_is_bounded_without_changing_chain_verification(
         )
         for index in range(1, 102)
     )
-
     monkeypatch.setattr(
         recovery_case_detail_service,
         "load_recovery_audit_chain",

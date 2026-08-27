@@ -4,6 +4,11 @@ import Link from "next/link";
 import Script from "next/script";
 import { useState } from "react";
 
+import {
+  type PaymentLabLiveRun,
+  usePaymentLabLiveRun,
+} from "@/hooks/use-payment-lab-live-run";
+
 type PaymentLabMode = "guided" | "custom";
 type PaymentMethod = "upi" | "card" | "netbanking" | "wallet";
 type RunState =
@@ -74,6 +79,18 @@ function formatMoney(amountMinor: number): string {
   }).format(amountMinor / 100);
 }
 
+function formatEvidenceTime(value: string): string {
+  return new Intl.DateTimeFormat("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(value));
+}
+
+function humanize(value: string): string {
+  return value.replaceAll("_", " ");
+}
+
 function stateCopy(state: RunState): { title: string; detail: string } {
   const copy: Record<RunState, { title: string; detail: string }> = {
     idle: {
@@ -109,6 +126,67 @@ function stateCopy(state: RunState): { title: string; detail: string } {
   return copy[state];
 }
 
+function liveStateCopy(liveRun: PaymentLabLiveRun): {
+  title: string;
+  detail: string;
+} {
+  if (liveRun.current_stage === "completed") {
+    if (liveRun.outcome?.status === "recovered") {
+      return {
+        title: "Revenue recovery verified",
+        detail: `${formatMoney(liveRun.outcome.gross_recovered_minor)} is backed by provider and ledger evidence.`,
+      };
+    }
+    if (liveRun.outcome?.status === "duplicate_collection_prevented") {
+      return {
+        title: "Duplicate collection prevented",
+        detail: `${formatMoney(liveRun.outcome.duplicate_collection_prevented_minor)} was protected by the stopping rules.`,
+      };
+    }
+    return {
+      title: "Financial outcome verified",
+      detail: liveRun.outcome
+        ? `The outcome ledger recorded ${humanize(liveRun.outcome.status)}.`
+        : "The provider-backed run reached a terminal state.",
+    };
+  }
+
+  const copy: Record<PaymentLabLiveRun["current_stage"], {
+    title: string;
+    detail: string;
+  }> = {
+    checkout: {
+      title: "Provider order created",
+      detail: "Checkout is live. Waiting for signed provider evidence.",
+    },
+    failure: {
+      title: "Signed payment failure verified",
+      detail: "The server correlated the webhook. Recovery may now begin.",
+    },
+    agent: {
+      title:
+        liveRun.agent?.agent_run_status === "succeeded"
+          ? "Bounded recovery plan persisted"
+          : "Bounded recovery agent is running",
+      detail: "Gemini proposes; deterministic policy retains authority.",
+    },
+    outcome: {
+      title: "Recovery action has provider evidence",
+      detail: "Waiting for reconciliation before counting a financial result.",
+    },
+    completed: {
+      title: "Financial outcome verified",
+      detail: "The provider-backed run reached a terminal state.",
+    },
+    failed: {
+      title: "Provider run ended safely",
+      detail: `No recovery result was invented. Status: ${humanize(liveRun.persisted_status)}.`,
+    },
+  };
+
+  return copy[liveRun.current_stage];
+}
+
 export function PaymentLabLauncher() {
   const [checkoutLoaded, setCheckoutLoaded] = useState(false);
   const [mode, setMode] = useState<PaymentLabMode>("guided");
@@ -118,15 +196,25 @@ export function PaymentLabLauncher() {
     useState<PaymentMethod>("netbanking");
   const [runState, setRunState] = useState<RunState>("idle");
   const [run, setRun] = useState<PaymentLabResponse | null>(null);
+  const [pollReviewerCode, setPollReviewerCode] = useState("");
   const [safeError, setSafeError] = useState<string | null>(null);
+  const { liveRun, polling, pollError } = usePaymentLabLiveRun({
+    paymentLabRunId: run?.payment_lab_run_id ?? null,
+    reviewerCode: pollReviewerCode,
+  });
 
   const selectedAmountMinor =
     mode === "guided" ? 349_900 : Math.round(Number(amountRupees) * 100);
-  const copy = stateCopy(runState);
+  const copy = liveRun ? liveStateCopy(liveRun) : stateCopy(runState);
   const busy = runState === "creating_order" || runState === "opening_checkout";
+  const latestAction = liveRun?.actions.length
+    ? liveRun.actions[liveRun.actions.length - 1]
+    : null;
 
   async function startRun() {
     setSafeError(null);
+    setRun(null);
+    setPollReviewerCode("");
 
     if (!reviewerCode.trim()) {
       setRunState("error");
@@ -189,6 +277,7 @@ export function PaymentLabLauncher() {
       }
 
       setRun(responseBody);
+      setPollReviewerCode(reviewerCode.trim());
       setRunState("opening_checkout");
 
       const checkout = new RazorpayCheckout({
@@ -320,15 +409,51 @@ export function PaymentLabLauncher() {
           </p>
         </div>
 
-        <aside className={`lab-run-state lab-run-state--${runState}`}>
+        <aside
+          className={`lab-run-state lab-run-state--${runState}${polling ? " lab-run-state--polling" : ""}`}
+          aria-live="polite"
+        >
           <div className="lab-run-state__heading">
             <span className="lab-live-dot" />
             <p>Live run evidence</p>
+            {run ? (
+              <span className="lab-poll-state">
+                {polling ? "Polling" : liveRun?.terminal ? "Terminal" : "Paused"}
+              </span>
+            ) : null}
           </div>
           <h2>{copy.title}</h2>
           <p>{copy.detail}</p>
 
           {safeError ? <div className="lab-safe-error">{safeError}</div> : null}
+          {pollError ? <div className="lab-poll-warning">{pollError}</div> : null}
+
+          {liveRun ? (
+            <ol className="lab-live-steps" aria-label="Live recovery progress">
+              {liveRun.steps.map((step, index) => (
+                <li
+                  className={`lab-live-step lab-live-step--${step.status}`}
+                  key={step.key}
+                >
+                  <span className="lab-live-step__marker">
+                    {step.status === "completed" ? "✓" : index + 1}
+                  </span>
+                  <div>
+                    <strong>{step.label}</strong>
+                    <p>{step.detail}</p>
+                    {step.occurred_at ? (
+                      <time dateTime={step.occurred_at}>
+                        {formatEvidenceTime(step.occurred_at)}
+                      </time>
+                    ) : null}
+                  </div>
+                  <span className="lab-live-step__status">
+                    {humanize(step.status)}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          ) : null}
 
           {run ? (
             <dl className="lab-run-proof">
@@ -337,8 +462,10 @@ export function PaymentLabLauncher() {
                 <dd>{run.checkout.order_id}</dd>
               </div>
               <div>
-                <dt>Provenance</dt>
-                <dd>Razorpay Test Mode</dd>
+                <dt>Persisted state</dt>
+                <dd>
+                  {liveRun ? humanize(liveRun.persisted_status) : "checkout ready"}
+                </dd>
               </div>
               <div>
                 <dt>Bounded input</dt>
@@ -354,6 +481,36 @@ export function PaymentLabLauncher() {
             </dl>
           ) : null}
 
+          {liveRun?.agent ? (
+            <div className="lab-agent-proof">
+              <div>
+                <span>Planner</span>
+                <strong>
+                  {liveRun.agent.planner_provider ?? "deterministic fallback"}
+                  {liveRun.agent.model_name
+                    ? ` · ${liveRun.agent.model_name}`
+                    : ""}
+                </strong>
+              </div>
+              <div>
+                <span>Policy result</span>
+                <strong>
+                  {latestAction
+                    ? humanize(latestAction.policy_outcome)
+                    : `${liveRun.agent.proposed_action_count} bounded proposal(s)`}
+                </strong>
+              </div>
+              {liveRun.agent.fallback_used ? (
+                <p>
+                  Gemini fallback activated safely
+                  {liveRun.agent.fallback_reason
+                    ? `: ${liveRun.agent.fallback_reason}`
+                    : "."}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="lab-truth-rule">
             <strong>Evidence rule</strong>
             <span>
@@ -361,9 +518,19 @@ export function PaymentLabLauncher() {
               provider reconciliation do.
             </span>
           </div>
-          <Link className="lab-secondary-link" href="/">
-            Open command center
-          </Link>
+          <div className="lab-run-links">
+            {liveRun?.agent ? (
+              <Link
+                className="lab-secondary-link"
+                href={`/cases/${liveRun.agent.recovery_case_id}`}
+              >
+                Inspect recovery case
+              </Link>
+            ) : null}
+            <Link className="lab-secondary-link" href="/">
+              Open command center
+            </Link>
+          </div>
         </aside>
       </section>
     </>

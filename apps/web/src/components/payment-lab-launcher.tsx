@@ -383,11 +383,15 @@ export function PaymentLabLauncher() {
         }}
       />
 
-      <section className={`lab-launcher${run ? " lab-launcher--running" : ""}`} aria-label="Razorpay Test Mode Payment Lab">
+      <section className={`lab-launcher${run ? " lab-launcher--running" : " lab-launcher--entry"}`} aria-label="Razorpay Test Mode Payment Lab">
         {!run ? <div className="lab-config">
-          <div className="lab-start-cue">
-            <span><Play size={17} fill="currentColor" /></span>
-            <div><strong>Start here</strong><p>Launch one real Razorpay Test Mode attempt.</p></div>
+          <div className="lab-start-cue lab-start-cue--hero">
+            <span><Play size={20} fill="currentColor" /></span>
+            <div>
+              <p>One controlled attempt</p>
+              <strong>Watch a payment failure become a recovery decision.</strong>
+              <p>ReclaimRail reveals each evidence-backed stage only as it arrives.</p>
+            </div>
           </div>
           <div className="lab-mode-switch" aria-label="Payment Lab mode">
             <button
@@ -478,7 +482,7 @@ export function PaymentLabLauncher() {
           </p>
         </div> : null}
 
-        <aside
+        {run ? <aside
           className={`lab-run-state lab-run-state--${runState}${polling ? " lab-run-state--polling" : ""}`}
           aria-live="polite"
         >
@@ -668,7 +672,7 @@ export function PaymentLabLauncher() {
             </Link>
             {liveRun?.terminal ? <button className="lab-reset-link" type="button" onClick={() => { setRun(null); setRunState("idle"); setPollReviewerCode(""); }}><RotateCcw size={16} /> Start another run</button> : null}
           </div>
-        </aside>
+        </aside> : null}
       </section>
     </>
   );

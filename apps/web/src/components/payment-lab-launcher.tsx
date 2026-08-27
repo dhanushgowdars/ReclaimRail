@@ -11,20 +11,18 @@ import {
   Copy,
   CreditCard,
   ExternalLink,
-  FileCheck2,
   Link2,
   LoaderCircle,
   Play,
   RotateCcw,
-  Scale,
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import Script from "next/script";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { LiveElapsed, RelativeTimestamp } from "@/components/live-time";
+import { LiveElapsed } from "@/components/live-time";
 import {
   type PaymentLabLiveRun,
   usePaymentLabLiveRun,
@@ -98,15 +96,14 @@ function humanize(value: string): string {
   return value.replaceAll("_", " ");
 }
 
-const stepIcons: Record<string, LucideIcon> = {
-  payment_attempt: CreditCard,
-  verified_failure: ShieldCheck,
-  recovery_case: FileCheck2,
-  agent_recommendation: BrainCircuit,
-  policy_decision: Scale,
-  provider_action: Link2,
-  measured_outcome: Banknote,
-};
+type LiveStepStatus = "pending" | "active" | "completed" | "failed";
+
+function stepStatusLabel(status: LiveStepStatus): string {
+  if (status === "completed") return "Verified";
+  if (status === "active") return "Live";
+  if (status === "failed") return "Stopped";
+  return "Waiting";
+}
 
 function stateCopy(state: RunState): { title: string; detail: string } {
   const copy: Record<RunState, { title: string; detail: string }> = {
@@ -123,8 +120,8 @@ function stateCopy(state: RunState): { title: string; detail: string } {
       detail: "The Order ID and exact amount are now locked by the provider.",
     },
     awaiting_webhook: {
-      title: "Payment failure observed",
-      detail: "Waiting for the signed Razorpay webhook before the recovery agent may act.",
+      title: "Checkout reported a failure",
+      detail: "Waiting for the signed Razorpay webhook before treating it as verified evidence.",
     },
     browser_success: {
       title: "Browser reported payment success",
@@ -225,15 +222,21 @@ export function PaymentLabLauncher() {
   const [run, setRun] = useState<PaymentLabResponse | null>(null);
   const [pollReviewerCode, setPollReviewerCode] = useState("");
   const [safeError, setSafeError] = useState<string | null>(null);
+  const [webhookDelayWarning, setWebhookDelayWarning] = useState<string | null>(null);
   const [copiedActionId, setCopiedActionId] = useState<string | null>(null);
-  const { liveRun, visibleSteps, polling, pollError, catchingUp } = usePaymentLabLiveRun({
+  const { liveRun, visibleSteps, polling, pollError } = usePaymentLabLiveRun({
     paymentLabRunId: run?.payment_lab_run_id ?? null,
     reviewerCode: pollReviewerCode,
   });
 
   const selectedAmountMinor =
     mode === "guided" ? 349_900 : Math.round(Number(amountRupees) * 100);
-  const copy = liveRun ? liveStateCopy(liveRun) : stateCopy(runState);
+  const browserFailureAwaitingServer =
+    runState === "awaiting_webhook" && liveRun?.current_stage === "checkout";
+  const copy =
+    liveRun && !browserFailureAwaitingServer
+      ? liveStateCopy(liveRun)
+      : stateCopy(runState);
   const busy = runState === "creating_order" || runState === "opening_checkout";
   const latestAction = liveRun?.actions.length
     ? liveRun.actions[liveRun.actions.length - 1]
@@ -245,14 +248,102 @@ export function PaymentLabLauncher() {
   );
   const paymentLinkIsActionable = Boolean(
     paymentLinkAction &&
-      !liveRun?.outcome &&
+      (!liveRun?.outcome || liveRun.outcome.status === "payment_link_pending") &&
       !["paid", "expired", "cancelled"].includes(
         paymentLinkAction.provider_action_status ?? "",
       ),
   );
-  const visibleStepKeys = new Set(visibleSteps.map((step) => step.key));
-  const showAgentEvidence = visibleStepKeys.has("agent_recommendation");
-  const showProviderEvidence = visibleStepKeys.has("provider_action");
+  const stepsByKey = new Map(visibleSteps.map((step) => [step.key, step]));
+  const paymentAttemptStep = stepsByKey.get("payment_attempt");
+  const verifiedFailureStep = stepsByKey.get("verified_failure");
+  const recoveryEvidence = [
+    stepsByKey.get("recovery_case"),
+    stepsByKey.get("agent_recommendation"),
+    stepsByKey.get("policy_decision"),
+    stepsByKey.get("provider_action"),
+  ].filter((step): step is NonNullable<typeof step> => step !== undefined);
+  const providerActionStep = stepsByKey.get("provider_action");
+  const measuredOutcomeStep = stepsByKey.get("measured_outcome");
+  const recoveryStatus: LiveStepStatus = recoveryEvidence.some(
+    (step) => step.status === "failed",
+  )
+    ? "failed"
+    : providerActionStep?.status === "completed"
+      ? "completed"
+      : verifiedFailureStep?.status === "completed"
+        ? "active"
+        : "pending";
+  const outcomeDetail = liveRun?.outcome
+    ? liveRun.outcome.status === "payment_link_pending"
+      ? "Recovery link created. Waiting for Razorpay to confirm a payment."
+      : liveRun.outcome.status === "recovered"
+      ? `${formatMoney(liveRun.outcome.gross_recovered_minor)} recovered with provider evidence.`
+      : liveRun.outcome.status === "duplicate_collection_prevented"
+        ? `${formatMoney(liveRun.outcome.duplicate_collection_prevented_minor)} protected after late authorization.`
+        : `Provider outcome: ${humanize(liveRun.outcome.status)}.`
+    : providerActionStep?.status === "completed"
+      ? "Recovery link created. Waiting for Razorpay to confirm a payment."
+      : "No financial result has been recorded yet.";
+  const mainPhases: Array<{
+    key: string;
+    label: string;
+    detail: string;
+    status: LiveStepStatus;
+    occurredAt: string | null;
+    icon: LucideIcon;
+  }> = [
+    {
+      key: "attempt",
+      label: "Payment attempt",
+      detail: paymentAttemptStep?.detail ?? "Creating the Razorpay Test Mode order.",
+      status: paymentAttemptStep?.status ?? "active",
+      occurredAt: paymentAttemptStep?.occurred_at ?? null,
+      icon: CreditCard,
+    },
+    {
+      key: "failure",
+      label: "Signed failure verified",
+      detail: verifiedFailureStep?.detail ?? "Waiting for signed Razorpay evidence.",
+      status: verifiedFailureStep?.status ?? "pending",
+      occurredAt: verifiedFailureStep?.occurred_at ?? null,
+      icon: ShieldCheck,
+    },
+    {
+      key: "decision",
+      label: "Recovery decision",
+      detail:
+        recoveryStatus === "completed"
+          ? "Agent proposal, deterministic policy, and provider action are persisted."
+          : recoveryStatus === "active"
+            ? "The bounded recovery workflow is evaluating this failure."
+            : "Starts only after the signed failure is verified.",
+      status: recoveryStatus,
+      occurredAt: providerActionStep?.occurred_at ?? null,
+      icon: BrainCircuit,
+    },
+    {
+      key: "outcome",
+      label: "Provider-verified outcome",
+      detail: outcomeDetail,
+      status: measuredOutcomeStep?.status ?? "pending",
+      occurredAt: liveRun?.outcome?.occurred_at ?? null,
+      icon: Banknote,
+    },
+  ];
+
+  useEffect(() => {
+    if (runState !== "awaiting_webhook" || liveRun?.payment) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setWebhookDelayWarning(
+        "Razorpay Checkout reported a failure, but the signed webhook has not been verified. Check the webhook tunnel and payment consumer logs.",
+      );
+    }, 15_000);
+
+    return () => window.clearTimeout(timer);
+  }, [runState, liveRun?.payment]);
 
   async function copyRecoveryLink(): Promise<void> {
     if (!paymentLinkAction?.provider_action_url) {
@@ -270,6 +361,7 @@ export function PaymentLabLauncher() {
   async function startRun() {
     failureObservedRef.current = false;
     setSafeError(null);
+    setWebhookDelayWarning(null);
     setCopiedActionId(null);
     setRun(null);
     setPollReviewerCode("");
@@ -436,7 +528,7 @@ export function PaymentLabLauncher() {
                 Payment rail
               </label>
               {mode === "guided" ? (
-                <strong>Netbanking</strong>
+                <strong>Choose in Razorpay Checkout</strong>
               ) : (
                 <select
                   id="payment-method"
@@ -491,7 +583,7 @@ export function PaymentLabLauncher() {
             <p>Live recovery evidence</p>
             {run ? (
               <span className="lab-poll-state">
-                {polling || catchingUp ? "Live" : liveRun?.terminal ? "Verified" : "Paused"}
+                {polling ? "Live" : liveRun?.terminal ? "Verified" : "Paused"}
               </span>
             ) : null}
           </div>
@@ -506,30 +598,64 @@ export function PaymentLabLauncher() {
 
           {safeError ? <div className="lab-safe-error">{safeError}</div> : null}
           {pollError ? <div className="lab-poll-warning">{pollError}</div> : null}
+          {webhookDelayWarning && runState === "awaiting_webhook" && !liveRun?.payment ? <div className="lab-poll-warning">{webhookDelayWarning}</div> : null}
 
           {liveRun ? (
-            <ol className="lab-live-steps" aria-label="Live recovery progress">
-              {visibleSteps.map((step, index) => {
-                const StepIcon = stepIcons[step.key] ?? CircleDot;
-                return <li
-                    className={`lab-live-step lab-live-step--${step.status}`}
-                    key={step.key}
+            <ol className="lab-story" aria-label="Live recovery progress">
+              {mainPhases.map((phase, index) => {
+                const PhaseIcon = phase.icon;
+                const expanded = phase.key === "decision" && recoveryStatus !== "pending";
+                return (
+                  <li
+                    className={`lab-story__phase lab-story__phase--${phase.status}`}
+                    key={phase.key}
                   >
-                    <span className="lab-live-step__marker">
-                      {step.status === "completed" ? <Check size={16} strokeWidth={3} /> : <StepIcon size={17} />}
+                    <span className="lab-story__rail" aria-hidden="true" />
+                    <span className="lab-story__marker">
+                      {phase.status === "completed" ? (
+                        <Check size={19} strokeWidth={3} />
+                      ) : phase.status === "active" ? (
+                        <LoaderCircle className="spin" size={19} />
+                      ) : (
+                        <PhaseIcon size={19} />
+                      )}
                     </span>
-                    <div className="lab-live-step__content">
-                      <span className="lab-live-step__eyebrow">Stage {String(index + 1).padStart(2, "0")}</span>
-                      <strong>{step.label}</strong>
-                      <p>{step.detail}</p>
-                      {step.occurred_at ? <span className="lab-live-step__time"><RelativeTimestamp value={step.occurred_at} /><span>·</span><time dateTime={step.occurred_at}>{formatTimestamp(step.occurred_at)} IST</time></span> : null}
+                    <div className="lab-story__body">
+                      <div className="lab-story__topline">
+                        <span>Phase {index + 1}</span>
+                        <strong>{stepStatusLabel(phase.status)}</strong>
+                      </div>
+                      <h3>{phase.label}</h3>
+                      <p>{phase.detail}</p>
+                      {phase.occurredAt ? (
+                        <time dateTime={phase.occurredAt}>
+                          Recorded {formatTimestamp(phase.occurredAt)} IST
+                        </time>
+                      ) : null}
+
+                      {expanded ? (
+                        <ol className="lab-story__evidence" aria-label="Recovery decision evidence">
+                          {recoveryEvidence.map((step) => (
+                            <li className={`lab-story__evidence-row lab-story__evidence-row--${step.status}`} key={step.key}>
+                              <span>{step.status === "completed" ? <Check size={14} strokeWidth={3} /> : <CircleDot size={14} />}</span>
+                              <div><strong>{step.label}</strong><p>{step.detail}</p></div>
+                              <em>{stepStatusLabel(step.status)}</em>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : null}
+
+                      {phase.key === "decision" && liveRun.agent ? (
+                        <div className="lab-story__decision-proof">
+                          <div><span>Planner</span><strong>{liveRun.agent.planner_provider ?? "deterministic fallback"}{liveRun.agent.model_name ? ` · ${liveRun.agent.model_name}` : ""}</strong></div>
+                          <div><span>Policy</span><strong>{latestAction ? humanize(latestAction.policy_outcome) : "Awaiting policy"}</strong></div>
+                          {liveRun.agent.reasoning_summary ? <p>{liveRun.agent.reasoning_summary}</p> : null}
+                        </div>
+                      ) : null}
                     </div>
-                    <span className="lab-live-step__status">
-                      {step.status === "active" ? <><span className="active-pulse" /> Processing</> : humanize(step.status)}
-                    </span>
-                  </li>;
+                  </li>
+                );
               })}
-              {catchingUp ? <li className="lab-live-step lab-live-step--loading"><span className="lab-live-step__marker"><LoaderCircle className="spin" size={17} /></span><div><strong>Loading next verified event</strong><p>The event exists on the backend and is entering the evidence stream.</p></div></li> : null}
             </ol>
           ) : null}
 
@@ -550,10 +676,10 @@ export function PaymentLabLauncher() {
                 </dd>
               </div>
               <div>
-                <dt>Bounded input</dt>
+                <dt>Verified rail</dt>
                 <dd>
                   {formatMoney(run.checkout.amount_minor)} ·{" "}
-                  {run.checkout.payment_method_hint}
+                  {liveRun?.payment_method ?? "awaiting provider"}
                 </dd>
               </div>
               <div>
@@ -563,39 +689,7 @@ export function PaymentLabLauncher() {
             </dl>
           ) : null}
 
-          {liveRun?.agent && showAgentEvidence ? (
-            <div className="lab-agent-proof">
-              <div className="lab-agent-proof__heading"><BrainCircuit size={18} /><strong>Agent + policy evidence</strong></div>
-              <div>
-                <span>Planner</span>
-                <strong>
-                  {liveRun.agent.planner_provider ?? "deterministic fallback"}
-                  {liveRun.agent.model_name
-                    ? ` · ${liveRun.agent.model_name}`
-                    : ""}
-                </strong>
-              </div>
-              <div>
-                <span>Policy result</span>
-                <strong>
-                  {latestAction
-                    ? humanize(latestAction.policy_outcome)
-                    : `${liveRun.agent.proposed_action_count} bounded proposal(s)`}
-                </strong>
-              </div>
-              {liveRun.agent.reasoning_summary ? <p className="lab-agent-reasoning">“{liveRun.agent.reasoning_summary}”</p> : null}
-              {liveRun.agent.fallback_used ? (
-                <p>
-                  Gemini fallback activated safely
-                  {liveRun.agent.fallback_reason
-                    ? `: ${liveRun.agent.fallback_reason}`
-                    : "."}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-
-          {paymentLinkAction && showProviderEvidence ? (
+          {paymentLinkAction ? (
             <section className="lab-recovery-link" aria-label="Recovery link">
               <div className="lab-recovery-link__heading">
                 <div>
@@ -634,7 +728,7 @@ export function PaymentLabLauncher() {
                     target="_blank"
                     rel="noreferrer noopener"
                   >
-                    Open Razorpay Test Link <ExternalLink size={16} />
+                    Open hosted Razorpay Test Link <ExternalLink size={16} />
                   </a>
                   <button type="button" onClick={() => void copyRecoveryLink()}>
                     <Copy size={16} />
@@ -667,7 +761,7 @@ export function PaymentLabLauncher() {
                 <ClipboardCheck size={16} /> Inspect recovery case
               </Link>
             ) : null}
-            <Link className="lab-secondary-link" href="/">
+            <Link className="lab-secondary-link" href={liveRun?.agent ? `/?liveCase=${liveRun.agent.recovery_case_id}#recovery-queue` : "/"}>
               Open command center <ArrowRight size={16} />
             </Link>
             {liveRun?.terminal ? <button className="lab-reset-link" type="button" onClick={() => { setRun(null); setRunState("idle"); setPollReviewerCode(""); }}><RotateCcw size={16} /> Start another run</button> : null}

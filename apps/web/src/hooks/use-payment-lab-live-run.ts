@@ -108,7 +108,6 @@ export function usePaymentLabLiveRun({
   visibleSteps: PaymentLabLiveRun["steps"];
   polling: boolean;
   pollError: string | null;
-  catchingUp: boolean;
 } {
   const [liveRunSnapshot, setLiveRunSnapshot] = useState<{
     paymentLabRunId: string;
@@ -118,11 +117,6 @@ export function usePaymentLabLiveRun({
     paymentLabRunId: string;
     message: string;
     retrying: boolean;
-  } | null>(null);
-  const [playback, setPlayback] = useState<{
-    paymentLabRunId: string;
-    visibleCount: number;
-    targetCount: number;
   } | null>(null);
 
   const liveRun =
@@ -138,29 +132,9 @@ export function usePaymentLabLiveRun({
       !liveRun?.terminal &&
       currentPollFailure?.retrying !== false,
   );
-  const currentPlayback =
-    playback?.paymentLabRunId === paymentLabRunId ? playback : null;
-  const visibleSteps = liveRun?.steps.slice(0, currentPlayback?.visibleCount ?? 0) ?? [];
-  const catchingUp = Boolean(
-    currentPlayback && currentPlayback.visibleCount < currentPlayback.targetCount,
-  );
-
-  useEffect(() => {
-    if (!currentPlayback || currentPlayback.visibleCount >= currentPlayback.targetCount) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setPlayback((current) =>
-        current?.paymentLabRunId === currentPlayback.paymentLabRunId
-          ? {
-              ...current,
-              visibleCount: Math.min(current.visibleCount + 1, current.targetCount),
-            }
-          : current,
-      );
-    }, 520);
-    return () => window.clearTimeout(timer);
-  }, [currentPlayback]);
+  // The server is the sole source of progression. Do not replay persisted
+  // events with client-side timers: that would make completed work look live.
+  const visibleSteps = liveRun?.steps ?? [];
 
   useEffect(() => {
     if (!paymentLabRunId || !reviewerCode) {
@@ -219,23 +193,6 @@ export function usePaymentLabLiveRun({
           paymentLabRunId: runId,
           liveRun: responseBody,
         });
-        const lastReadyStepIndex = responseBody.steps.findLastIndex(
-          (step) => step.status !== "pending",
-        );
-        const visibleStepTarget = Math.max(1, lastReadyStepIndex + 1);
-        setPlayback((current) => {
-          if (current?.paymentLabRunId !== runId) {
-            return {
-              paymentLabRunId: runId,
-              visibleCount: Math.min(2, visibleStepTarget),
-              targetCount: visibleStepTarget,
-            };
-          }
-          return {
-            ...current,
-            targetCount: Math.max(current.targetCount, visibleStepTarget),
-          };
-        });
         setPollFailure(null);
 
         if (responseBody.terminal) {
@@ -274,5 +231,5 @@ export function usePaymentLabLiveRun({
     };
   }, [paymentLabRunId, reviewerCode]);
 
-  return { liveRun, visibleSteps, polling, pollError, catchingUp };
+  return { liveRun, visibleSteps, polling, pollError };
 }

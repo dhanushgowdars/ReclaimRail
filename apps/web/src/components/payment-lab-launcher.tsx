@@ -1,13 +1,35 @@
 "use client";
 
+import {
+  ArrowRight,
+  Banknote,
+  BrainCircuit,
+  Check,
+  CircleDot,
+  ClipboardCheck,
+  Clock3,
+  Copy,
+  CreditCard,
+  ExternalLink,
+  FileCheck2,
+  Link2,
+  LoaderCircle,
+  Play,
+  RotateCcw,
+  Scale,
+  ShieldCheck,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import Script from "next/script";
 import { useRef, useState } from "react";
 
+import { LiveElapsed, RelativeTimestamp } from "@/components/live-time";
 import {
   type PaymentLabLiveRun,
   usePaymentLabLiveRun,
 } from "@/hooks/use-payment-lab-live-run";
+import { formatMoney, formatTimestamp } from "@/lib/presentation";
 
 type PaymentLabMode = "guided" | "custom";
 type PaymentMethod = "upi" | "card" | "netbanking" | "wallet";
@@ -72,34 +94,19 @@ declare global {
   }
 }
 
-function formatMoney(amountMinor: number): string {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(amountMinor / 100);
-}
-
-function formatEvidenceTime(value: string): string {
-  return new Intl.DateTimeFormat("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(value));
-}
-
-function formatEvidenceDateTime(value: string): string {
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
 function humanize(value: string): string {
   return value.replaceAll("_", " ");
 }
+
+const stepIcons: Record<string, LucideIcon> = {
+  payment_attempt: CreditCard,
+  verified_failure: ShieldCheck,
+  recovery_case: FileCheck2,
+  agent_recommendation: BrainCircuit,
+  policy_decision: Scale,
+  provider_action: Link2,
+  measured_outcome: Banknote,
+};
 
 function stateCopy(state: RunState): { title: string; detail: string } {
   const copy: Record<RunState, { title: string; detail: string }> = {
@@ -188,8 +195,10 @@ function liveStateCopy(liveRun: PaymentLabLiveRun): {
       detail: "Gemini proposes; deterministic policy retains authority.",
     },
     outcome: {
-      title: "Recovery action has provider evidence",
-      detail: "Waiting for reconciliation before counting a financial result.",
+      title: liveRun.actions.some((action) => action.provider_action_url)
+        ? "Recovery link created"
+        : "Creating the provider recovery action",
+      detail: "The action is provider-backed. Reconciliation is still required before revenue is counted.",
     },
     completed: {
       title: "Financial outcome verified",
@@ -217,7 +226,7 @@ export function PaymentLabLauncher() {
   const [pollReviewerCode, setPollReviewerCode] = useState("");
   const [safeError, setSafeError] = useState<string | null>(null);
   const [copiedActionId, setCopiedActionId] = useState<string | null>(null);
-  const { liveRun, polling, pollError } = usePaymentLabLiveRun({
+  const { liveRun, visibleSteps, polling, pollError, catchingUp } = usePaymentLabLiveRun({
     paymentLabRunId: run?.payment_lab_run_id ?? null,
     reviewerCode: pollReviewerCode,
   });
@@ -241,6 +250,9 @@ export function PaymentLabLauncher() {
         paymentLinkAction.provider_action_status ?? "",
       ),
   );
+  const visibleStepKeys = new Set(visibleSteps.map((step) => step.key));
+  const showAgentEvidence = visibleStepKeys.has("agent_recommendation");
+  const showProviderEvidence = visibleStepKeys.has("provider_action");
 
   async function copyRecoveryLink(): Promise<void> {
     if (!paymentLinkAction?.provider_action_url) {
@@ -371,8 +383,12 @@ export function PaymentLabLauncher() {
         }}
       />
 
-      <section className="lab-launcher" aria-label="Razorpay Test Mode Payment Lab">
-        <div className="lab-config">
+      <section className={`lab-launcher${run ? " lab-launcher--running" : ""}`} aria-label="Razorpay Test Mode Payment Lab">
+        {!run ? <div className="lab-config">
+          <div className="lab-start-cue">
+            <span><Play size={17} fill="currentColor" /></span>
+            <div><strong>Start here</strong><p>Launch one real Razorpay Test Mode attempt.</p></div>
+          </div>
           <div className="lab-mode-switch" aria-label="Payment Lab mode">
             <button
               className={mode === "guided" ? "is-active" : ""}
@@ -454,57 +470,62 @@ export function PaymentLabLauncher() {
             type="button"
             onClick={startRun}
           >
-            {busy ? "Preparing secure checkout…" : "Start provider-live recovery"}
+            {busy ? <><LoaderCircle className="spin" size={18} /> Preparing secure checkout…</> : <><Play size={18} fill="currentColor" /> Start provider-live recovery <ArrowRight size={18} /></>}
           </button>
           <p className="lab-action-note">
             Razorpay Test Mode · no real money moves · no payment credentials are
             stored by ReclaimRail
           </p>
-        </div>
+        </div> : null}
 
         <aside
           className={`lab-run-state lab-run-state--${runState}${polling ? " lab-run-state--polling" : ""}`}
           aria-live="polite"
         >
           <div className="lab-run-state__heading">
-            <span className="lab-live-dot" />
-            <p>Live run evidence</p>
+            <span className="lab-live-dot" aria-hidden="true" />
+            <p>Live recovery evidence</p>
             {run ? (
               <span className="lab-poll-state">
-                {polling ? "Polling" : liveRun?.terminal ? "Terminal" : "Paused"}
+                {polling || catchingUp ? "Live" : liveRun?.terminal ? "Verified" : "Paused"}
               </span>
             ) : null}
           </div>
-          <h2>{copy.title}</h2>
-          <p>{copy.detail}</p>
+          <div className="lab-run-hero">
+            <div>
+              {run ? <strong className="lab-run-amount">{formatMoney(run.checkout.amount_minor)}</strong> : null}
+              <h2>{copy.title}</h2>
+              <p>{copy.detail}</p>
+            </div>
+            {liveRun ? <span className="lab-run-timer"><Clock3 size={15} /><LiveElapsed startedAt={liveRun.created_at} endedAt={liveRun.terminal ? liveRun.updated_at : null} /></span> : null}
+          </div>
 
           {safeError ? <div className="lab-safe-error">{safeError}</div> : null}
           {pollError ? <div className="lab-poll-warning">{pollError}</div> : null}
 
           {liveRun ? (
             <ol className="lab-live-steps" aria-label="Live recovery progress">
-              {liveRun.steps.map((step, index) => (
-                <li
-                  className={`lab-live-step lab-live-step--${step.status}`}
-                  key={step.key}
-                >
-                  <span className="lab-live-step__marker">
-                    {step.status === "completed" ? "✓" : index + 1}
-                  </span>
-                  <div>
-                    <strong>{step.label}</strong>
-                    <p>{step.detail}</p>
-                    {step.occurred_at ? (
-                      <time dateTime={step.occurred_at}>
-                        {formatEvidenceTime(step.occurred_at)}
-                      </time>
-                    ) : null}
-                  </div>
-                  <span className="lab-live-step__status">
-                    {humanize(step.status)}
-                  </span>
-                </li>
-              ))}
+              {visibleSteps.map((step, index) => {
+                const StepIcon = stepIcons[step.key] ?? CircleDot;
+                return <li
+                    className={`lab-live-step lab-live-step--${step.status}`}
+                    key={step.key}
+                  >
+                    <span className="lab-live-step__marker">
+                      {step.status === "completed" ? <Check size={16} strokeWidth={3} /> : <StepIcon size={17} />}
+                    </span>
+                    <div className="lab-live-step__content">
+                      <span className="lab-live-step__eyebrow">Stage {String(index + 1).padStart(2, "0")}</span>
+                      <strong>{step.label}</strong>
+                      <p>{step.detail}</p>
+                      {step.occurred_at ? <span className="lab-live-step__time"><RelativeTimestamp value={step.occurred_at} /><span>·</span><time dateTime={step.occurred_at}>{formatTimestamp(step.occurred_at)} IST</time></span> : null}
+                    </div>
+                    <span className="lab-live-step__status">
+                      {step.status === "active" ? <><span className="active-pulse" /> Processing</> : humanize(step.status)}
+                    </span>
+                  </li>;
+              })}
+              {catchingUp ? <li className="lab-live-step lab-live-step--loading"><span className="lab-live-step__marker"><LoaderCircle className="spin" size={17} /></span><div><strong>Loading next verified event</strong><p>The event exists on the backend and is entering the evidence stream.</p></div></li> : null}
             </ol>
           ) : null}
 
@@ -538,8 +559,9 @@ export function PaymentLabLauncher() {
             </dl>
           ) : null}
 
-          {liveRun?.agent ? (
+          {liveRun?.agent && showAgentEvidence ? (
             <div className="lab-agent-proof">
+              <div className="lab-agent-proof__heading"><BrainCircuit size={18} /><strong>Agent + policy evidence</strong></div>
               <div>
                 <span>Planner</span>
                 <strong>
@@ -557,6 +579,7 @@ export function PaymentLabLauncher() {
                     : `${liveRun.agent.proposed_action_count} bounded proposal(s)`}
                 </strong>
               </div>
+              {liveRun.agent.reasoning_summary ? <p className="lab-agent-reasoning">“{liveRun.agent.reasoning_summary}”</p> : null}
               {liveRun.agent.fallback_used ? (
                 <p>
                   Gemini fallback activated safely
@@ -568,11 +591,11 @@ export function PaymentLabLauncher() {
             </div>
           ) : null}
 
-          {paymentLinkAction ? (
+          {paymentLinkAction && showProviderEvidence ? (
             <section className="lab-recovery-link" aria-label="Recovery link">
               <div className="lab-recovery-link__heading">
                 <div>
-                  <span>Provider recovery action</span>
+                  <span><Link2 size={15} /> Provider recovery action</span>
                   <strong>
                     {paymentLinkIsActionable
                       ? "Recovery link ready"
@@ -585,6 +608,7 @@ export function PaymentLabLauncher() {
                   {humanize(paymentLinkAction.provider_action_status ?? "created")}
                 </span>
               </div>
+              <strong className="lab-recovery-link__amount">{formatMoney(liveRun?.amount_minor ?? run?.checkout.amount_minor ?? 0)}</strong>
               <dl>
                 <div>
                   <dt>Link ID</dt>
@@ -594,9 +618,7 @@ export function PaymentLabLauncher() {
                   <dt>Expires</dt>
                   <dd>
                     {paymentLinkAction.provider_action_expires_at
-                      ? formatEvidenceDateTime(
-                          paymentLinkAction.provider_action_expires_at,
-                        )
+                      ? `${formatTimestamp(paymentLinkAction.provider_action_expires_at)} IST`
                       : "Provider managed"}
                   </dd>
                 </div>
@@ -608,9 +630,10 @@ export function PaymentLabLauncher() {
                     target="_blank"
                     rel="noreferrer noopener"
                   >
-                    Open Razorpay Test Link
+                    Open Razorpay Test Link <ExternalLink size={16} />
                   </a>
                   <button type="button" onClick={() => void copyRecoveryLink()}>
+                    <Copy size={16} />
                     {copiedActionId === paymentLinkAction.recovery_action_id
                       ? "Copied"
                       : "Copy link"}
@@ -625,7 +648,7 @@ export function PaymentLabLauncher() {
           ) : null}
 
           <div className="lab-truth-rule">
-            <strong>Evidence rule</strong>
+            <strong><ShieldCheck size={17} /> Evidence rule</strong>
             <span>
               Browser callbacks never update recovered revenue. Signed webhooks and
               provider reconciliation do.
@@ -637,12 +660,13 @@ export function PaymentLabLauncher() {
                 className="lab-secondary-link"
                 href={`/cases/${liveRun.agent.recovery_case_id}`}
               >
-                Inspect recovery case
+                <ClipboardCheck size={16} /> Inspect recovery case
               </Link>
             ) : null}
             <Link className="lab-secondary-link" href="/">
-              Open command center
+              Open command center <ArrowRight size={16} />
             </Link>
+            {liveRun?.terminal ? <button className="lab-reset-link" type="button" onClick={() => { setRun(null); setRunState("idle"); setPollReviewerCode(""); }}><RotateCcw size={16} /> Start another run</button> : null}
           </div>
         </aside>
       </section>

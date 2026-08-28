@@ -46,7 +46,6 @@ from app.services.recovery_action_executor import (
     _apply_denied_case_projection,
     _build_case_snapshot,
     _build_proposal,
-    _load_active_incident_severity,
     _policy_disposition,
     _policy_status,
     _require_timezone_aware,
@@ -54,6 +53,9 @@ from app.services.recovery_action_executor import (
 from app.services.recovery_audit_store import (
     RecoveryAuditAppendRequest,
     append_recovery_audit_event,
+)
+from app.services.recovery_incident_context import (
+    load_active_recovery_incident_context,
 )
 
 SessionFactory = async_sessionmaker[AsyncSession]
@@ -248,16 +250,18 @@ async def prepare_recovery_message_action(
             f"Payment attempt {recovery_case.payment_attempt_id} does not exist",
         )
 
-    incident_severity = await _load_active_incident_severity(
+    incident_context = await load_active_recovery_incident_context(
         session,
         source_incident_id=recovery_case.source_incident_id,
+        currency=recovery_case.currency,
+        payment_method=recovery_case.payment_method,
     )
 
     decision = evaluate_recovery_proposal(
         _build_case_snapshot(
             recovery_case,
             payment_attempt,
-            incident_severity=incident_severity,
+            incident_severity=(incident_context.severity if incident_context is not None else None),
         ),
         _build_proposal(action),
         evaluated_at=executed_at,
@@ -293,6 +297,16 @@ async def prepare_recovery_message_action(
                     "policy_outcome": decision.outcome.value,
                     "guardrails": [guardrail.value for guardrail in decision.guardrails],
                     "policy_version": action.policy_version,
+                    "active_incident": (
+                        {
+                            "incident_id": str(incident_context.incident_id),
+                            "scope": incident_context.scope,
+                            "dimension_value": incident_context.dimension_value,
+                            "severity": incident_context.severity.value,
+                        }
+                        if incident_context is not None
+                        else None
+                    ),
                 },
                 occurred_at=executed_at,
             ),

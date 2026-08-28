@@ -6,7 +6,6 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models.incident import RevenueIncident, RevenueIncidentStatus
 from app.db.models.payment import PaymentAttempt
 from app.db.models.recovery import (
     RecoveryAction,
@@ -39,20 +38,16 @@ from app.services.recovery_audit_store import (
     RecoveryAuditAppendRequest,
     append_recovery_audit_event,
 )
+from app.services.recovery_incident_context import (
+    ActiveRecoveryIncidentContext,
+    load_active_recovery_incident_context,
+)
 
 SessionFactory = async_sessionmaker[AsyncSession]
 
 DEFAULT_ACTION_CLAIM_TIMEOUT = timedelta(minutes=2)
 DEFAULT_MAXIMUM_EXECUTION_ATTEMPTS = 3
 DEFAULT_PAYMENT_LINK_LIFETIME = timedelta(hours=24)
-
-ACTIVE_INCIDENT_STATUSES = frozenset(
-    {
-        RevenueIncidentStatus.OPEN.value,
-        RevenueIncidentStatus.INVESTIGATING.value,
-        RevenueIncidentStatus.MITIGATING.value,
-    },
-)
 
 
 class RecoveryActionExecutionDisposition(StrEnum):
@@ -186,25 +181,17 @@ def _build_case_snapshot(
     )
 
 
-async def _load_active_incident_severity(
+async def _load_active_incident_context(
     session: AsyncSession,
     *,
-    source_incident_id: UUID | None,
-) -> IncidentSeverity | None:
-    if source_incident_id is None:
-        return None
-
-    result = await session.execute(
-        select(RevenueIncident).where(
-            RevenueIncident.id == source_incident_id,
-        ),
+    recovery_case: RecoveryCase,
+) -> ActiveRecoveryIncidentContext | None:
+    return await load_active_recovery_incident_context(
+        session,
+        source_incident_id=recovery_case.source_incident_id,
+        currency=recovery_case.currency,
+        payment_method=recovery_case.payment_method,
     )
-    incident = result.scalar_one_or_none()
-
-    if incident is None or incident.status not in ACTIVE_INCIDENT_STATUSES:
-        return None
-
-    return IncidentSeverity(incident.severity)
 
 
 def _policy_status(
@@ -349,15 +336,15 @@ async def prepare_recovery_payment_link_action(
             f"Payment attempt {recovery_case.payment_attempt_id} does not exist",
         )
 
-    incident_severity = await _load_active_incident_severity(
+    incident_context = await _load_active_incident_context(
         session,
-        source_incident_id=recovery_case.source_incident_id,
+        recovery_case=recovery_case,
     )
 
     snapshot = _build_case_snapshot(
         recovery_case,
         payment_attempt,
-        incident_severity=incident_severity,
+        incident_severity=(incident_context.severity if incident_context is not None else None),
     )
     proposal = _build_proposal(action)
 
@@ -397,6 +384,16 @@ async def prepare_recovery_payment_link_action(
                     "policy_outcome": (decision.outcome.value),
                     "guardrails": [guardrail.value for guardrail in decision.guardrails],
                     "policy_version": action.policy_version,
+                    "active_incident": (
+                        {
+                            "incident_id": str(incident_context.incident_id),
+                            "scope": incident_context.scope,
+                            "dimension_value": incident_context.dimension_value,
+                            "severity": incident_context.severity.value,
+                        }
+                        if incident_context is not None
+                        else None
+                    ),
                 },
                 occurred_at=executed_at,
             ),

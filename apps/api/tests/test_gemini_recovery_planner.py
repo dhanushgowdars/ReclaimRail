@@ -63,6 +63,14 @@ def create_context() -> RecoveryPlanningContext:
 
 def valid_payload() -> dict[str, object]:
     return {
+        "analysis": {
+            "root_cause_category": "customer_authentication_failure",
+            "recoverability_assessment": "Eligible for bounded recovery",
+            "confidence": 0.91,
+            "allowed_action_recommendation": "create_payment_link",
+            "evidence_references": ["payment_state_snapshot", "merchant_recovery_policy"],
+            "operator_explanation": "Failure is verified and policy permits an exact-amount link.",
+        },
         "decision": "recover",
         "reasoning_summary": "Offer a safe alternate method and one approved reminder",
         "proposals": [
@@ -129,6 +137,8 @@ async def test_uses_valid_structured_gemini_plan() -> None:
     ]
     assert result.plan.evidence_codes[0] == "payment_state:failed"
     assert result.plan.planner_version == "gemini-structured-v2"
+    assert result.analysis is not None
+    assert result.analysis.confidence == 0.91
 
 
 @pytest.mark.asyncio
@@ -273,6 +283,7 @@ async def test_low_risk_escalation_uses_policy_contract_fallback() -> None:
     provider = StubProvider(
         response=GeminiProviderResponse(
             structured_plan={
+                "analysis": valid_payload()["analysis"],
                 "decision": "escalate",
                 "reasoning_summary": "Escalate despite no hard guardrail",
                 "proposals": [

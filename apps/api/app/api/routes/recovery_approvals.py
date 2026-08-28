@@ -43,7 +43,8 @@ class RecoveryApprovalResponse(BaseModel):
     request_reason: str
     amount_minor: int = Field(gt=0)
     currency: str = Field(min_length=3, max_length=3)
-    threshold_minor: int = Field(gt=0)
+    threshold_minor: int | None = Field(default=None, gt=0)
+    request_context: dict[str, object]
     requested_at: datetime
     expires_at: datetime
     decided_at: datetime | None

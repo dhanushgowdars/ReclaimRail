@@ -14,7 +14,8 @@ from app.db.models.recovery import (
     RecoveryAuditActor,
     RecoveryCase,
 )
-from app.domain.recovery import RecoveryCaseStatus
+from app.domain.incidents import IncidentSeverity
+from app.domain.recovery import DEFAULT_RECOVERY_POLICY, RecoveryCaseStatus
 from app.services.recovery_audit_store import (
     RecoveryAuditAppendRequest,
     append_recovery_audit_event,
@@ -22,7 +23,31 @@ from app.services.recovery_audit_store import (
 
 DEFAULT_APPROVAL_THRESHOLD_MINOR = 1_000_000
 DEFAULT_APPROVAL_WINDOW = timedelta(minutes=15)
-APPROVAL_REQUEST_REASON = "amount_requires_operator_approval"
+
+
+class RecoveryApprovalReason(StrEnum):
+    """Explain why a policy-allowed action still requires a human decision."""
+
+    AMOUNT_THRESHOLD = "amount_threshold"
+    ACTIVE_INCIDENT_UNCERTAINTY = "active_incident_uncertainty"
+    NEAR_MAXIMUM_ATTEMPTS = "near_maximum_attempts"
+    PARTIAL_RECOVERY = "partial_recovery"
+    PROVIDER_STATE_CONFLICT = "provider_state_conflict"
+    AI_LOW_CONFIDENCE = "ai_low_confidence"
+    POLICY_REQUIRES_REVIEW = "policy_requires_review"
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryApprovalRequirement:
+    """A durable, PII-safe explanation of why an operator must review."""
+
+    reasons: tuple[RecoveryApprovalReason, ...]
+    threshold_minor: int | None
+    context: dict[str, object]
+
+    @property
+    def primary_reason(self) -> str:
+        return self.reasons[0].value
 
 
 class RecoveryApprovalDecision(StrEnum):
@@ -73,22 +98,91 @@ def _normalize_required_text(
     return normalized
 
 
+def build_recovery_approval_requirement(
+    action: RecoveryAction,
+    *,
+    threshold_minor: int,
+    recovery_attempt_count: int = 0,
+    active_incident_severity: IncidentSeverity | None = None,
+    partial_recovery: bool = False,
+    provider_state_conflict: bool = False,
+    ai_confidence: float | None = None,
+    policy_requires_review: bool = False,
+) -> RecoveryApprovalRequirement | None:
+    """Return the review gate for a policy-allowed provider action.
+
+    Hard policy stops are intentionally excluded here: they remain blocked and
+    an approval can never turn them into an executable action.  Confidence is
+    accepted now so the bounded-AI phase can use the same durable gate without
+    changing the approval contract again.
+    """
+    if threshold_minor < 1:
+        raise ValueError("Approval threshold must be positive")
+    if recovery_attempt_count < 0:
+        raise ValueError("Recovery attempt count cannot be negative")
+    if (
+        action.status
+        not in {
+            RecoveryActionStatus.ALLOWED.value,
+            RecoveryActionStatus.APPROVAL_REQUIRED.value,
+        }
+        or action.action_type != "create_payment_link"
+        or action.amount_minor is None
+    ):
+        return None
+
+    reasons: list[RecoveryApprovalReason] = []
+    if action.amount_minor >= threshold_minor:
+        reasons.append(RecoveryApprovalReason.AMOUNT_THRESHOLD)
+    if active_incident_severity is IncidentSeverity.MEDIUM:
+        reasons.append(RecoveryApprovalReason.ACTIVE_INCIDENT_UNCERTAINTY)
+    if recovery_attempt_count >= DEFAULT_RECOVERY_POLICY.maximum_recovery_attempts - 1:
+        reasons.append(RecoveryApprovalReason.NEAR_MAXIMUM_ATTEMPTS)
+    if partial_recovery:
+        reasons.append(RecoveryApprovalReason.PARTIAL_RECOVERY)
+    if provider_state_conflict:
+        reasons.append(RecoveryApprovalReason.PROVIDER_STATE_CONFLICT)
+    if ai_confidence is not None and not 0 <= ai_confidence <= 1:
+        raise ValueError("AI confidence must be between zero and one")
+    if ai_confidence is not None and ai_confidence < 0.70:
+        reasons.append(RecoveryApprovalReason.AI_LOW_CONFIDENCE)
+    if policy_requires_review:
+        reasons.append(RecoveryApprovalReason.POLICY_REQUIRES_REVIEW)
+    if not reasons:
+        return None
+
+    return RecoveryApprovalRequirement(
+        reasons=tuple(reasons),
+        threshold_minor=(
+            threshold_minor if RecoveryApprovalReason.AMOUNT_THRESHOLD in reasons else None
+        ),
+        context={
+            "reason_codes": [reason.value for reason in reasons],
+            "recovery_attempt_count": recovery_attempt_count,
+            "maximum_recovery_attempts": DEFAULT_RECOVERY_POLICY.maximum_recovery_attempts,
+            "active_incident_severity": (
+                active_incident_severity.value if active_incident_severity is not None else None
+            ),
+            "partial_recovery": partial_recovery,
+            "provider_state_conflict": provider_state_conflict,
+            "ai_confidence": ai_confidence,
+            "policy_requires_review": policy_requires_review,
+        },
+    )
+
+
 def action_requires_human_approval(
     action: RecoveryAction,
     *,
     threshold_minor: int,
 ) -> bool:
-    if threshold_minor < 1:
-        raise ValueError("Approval threshold must be positive")
+    """Compatibility helper for existing callers and focused policy tests."""
     return (
-        action.status
-        in {
-            RecoveryActionStatus.ALLOWED.value,
-            RecoveryActionStatus.APPROVAL_REQUIRED.value,
-        }
-        and action.action_type == "create_payment_link"
-        and action.amount_minor is not None
-        and action.amount_minor >= threshold_minor
+        build_recovery_approval_requirement(
+            action,
+            threshold_minor=threshold_minor,
+        )
+        is not None
     )
 
 
@@ -97,16 +191,14 @@ async def create_recovery_approval_request(
     *,
     recovery_case: RecoveryCase,
     action: RecoveryAction,
-    threshold_minor: int,
+    requirement: RecoveryApprovalRequirement,
     requested_at: datetime,
     approval_window: timedelta,
 ) -> RecoveryApproval:
     _require_timezone_aware(requested_at, field_name="Approval request time")
-    if threshold_minor < 1:
-        raise ValueError("Approval threshold must be positive")
     if approval_window <= timedelta(0):
         raise ValueError("Approval window must be positive")
-    if not action_requires_human_approval(action, threshold_minor=threshold_minor):
+    if not requirement.reasons:
         raise RecoveryApprovalStateError(
             f"Recovery action {action.id} does not require approval",
         )
@@ -120,10 +212,11 @@ async def create_recovery_approval_request(
         recovery_case_id=recovery_case.id,
         recovery_action_id=action.id,
         status=RecoveryApprovalStatus.PENDING.value,
-        request_reason=APPROVAL_REQUEST_REASON,
+        request_reason=requirement.primary_reason,
         amount_minor=action.amount_minor,
         currency=action.currency,
-        threshold_minor=threshold_minor,
+        threshold_minor=requirement.threshold_minor,
+        request_context=requirement.context,
         requested_at=requested_at,
         expires_at=requested_at + approval_window,
         version=0,
@@ -146,6 +239,7 @@ async def create_recovery_approval_request(
                 "amount_minor": approval.amount_minor,
                 "currency": approval.currency,
                 "threshold_minor": approval.threshold_minor,
+                "request_context": approval.request_context,
                 "expires_at": approval.expires_at.isoformat(),
             },
             occurred_at=requested_at,
@@ -326,6 +420,8 @@ async def decide_recovery_approval(
                 "approval_version": approval.version,
                 "reviewer_id": normalized_reviewer,
                 "decision_reason": normalized_reason,
+                "request_reason": approval.request_reason,
+                "request_context": approval.request_context,
             },
             occurred_at=decided_at,
         ),

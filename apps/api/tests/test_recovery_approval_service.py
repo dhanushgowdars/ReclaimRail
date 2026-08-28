@@ -12,12 +12,14 @@ from app.db.models.recovery import (
     RecoveryApprovalStatus,
     RecoveryCase,
 )
+from app.domain.incidents import IncidentSeverity
 from app.domain.recovery import RecoveryCaseStatus
 from app.services import recovery_approval_service
 from app.services.recovery_approval_service import (
     RecoveryApprovalConflictError,
     RecoveryApprovalDecision,
     RecoveryApprovalDecisionDisposition,
+    build_recovery_approval_requirement,
     create_recovery_approval_request,
     decide_recovery_approval,
 )
@@ -88,6 +90,7 @@ def build_approval(
         amount_minor=349_900,
         currency="INR",
         threshold_minor=300_000,
+        request_context={},
         requested_at=NOW - timedelta(minutes=2),
         expires_at=NOW + timedelta(minutes=13),
         version=version,
@@ -118,7 +121,10 @@ async def test_creates_durable_approval_request_and_blocks_action(
         session,
         recovery_case=recovery_case,
         action=action,
-        threshold_minor=300_000,
+        requirement=build_recovery_approval_requirement(
+            action,
+            threshold_minor=300_000,
+        ),
         requested_at=NOW,
         approval_window=timedelta(minutes=15),
     )
@@ -129,6 +135,31 @@ async def test_creates_durable_approval_request_and_blocks_action(
     session.add.assert_called_once_with(approval)
     session.flush.assert_awaited_once()
     assert append.await_args.kwargs["request"].event_type == "approval.requested"
+
+
+def test_medium_incident_requires_review_without_misrepresenting_amount_threshold() -> None:
+    requirement = build_recovery_approval_requirement(
+        build_action(status=RecoveryActionStatus.ALLOWED),
+        threshold_minor=1_000_000,
+        active_incident_severity=IncidentSeverity.MEDIUM,
+    )
+
+    assert requirement is not None
+    assert requirement.primary_reason == "active_incident_uncertainty"
+    assert requirement.threshold_minor is None
+    assert requirement.context["reason_codes"] == ["active_incident_uncertainty"]
+
+
+def test_near_maximum_attempts_requires_review() -> None:
+    requirement = build_recovery_approval_requirement(
+        build_action(status=RecoveryActionStatus.ALLOWED),
+        threshold_minor=1_000_000,
+        recovery_attempt_count=2,
+    )
+
+    assert requirement is not None
+    assert requirement.primary_reason == "near_maximum_attempts"
+    assert requirement.context["maximum_recovery_attempts"] == 3
 
 
 @pytest.mark.asyncio

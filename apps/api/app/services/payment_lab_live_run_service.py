@@ -132,7 +132,8 @@ class PaymentLabApprovalEvidence:
     request_reason: str
     amount_minor: int
     currency: str
-    threshold_minor: int
+    threshold_minor: int | None
+    request_context: dict[str, object]
     requested_at: datetime
     expires_at: datetime
     decided_at: datetime | None
@@ -301,6 +302,7 @@ def _build_approval_evidence(
         amount_minor=approval.amount_minor,
         currency=approval.currency,
         threshold_minor=approval.threshold_minor,
+        request_context=approval.request_context,
         requested_at=approval.requested_at,
         expires_at=approval.expires_at,
         decided_at=approval.decided_at,

@@ -14,6 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
     false,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
@@ -648,11 +649,11 @@ class RecoveryApproval(Base):
             name="ck_recovery_approvals_amount",
         ),
         CheckConstraint(
-            "threshold_minor > 0",
+            "threshold_minor IS NULL OR threshold_minor > 0",
             name="ck_recovery_approvals_threshold",
         ),
         CheckConstraint(
-            "amount_minor >= threshold_minor",
+            "threshold_minor IS NULL OR amount_minor >= threshold_minor",
             name="ck_recovery_approvals_threshold_met",
         ),
         CheckConstraint(
@@ -715,7 +716,16 @@ class RecoveryApproval(Base):
     )
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
-    threshold_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Present only when the request was caused by the automatic amount limit.
+    # Other review triggers (for example a medium rail incident) must not
+    # pretend that an amount threshold was the reason for human review.
+    threshold_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    request_context: Mapped[dict[str, object]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
     requested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

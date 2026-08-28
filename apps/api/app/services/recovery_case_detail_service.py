@@ -10,6 +10,7 @@ from app.db.models.payment import PaymentAttempt, PaymentStateTransition
 from app.db.models.recovery import (
     RecoveryAction,
     RecoveryAgentRun,
+    RecoveryApproval,
     RecoveryCase,
 )
 from app.db.models.recovery_outcome import RecoveryOutcome
@@ -111,6 +112,23 @@ class RecoveryActionSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class RecoveryApprovalSummary:
+    approval_id: UUID
+    recovery_action_id: UUID
+    status: str
+    request_reason: str
+    amount_minor: int
+    currency: str
+    threshold_minor: int
+    requested_at: datetime
+    expires_at: datetime
+    decided_at: datetime | None
+    decided_by: str | None
+    decision_reason: str | None
+    version: int
+
+
+@dataclass(frozen=True, slots=True)
 class RecoveryOutcomeSummary:
     recovery_outcome_id: UUID
     status: str
@@ -172,6 +190,7 @@ class RecoveryCaseDetail:
     outcome: RecoveryOutcomeSummary | None
     payment_transitions: tuple[PaymentTransitionSummary, ...]
     audit_chain: RecoveryAuditChainSummary
+    approvals: tuple[RecoveryApprovalSummary, ...] = ()
 
 
 def build_recovery_case_snapshot(case: RecoveryCase) -> RecoveryCaseSnapshot:
@@ -255,6 +274,24 @@ def build_action_summary(action: RecoveryAction) -> RecoveryActionSummary:
         provider_action_expires_at=action.provider_action_expires_at,
         started_at=action.started_at,
         completed_at=action.completed_at,
+    )
+
+
+def build_approval_summary(approval: RecoveryApproval) -> RecoveryApprovalSummary:
+    return RecoveryApprovalSummary(
+        approval_id=approval.id,
+        recovery_action_id=approval.recovery_action_id,
+        status=approval.status,
+        request_reason=approval.request_reason,
+        amount_minor=approval.amount_minor,
+        currency=approval.currency,
+        threshold_minor=approval.threshold_minor,
+        requested_at=approval.requested_at,
+        expires_at=approval.expires_at,
+        decided_at=approval.decided_at,
+        decided_by=approval.decided_by,
+        decision_reason=approval.decision_reason,
+        version=approval.version,
     )
 
 
@@ -360,6 +397,11 @@ async def load_recovery_case_detail(
         .order_by(RecoveryAction.sequence_number)
         .limit(MAX_ACTION_SUMMARIES),
     )
+    approvals_result = await session.execute(
+        select(RecoveryApproval)
+        .where(RecoveryApproval.recovery_case_id == recovery_case_id)
+        .order_by(RecoveryApproval.requested_at, RecoveryApproval.id),
+    )
     transitions_result = await session.execute(
         select(PaymentStateTransition)
         .where(PaymentStateTransition.payment_attempt_id == payment_attempt.id)
@@ -386,6 +428,9 @@ async def load_recovery_case_detail(
             build_agent_run_summary(agent_run) for agent_run in agent_runs_result.scalars().all()
         ),
         actions=tuple(build_action_summary(action) for action in actions_result.scalars().all()),
+        approvals=tuple(
+            build_approval_summary(approval) for approval in approvals_result.scalars().all()
+        ),
         outcome=build_outcome_summary(outcome) if outcome is not None else None,
         payment_transitions=tuple(
             build_payment_transition_summary(transition)

@@ -101,6 +101,22 @@ class RecoveryActionSummaryResponse(ResponseModel):
     completed_at: datetime | None
 
 
+class RecoveryApprovalSummaryResponse(ResponseModel):
+    approval_id: UUID
+    recovery_action_id: UUID
+    status: str
+    request_reason: str
+    amount_minor: int = Field(gt=0)
+    currency: str = Field(min_length=3, max_length=3)
+    threshold_minor: int = Field(gt=0)
+    requested_at: datetime
+    expires_at: datetime
+    decided_at: datetime | None
+    decided_by: str | None
+    decision_reason: str | None
+    version: int = Field(ge=0)
+
+
 class RecoveryOutcomeSummaryResponse(ResponseModel):
     recovery_outcome_id: UUID
     status: str
@@ -155,6 +171,7 @@ class RecoveryCaseDetailResponse(ResponseModel):
     payment_lifecycle: PaymentLifecycleSnapshotResponse
     agent_runs: list[RecoveryAgentRunSummaryResponse]
     actions: list[RecoveryActionSummaryResponse]
+    approvals: list[RecoveryApprovalSummaryResponse]
     outcome: RecoveryOutcomeSummaryResponse | None
     payment_transitions: list[PaymentTransitionSummaryResponse]
     audit_chain: RecoveryAuditChainSummaryResponse

@@ -22,6 +22,10 @@ from app.services.payment_lab_recovery_service import (
     PaymentLabRecoveryStartResult,
     start_payment_lab_recovery,
 )
+from app.services.recovery_approval_service import (
+    DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    DEFAULT_APPROVAL_WINDOW,
+)
 
 SessionFactory = async_sessionmaker[AsyncSession]
 
@@ -186,6 +190,8 @@ async def run_payment_lab_recovery_batch(
     batch_size: int = 25,
     supported_payment_methods: Sequence[str] = DEFAULT_ALTERNATE_PAYMENT_METHODS,
     claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
+    approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
 ) -> PaymentLabRecoveryBatchResult:
     """Start bounded recovery for verified Payment Lab failures.
 
@@ -222,6 +228,8 @@ async def run_payment_lab_recovery_batch(
                 ),
                 provider=provider,
                 claim_timeout=claim_timeout,
+                approval_threshold_minor=approval_threshold_minor,
+                approval_window=approval_window,
             )
             start_results.append(result)
         except asyncio.CancelledError:

@@ -30,6 +30,7 @@ from app.services.recovery_action_executor import (
     RecoveryActionExecutionResult,
     RecoveryActionInProgressError,
     RecoveryActionNotDueError,
+    RecoveryActionNotExecutableError,
     RecoveryActionPreparation,
     RecoveryActionProviderFailure,
     build_payment_link_reference_id,
@@ -263,6 +264,26 @@ async def test_scheduled_action_cannot_execute_early() -> None:
         )
 
     assert session.execute.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_approval_required_action_cannot_reach_provider_execution() -> None:
+    action = create_action(status=RecoveryActionStatus.APPROVAL_REQUIRED)
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = query_result(action)
+
+    with pytest.raises(
+        RecoveryActionNotExecutableError,
+        match="cannot execute from approval_required",
+    ):
+        await prepare_recovery_payment_link_action(
+            session,
+            action_id=ACTION_ID,
+            executed_at=NOW,
+        )
+
+    assert session.execute.await_count == 1
+    assert action.execution_attempt_count == 0
 
 
 @pytest.mark.asyncio

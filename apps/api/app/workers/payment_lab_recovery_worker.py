@@ -86,6 +86,10 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
                     provider=provider,
                     batch_size=settings.payment_lab_recovery_batch_size,
                     claim_timeout=claim_timeout,
+                    approval_threshold_minor=(settings.recovery_approval_threshold_minor),
+                    approval_window=timedelta(
+                        seconds=settings.recovery_approval_ttl_seconds,
+                    ),
                 )
             except asyncio.CancelledError:
                 raise

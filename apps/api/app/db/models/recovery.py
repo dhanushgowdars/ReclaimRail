@@ -37,6 +37,7 @@ class RecoveryPlannerProvider(StrEnum):
 
 class RecoveryActionStatus(StrEnum):
     ALLOWED = "allowed"
+    APPROVAL_REQUIRED = "approval_required"
     BLOCKED = "blocked"
     ESCALATED = "escalated"
     STOPPED = "stopped"
@@ -56,6 +57,13 @@ class RecoveryAuditActor(StrEnum):
     RAZORPAY = "razorpay"
 
 
+class RecoveryApprovalStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
 class RecoveryCase(Base):
     """Current projection of one bounded payment-recovery case."""
 
@@ -68,7 +76,7 @@ class RecoveryCase(Base):
         CheckConstraint(
             (
                 "status IN "
-                "('open', 'planning', 'ready', 'executing', "
+                "('open', 'planning', 'ready', 'awaiting_approval', 'executing', "
                 "'waiting', 'recovered', 'exhausted', "
                 "'cancelled', 'escalated')"
             ),
@@ -95,7 +103,7 @@ class RecoveryCase(Base):
                 "AND recovered_at IS NULL "
                 "AND closed_at IS NOT NULL) "
                 "OR (status IN "
-                "('open', 'planning', 'ready', 'executing', "
+                "('open', 'planning', 'ready', 'awaiting_approval', 'executing', "
                 "'waiting', 'escalated') "
                 "AND recovered_at IS NULL "
                 "AND closed_at IS NULL)"
@@ -138,7 +146,7 @@ class RecoveryCase(Base):
     )
 
     status: Mapped[str] = mapped_column(
-        String(16),
+        String(32),
         nullable=False,
         default=RecoveryCaseStatus.OPEN.value,
         server_default=RecoveryCaseStatus.OPEN.value,
@@ -402,7 +410,7 @@ class RecoveryAction(Base):
         CheckConstraint(
             (
                 "status IN "
-                "('allowed', 'blocked', 'escalated', 'stopped', "
+                "('allowed', 'approval_required', 'blocked', 'escalated', 'stopped', "
                 "'scheduled', 'executing', 'succeeded', "
                 "'failed', 'cancelled')"
             ),
@@ -460,7 +468,7 @@ class RecoveryAction(Base):
                 "OR (policy_outcome = 'stop' AND status = 'stopped') "
                 "OR (policy_outcome = 'allow' "
                 "AND status IN "
-                "('allowed', 'scheduled', 'executing', "
+                "('allowed', 'approval_required', 'scheduled', 'executing', "
                 "'succeeded', 'failed', 'cancelled'))"
             ),
             name="ck_recovery_actions_policy_status",
@@ -523,7 +531,7 @@ class RecoveryAction(Base):
         nullable=False,
     )
     status: Mapped[str] = mapped_column(
-        String(16),
+        String(32),
         nullable=False,
     )
     proposal_reason: Mapped[str] = mapped_column(
@@ -608,6 +616,125 @@ class RecoveryAction(Base):
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class RecoveryApproval(Base):
+    """Versioned operator decision that gates one money-facing action."""
+
+    __tablename__ = "recovery_approvals"
+    __table_args__ = (
+        UniqueConstraint(
+            "recovery_action_id",
+            name="uq_recovery_approvals_action",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected', 'expired')",
+            name="ck_recovery_approvals_status",
+        ),
+        CheckConstraint(
+            "amount_minor > 0",
+            name="ck_recovery_approvals_amount",
+        ),
+        CheckConstraint(
+            "threshold_minor > 0",
+            name="ck_recovery_approvals_threshold",
+        ),
+        CheckConstraint(
+            "amount_minor >= threshold_minor",
+            name="ck_recovery_approvals_threshold_met",
+        ),
+        CheckConstraint(
+            "expires_at > requested_at",
+            name="ck_recovery_approvals_expiry",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_recovery_approvals_version",
+        ),
+        CheckConstraint(
+            (
+                "(status = 'pending' AND decided_at IS NULL "
+                "AND decided_by IS NULL AND decision_reason IS NULL) "
+                "OR (status IN ('approved', 'rejected') "
+                "AND decided_at IS NOT NULL AND decided_by IS NOT NULL "
+                "AND decision_reason IS NOT NULL) "
+                "OR (status = 'expired' AND decided_at IS NOT NULL "
+                "AND decided_by IS NULL AND decision_reason IS NOT NULL)"
+            ),
+            name="ck_recovery_approvals_lifecycle",
+        ),
+        Index(
+            "ix_recovery_approvals_queue",
+            "status",
+            "expires_at",
+            "requested_at",
+        ),
+        Index(
+            "ix_recovery_approvals_case_requested",
+            "recovery_case_id",
+            "requested_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    recovery_case_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("recovery_cases.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    recovery_action_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("recovery_actions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=RecoveryApprovalStatus.PENDING.value,
+        server_default=RecoveryApprovalStatus.PENDING.value,
+    )
+    request_reason: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+    )
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    threshold_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    decided_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

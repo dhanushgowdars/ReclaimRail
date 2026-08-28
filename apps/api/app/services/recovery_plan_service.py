@@ -1,7 +1,7 @@
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
@@ -14,6 +14,7 @@ from app.db.models.recovery import (
     RecoveryActionStatus,
     RecoveryAgentRun,
     RecoveryAgentRunStatus,
+    RecoveryApproval,
     RecoveryAuditActor,
     RecoveryAuditEvent,
     RecoveryCase,
@@ -39,6 +40,12 @@ from app.integrations.gemini import (
     BoundedRecoveryPlannerResult,
     GeminiPlannerFallbackReason,
     RecoveryPlannerSource,
+)
+from app.services.recovery_approval_service import (
+    DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    DEFAULT_APPROVAL_WINDOW,
+    action_requires_human_approval,
+    create_recovery_approval_request,
 )
 from app.services.recovery_audit_store import (
     RecoveryAuditAppendRequest,
@@ -82,6 +89,7 @@ class PersistedRecoveryPlan:
     plan: RecoveryPlan
     agent_run: RecoveryAgentRun
     actions: tuple[RecoveryAction, ...]
+    approvals: tuple[RecoveryApproval, ...]
     audit_event: RecoveryAuditEvent
 
 
@@ -272,6 +280,10 @@ def _apply_case_projection(
         recovery_case.status = RecoveryCaseStatus.ESCALATED.value
         recovery_case.next_action_at = None
 
+    elif any(action.status == RecoveryActionStatus.APPROVAL_REQUIRED.value for action in actions):
+        recovery_case.status = RecoveryCaseStatus.AWAITING_APPROVAL.value
+        recovery_case.next_action_at = None
+
     elif plan.decision is RecoveryPlanDecision.WAIT:
         recovery_case.status = RecoveryCaseStatus.WAITING.value
         recovery_case.next_action_at = min(
@@ -392,8 +404,14 @@ async def plan_and_persist_recovery_case(
     alternate_payment_methods: Sequence[str],
     planned_at: datetime,
     planner_result: BoundedRecoveryPlannerResult | None = None,
+    approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
 ) -> PersistedRecoveryPlan:
     _require_timezone_aware(planned_at)
+    if approval_threshold_minor < 1:
+        raise ValueError("Approval threshold must be positive")
+    if approval_window <= timedelta(0):
+        raise ValueError("Approval window must be positive")
 
     case_result = await session.execute(
         select(RecoveryCase)
@@ -511,8 +529,6 @@ async def plan_and_persist_recovery_case(
     await session.flush()
 
     actions: list[RecoveryAction] = []
-    action_audit_data: list[dict[str, object]] = []
-
     for sequence_number, proposal in enumerate(
         plan.proposals,
         start=1,
@@ -563,18 +579,18 @@ async def plan_and_persist_recovery_case(
             action,
         )
 
-        action_audit_data.append(
-            {
-                "action_id": action.id,
-                "sequence_number": sequence_number,
-                "action_type": action.action_type,
-                "status": action.status,
-                "policy_outcome": (action.policy_outcome),
-                "policy_guardrails": (action.policy_guardrails),
-            },
-        )
-
     await session.flush()
+
+    approval_actions = tuple(
+        action
+        for action in actions
+        if action_requires_human_approval(
+            action,
+            threshold_minor=approval_threshold_minor,
+        )
+    )
+    for action in approval_actions:
+        action.status = RecoveryActionStatus.APPROVAL_REQUIRED.value
 
     _apply_case_projection(
         recovery_case,
@@ -605,11 +621,34 @@ async def plan_and_persist_recovery_case(
                 "output_token_count": (planner_result.output_token_count),
                 "plan_decision": plan.decision,
                 "reasoning_summary": (plan.reasoning_summary),
-                "actions": action_audit_data,
+                "actions": [
+                    {
+                        "action_id": action.id,
+                        "sequence_number": action.sequence_number,
+                        "action_type": action.action_type,
+                        "status": action.status,
+                        "policy_outcome": action.policy_outcome,
+                        "policy_guardrails": action.policy_guardrails,
+                    }
+                    for action in actions
+                ],
             },
             occurred_at=planned_at,
         ),
     )
+
+    approvals: list[RecoveryApproval] = []
+    for action in approval_actions:
+        approvals.append(
+            await create_recovery_approval_request(
+                session,
+                recovery_case=recovery_case,
+                action=action,
+                threshold_minor=approval_threshold_minor,
+                requested_at=planned_at,
+                approval_window=approval_window,
+            ),
+        )
 
     return PersistedRecoveryPlan(
         plan=plan,
@@ -617,5 +656,6 @@ async def plan_and_persist_recovery_case(
         actions=tuple(
             actions,
         ),
+        approvals=tuple(approvals),
         audit_event=audit_event,
     )

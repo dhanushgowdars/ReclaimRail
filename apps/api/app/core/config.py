@@ -150,6 +150,17 @@ class Settings(BaseSettings):
         ge=1,
         le=20,
     )
+    recovery_approval_threshold_minor: int = Field(
+        default=300_000,
+        ge=100,
+        le=100_000_000,
+    )
+    recovery_approval_ttl_seconds: int = Field(
+        default=900,
+        ge=60,
+        le=86_400,
+    )
+    recovery_operator_access_token: SecretStr | None = None
 
     recovery_outcome_batch_size: int = Field(
         default=25,

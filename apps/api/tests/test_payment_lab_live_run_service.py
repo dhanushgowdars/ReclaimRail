@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.payment import PaymentAttempt
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
-from app.db.models.recovery import RecoveryAction, RecoveryAgentRun, RecoveryCase
+from app.db.models.recovery import (
+    RecoveryAction,
+    RecoveryAgentRun,
+    RecoveryApproval,
+    RecoveryCase,
+)
 from app.db.models.recovery_outcome import RecoveryOutcome
 from app.services.payment_lab_live_run_service import (
     PaymentLabLiveBusinessState,
@@ -25,6 +30,7 @@ CASE_ID = UUID("93000000-0000-0000-0000-000000000004")
 AGENT_ID = UUID("93000000-0000-0000-0000-000000000005")
 ACTION_ID = UUID("93000000-0000-0000-0000-000000000006")
 OUTCOME_ID = UUID("93000000-0000-0000-0000-000000000007")
+APPROVAL_ID = UUID("93000000-0000-0000-0000-000000000008")
 
 
 def scalar_result(value: object) -> MagicMock:
@@ -125,6 +131,24 @@ def build_escalated_action() -> MagicMock:
     return action
 
 
+def build_pending_approval() -> MagicMock:
+    approval = MagicMock(spec=RecoveryApproval)
+    approval.id = APPROVAL_ID
+    approval.recovery_action_id = ACTION_ID
+    approval.status = "pending"
+    approval.request_reason = "amount_requires_operator_approval"
+    approval.amount_minor = 349_900
+    approval.currency = "INR"
+    approval.threshold_minor = 300_000
+    approval.requested_at = NOW + timedelta(seconds=7, milliseconds=300)
+    approval.expires_at = NOW + timedelta(minutes=15)
+    approval.decided_at = None
+    approval.decided_by = None
+    approval.decision_reason = None
+    approval.version = 0
+    return approval
+
+
 def build_outcome() -> MagicMock:
     outcome = MagicMock(spec=RecoveryOutcome)
     outcome.id = OUTCOME_ID
@@ -166,6 +190,7 @@ async def test_checkout_run_waits_for_signed_failure() -> None:
         PaymentLabLiveStepStatus.PENDING,
         PaymentLabLiveStepStatus.PENDING,
         PaymentLabLiveStepStatus.PENDING,
+        PaymentLabLiveStepStatus.PENDING,
     ]
     assert [step.key for step in result.steps] == [
         "payment_attempt",
@@ -173,6 +198,7 @@ async def test_checkout_run_waits_for_signed_failure() -> None:
         "recovery_case",
         "agent_recommendation",
         "policy_decision",
+        "human_approval",
         "provider_action",
         "measured_outcome",
     ]
@@ -220,6 +246,7 @@ async def test_completed_run_exposes_provider_agent_policy_and_outcome_evidence(
         scalar_result(recovery_case),
         scalar_result(agent),
         action_result,
+        scalar_result(None),
         scalar_result(outcome),
     )
 
@@ -266,6 +293,7 @@ async def test_created_payment_link_waits_for_provider_outcome() -> None:
         scalar_result(agent),
         action_result,
         scalar_result(None),
+        scalar_result(None),
     )
 
     result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
@@ -279,6 +307,92 @@ async def test_created_payment_link_waits_for_provider_outcome() -> None:
     assert result.steps[-2].status is PaymentLabLiveStepStatus.COMPLETED
     assert result.steps[-1].status is PaymentLabLiveStepStatus.ACTIVE
     assert result.steps[-1].detail == "Waiting for provider reconciliation"
+
+
+@pytest.mark.asyncio
+async def test_pending_human_approval_is_live_before_provider_execution() -> None:
+    run = build_run(status=PaymentLabRunStatus.RECOVERY_RUNNING.value)
+    run.payment_attempt_id = ATTEMPT_ID
+    payment = build_payment()
+    recovery_case = build_case(status="awaiting_approval")
+    agent = build_agent()
+    action = build_action()
+    action.status = "approval_required"
+    action.provider_action_id = None
+    action.provider_action_status = None
+    action.provider_action_url = None
+    action.provider_action_expires_at = None
+    approval = build_pending_approval()
+
+    action_result = MagicMock()
+    action_result.scalars.return_value.all.return_value = [action]
+    session = AsyncMock(spec=AsyncSession)
+    session.get.side_effect = (run, payment)
+    session.execute.side_effect = (
+        scalar_result(recovery_case),
+        scalar_result(agent),
+        action_result,
+        scalar_result(approval),
+        scalar_result(None),
+    )
+
+    result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
+
+    assert result.business_state is PaymentLabLiveBusinessState.AWAITING_HUMAN_REVIEW
+    assert result.active_step_key == "human_approval"
+    assert result.automation_complete is False
+    assert result.financial_outcome_terminal is False
+    assert result.terminal is False
+    assert result.approval is not None
+    assert result.approval.status == "pending"
+    step_by_key = {step.key: step for step in result.steps}
+    assert step_by_key["human_approval"].status is PaymentLabLiveStepStatus.ACTIVE
+    assert step_by_key["provider_action"].status is PaymentLabLiveStepStatus.PENDING
+    assert step_by_key["measured_outcome"].status is PaymentLabLiveStepStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_rejected_approval_closes_without_provider_execution() -> None:
+    run = build_run(status=PaymentLabRunStatus.RECOVERY_RUNNING.value)
+    run.payment_attempt_id = ATTEMPT_ID
+    recovery_case = build_case(status="escalated")
+    action = build_action()
+    action.status = "cancelled"
+    action.provider_action_id = None
+    action.provider_action_status = None
+    action.provider_action_url = None
+    action.provider_action_expires_at = None
+    action.completed_at = NOW + timedelta(seconds=9)
+    approval = build_pending_approval()
+    approval.status = "rejected"
+    approval.decided_at = NOW + timedelta(seconds=9)
+    approval.decided_by = "merchant-operator"
+    approval.decision_reason = "Amount requires manual outreach"
+    approval.version = 1
+
+    action_result = MagicMock()
+    action_result.scalars.return_value.all.return_value = [action]
+    session = AsyncMock(spec=AsyncSession)
+    session.get.side_effect = (run, build_payment())
+    session.execute.side_effect = (
+        scalar_result(recovery_case),
+        scalar_result(build_agent()),
+        action_result,
+        scalar_result(approval),
+        scalar_result(None),
+    )
+
+    result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
+
+    assert result.business_state is PaymentLabLiveBusinessState.ESCALATED
+    assert result.terminal is True
+    assert result.financial_outcome_terminal is True
+    step_by_key = {step.key: step for step in result.steps}
+    assert step_by_key["human_approval"].status is PaymentLabLiveStepStatus.COMPLETED
+    assert step_by_key["provider_action"].label == "Safe disposition"
+    assert step_by_key["provider_action"].status is PaymentLabLiveStepStatus.COMPLETED
+    assert step_by_key["provider_action"].detail == ("Approval closed without provider execution")
+    assert step_by_key["measured_outcome"].status is PaymentLabLiveStepStatus.COMPLETED
 
 
 @pytest.mark.asyncio
@@ -298,6 +412,7 @@ async def test_policy_escalation_is_a_terminal_safe_disposition() -> None:
         scalar_result(recovery_case),
         scalar_result(agent),
         action_result,
+        scalar_result(None),
         scalar_result(None),
     )
 
@@ -364,6 +479,7 @@ async def test_late_authorization_remains_live_until_compensation_finishes() -> 
         scalar_result(agent),
         action_result,
         scalar_result(None),
+        scalar_result(None),
     )
 
     result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
@@ -394,6 +510,7 @@ async def test_late_authorization_becomes_terminal_after_recovery_is_cancelled()
         scalar_result(recovery_case),
         scalar_result(agent),
         action_result,
+        scalar_result(None),
         scalar_result(None),
     )
 

@@ -49,3 +49,46 @@ into `Stop-Process`.
 Cloudflare tunnel startup remains separate because the public URL changes and must be
 copied into the Razorpay webhook configuration. ReclaimRail still treats only the signed
 webhook ingress as payment truth.
+
+## Human approval gate
+
+Recovery payment-link actions at or above
+`RECLAIMRAIL_RECOVERY_APPROVAL_THRESHOLD_MINOR` pause before provider execution. Set a
+separate operator credential in `apps/api/.env`:
+
+```dotenv
+RECLAIMRAIL_RECOVERY_APPROVAL_THRESHOLD_MINOR=300000
+RECLAIMRAIL_RECOVERY_APPROVAL_TTL_SECONDS=900
+RECLAIMRAIL_RECOVERY_OPERATOR_ACCESS_TOKEN=<long-random-operator-secret>
+```
+
+The operator queue is intentionally separate from the public demo surface. Every
+decision requires the dedicated header, reviewer identity, reason and current approval
+version:
+
+```powershell
+$Headers = @{ "X-ReclaimRail-Operator-Token" = $env:RR_OPERATOR_TOKEN }
+$Queue = Invoke-RestMethod `
+    -Uri "http://127.0.0.1:8000/recovery/approvals?status=pending" `
+    -Headers $Headers
+
+$Approval = $Queue.approvals | Select-Object -First 1
+$Body = @{
+    decision = "approve"
+    reviewer_id = "demo-operator"
+    reason = "Verified amount, provider failure, and policy evidence"
+    expected_version = $Approval.version
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://127.0.0.1:8000/recovery/approvals/$($Approval.approval_id)/decision" `
+    -Headers $Headers `
+    -ContentType "application/json" `
+    -Body $Body
+```
+
+Approval releases only the gated action. The action worker still reloads provider state,
+incident context and deterministic policy before any money-facing call. Rejection or
+expiry cancels the action and escalates the case; it never silently falls through to
+execution.

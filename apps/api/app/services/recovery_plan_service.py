@@ -605,6 +605,11 @@ async def plan_and_persist_recovery_case(
                 active_incident_severity=(
                     incident_context.severity if incident_context is not None else None
                 ),
+                ai_confidence=(
+                    planner_result.analysis.confidence
+                    if planner_result.analysis is not None
+                    else None
+                ),
             )
         )
         is not None

@@ -1,7 +1,7 @@
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -208,6 +208,39 @@ class Settings(BaseSettings):
         ge=10,
         le=3600,
     )
+
+    worker_heartbeat_interval_seconds: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=60.0,
+    )
+    worker_heartbeat_ttl_seconds: int = Field(
+        default=30,
+        ge=10,
+        le=300,
+    )
+    worker_delayed_after_seconds: float = Field(
+        default=15.0,
+        ge=2.0,
+        le=180.0,
+    )
+    worker_degraded_failure_threshold: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+    )
+
+    @model_validator(mode="after")
+    def validate_worker_supervision_intervals(self) -> Self:
+        if self.worker_heartbeat_ttl_seconds <= self.worker_heartbeat_interval_seconds * 2:
+            raise ValueError(
+                "Worker heartbeat TTL must exceed two heartbeat intervals",
+            )
+        if self.worker_delayed_after_seconds >= self.worker_heartbeat_ttl_seconds:
+            raise ValueError(
+                "Worker delayed threshold must be lower than heartbeat TTL",
+            )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

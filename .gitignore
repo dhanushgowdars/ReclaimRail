@@ -29,6 +29,7 @@ pnpm-debug.log*
 # Runtime
 *.pid
 *.log
+.runtime/
 
 # Editors and operating systems
 .vscode/

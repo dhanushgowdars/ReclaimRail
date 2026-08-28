@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "processes": [
+    {
+      "name": "api",
+      "kind": "service",
+      "working_directory": "apps/api",
+      "executable": "uv",
+      "arguments": ["run", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "webhook",
+      "kind": "service",
+      "working_directory": "apps/api",
+      "executable": "uv",
+      "arguments": ["run", "uvicorn", "app.webhook_main:app", "--host", "0.0.0.0", "--port", "8001"],
+      "port": 8001
+    },
+    {
+      "name": "outbox",
+      "kind": "worker",
+      "working_directory": "apps/api",
+      "executable": "uv",
+      "arguments": ["run", "python", "-m", "app.workers.outbox_worker"],
+      "worker_name": "outbox"
+    },
+    {
+      "name": "payment-consumer",
+      "kind": "worker",
+      "working_directory": "apps/api",
+      "executable": "uv",
+      "arguments": ["run", "python", "-m", "app.workers.payment_consumer_worker"],
+      "worker_name": "payment_consumer"
+    },
+    {
+      "name": "payment-lab-recovery",
+      "kind": "worker",
+      "working_directory": "apps/api",
+      "executable": "uv",
+      "arguments": ["run", "python", "-m", "app.workers.payment_lab_recovery_worker"],
+      "worker_name": "payment_lab_recovery"
+    },
+    {
+      "name": "recovery-action",
+      "kind": "worker",
+      "working_directory": "apps/api",
+      "executable": "uv",
+      "arguments": ["run", "python", "-m", "app.workers.recovery_action_worker"],
+      "worker_name": "recovery_action"
+    },
+    {
+      "name": "recovery-compensation",
+      "kind": "worker",
+      "working_directory": "apps/api",
+      "executable": "uv",
+      "arguments": ["run", "python", "-m", "app.workers.recovery_compensation_worker"],
+      "worker_name": "recovery_compensation"
+    },
+    {
+      "name": "recovery-message",
+      "kind": "worker",
+      "working_directory": "apps/api",
+      "executable": "uv",
+      "arguments": ["run", "python", "-m", "app.workers.recovery_message_worker"],
+      "worker_name": "recovery_message"
+    },
+    {
+      "name": "recovery-outcome",
+      "kind": "worker",
+      "working_directory": "apps/api",
+      "executable": "uv",
+      "arguments": ["run", "python", "-m", "app.workers.recovery_outcome_worker"],
+      "worker_name": "recovery_outcome"
+    },
+    {
+      "name": "incident-detection",
+      "kind": "worker",
+      "working_directory": "apps/api",
+      "executable": "uv",
+      "arguments": ["run", "python", "-m", "app.workers.incident_detection_worker"],
+      "worker_name": "incident_detection"
+    },
+    {
+      "name": "web",
+      "kind": "service",
+      "working_directory": "apps/web",
+      "executable": "npm.cmd",
+      "arguments": ["run", "dev", "--", "--port", "3000"],
+      "port": 3000
+    }
+  ]
+}

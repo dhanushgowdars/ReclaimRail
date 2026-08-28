@@ -110,8 +110,7 @@ def create_session(
         RecoveryCaseStatus.WAITING.value,
     }:
         results.append(query_result(payment))
-        if recovery_case.source_incident_id is not None:
-            results.append(query_result(incident))
+        results.append(query_result(incident))
         if payment is not None:
             results.append(query_result(previous_run_number))
     session.execute.side_effect = results
@@ -255,8 +254,11 @@ async def test_active_high_incident_schedules_wait(
 ) -> None:
     recovery_case = create_case(source_incident_id=INCIDENT_ID)
     incident = MagicMock(spec=RevenueIncident)
+    incident.id = INCIDENT_ID
     incident.status = RevenueIncidentStatus.OPEN.value
     incident.severity = "high"
+    incident.scope = "payment_method"
+    incident.dimension_value = "upi"
     session = create_session(
         recovery_case=recovery_case,
         payment=create_payment(),
@@ -277,6 +279,41 @@ async def test_active_high_incident_schedules_wait(
     assert result.actions[0].status == RecoveryActionStatus.SCHEDULED.value
     assert recovery_case.status == RecoveryCaseStatus.WAITING.value
     assert recovery_case.next_action_at == NOW + timedelta(minutes=15)
+
+
+@pytest.mark.asyncio
+async def test_new_matching_incident_blocks_recovery_without_source_incident(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recovery_case = create_case()
+    incident = MagicMock(spec=RevenueIncident)
+    incident.id = INCIDENT_ID
+    incident.status = RevenueIncidentStatus.OPEN.value
+    incident.severity = "critical"
+    incident.scope = "payment_method"
+    incident.dimension_value = "upi"
+    session = create_session(
+        recovery_case=recovery_case,
+        payment=create_payment(),
+        incident=incident,
+    )
+    patch_audit(monkeypatch)
+
+    result = await plan_and_persist_recovery_case(
+        session,
+        recovery_case_id=CASE_ID,
+        available_channels=(RecoveryChannel.EMAIL,),
+        alternate_payment_methods=("card",),
+        planned_at=NOW,
+    )
+
+    assert result.plan.decision is RecoveryPlanDecision.WAIT
+    assert result.agent_run.input_snapshot["active_incident"] == {
+        "incident_id": str(INCIDENT_ID),
+        "scope": "payment_method",
+        "dimension_value": "upi",
+        "severity": "critical",
+    }
 
 
 @pytest.mark.asyncio

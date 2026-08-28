@@ -148,6 +148,7 @@ async def test_loads_unlocked_context_for_external_planning() -> None:
     session.execute.side_effect = [
         query_result(create_case()),
         query_result(create_payment()),
+        query_result(None),
     ]
 
     context = await load_recovery_planning_context(
@@ -175,6 +176,7 @@ async def test_persists_gemini_metadata_and_usage(
     session.execute.side_effect = [
         query_result(recovery_case),
         query_result(create_payment()),
+        query_result(None),
         query_result(0),
     ]
     append_audit = patch_audit(monkeypatch)
@@ -214,6 +216,7 @@ async def test_persists_deterministic_fallback_evidence(
     session.execute.side_effect = [
         query_result(create_case()),
         query_result(create_payment()),
+        query_result(None),
         query_result(0),
     ]
     append_audit = patch_audit(monkeypatch)
@@ -243,6 +246,7 @@ async def test_fresh_policy_stops_stale_gemini_recovery_plan(
     session.execute.side_effect = [
         query_result(recovery_case),
         query_result(create_payment(state="authorized")),
+        query_result(None),
         query_result(0),
     ]
     patch_audit(monkeypatch)
@@ -270,6 +274,7 @@ async def test_rejects_planner_result_from_another_planning_attempt() -> None:
     session.execute.side_effect = [
         query_result(create_case()),
         query_result(create_payment()),
+        query_result(None),
     ]
 
     with pytest.raises(RecoveryPlannerResultMismatchError, match="timestamp"):

@@ -7,7 +7,6 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.incident import RevenueIncident, RevenueIncidentStatus
 from app.db.models.payment import PaymentAttempt
 from app.db.models.recovery import (
     RecoveryAction,
@@ -51,19 +50,15 @@ from app.services.recovery_audit_store import (
     RecoveryAuditAppendRequest,
     append_recovery_audit_event,
 )
+from app.services.recovery_incident_context import (
+    ActiveRecoveryIncidentContext,
+    load_active_recovery_incident_context,
+)
 
 PLANNABLE_CASE_STATUSES = frozenset(
     {
         RecoveryCaseStatus.OPEN,
         RecoveryCaseStatus.WAITING,
-    },
-)
-
-ACTIVE_INCIDENT_STATUSES = frozenset(
-    {
-        RevenueIncidentStatus.OPEN.value,
-        RevenueIncidentStatus.INVESTIGATING.value,
-        RevenueIncidentStatus.MITIGATING.value,
     },
 )
 
@@ -301,25 +296,17 @@ def _apply_case_projection(
     recovery_case.version += 1
 
 
-async def _load_active_incident_severity(
+async def _load_active_incident_context(
     session: AsyncSession,
     *,
-    source_incident_id: UUID | None,
-) -> IncidentSeverity | None:
-    if source_incident_id is None:
-        return None
-
-    incident_result = await session.execute(
-        select(RevenueIncident).where(
-            RevenueIncident.id == source_incident_id,
-        ),
+    recovery_case: RecoveryCase,
+) -> ActiveRecoveryIncidentContext | None:
+    return await load_active_recovery_incident_context(
+        session,
+        source_incident_id=recovery_case.source_incident_id,
+        currency=recovery_case.currency,
+        payment_method=recovery_case.payment_method,
     )
-    incident = incident_result.scalar_one_or_none()
-
-    if incident is None or incident.status not in ACTIVE_INCIDENT_STATUSES:
-        return None
-
-    return IncidentSeverity(incident.severity)
 
 
 async def load_recovery_planning_context(
@@ -367,15 +354,15 @@ async def load_recovery_planning_context(
             f"Payment attempt {recovery_case.payment_attempt_id} does not exist",
         )
 
-    incident_severity = await _load_active_incident_severity(
+    incident_context = await _load_active_incident_context(
         session,
-        source_incident_id=recovery_case.source_incident_id,
+        recovery_case=recovery_case,
     )
 
     return _build_planning_context(
         recovery_case,
         payment_attempt,
-        incident_severity=incident_severity,
+        incident_severity=(incident_context.severity if incident_context is not None else None),
         available_channels=available_channels,
         alternate_payment_methods=alternate_payment_methods,
         planned_at=planned_at,
@@ -450,15 +437,15 @@ async def plan_and_persist_recovery_case(
             f"Payment attempt {recovery_case.payment_attempt_id} does not exist",
         )
 
-    incident_severity = await _load_active_incident_severity(
+    incident_context = await _load_active_incident_context(
         session,
-        source_incident_id=recovery_case.source_incident_id,
+        recovery_case=recovery_case,
     )
 
     context = _build_planning_context(
         recovery_case,
         payment_attempt,
-        incident_severity=incident_severity,
+        incident_severity=(incident_context.severity if incident_context is not None else None),
         available_channels=available_channels,
         alternate_payment_methods=alternate_payment_methods,
         planned_at=planned_at,
@@ -505,9 +492,19 @@ async def plan_and_persist_recovery_case(
         ).value,
         model_name=planner_result.model_name,
         prompt_version=plan.planner_version,
-        input_snapshot=_input_snapshot(
-            context,
-        ),
+        input_snapshot={
+            **_input_snapshot(context),
+            "active_incident": (
+                {
+                    "incident_id": str(incident_context.incident_id),
+                    "scope": incident_context.scope,
+                    "dimension_value": incident_context.dimension_value,
+                    "severity": incident_context.severity.value,
+                }
+                if incident_context is not None
+                else None
+            ),
+        },
         evidence=_planning_evidence(
             context,
             plan,

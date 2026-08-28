@@ -15,6 +15,7 @@ from app.integrations.razorpay.payment_events import (
     PaymentEventNormalizationError,
     UnsupportedPaymentEventError,
     normalize_razorpay_payment_event,
+    normalize_razorpay_payment_link_event,
 )
 from app.integrations.razorpay.webhooks import (
     RazorpayWebhookEnvelope,
@@ -28,6 +29,11 @@ from app.services.payment_projector import (
     PaymentProjectionConflictError,
     PaymentProjectionResult,
     project_payment_lifecycle_event,
+)
+from app.services.recovery_outcome_reconciler import (
+    RecoveryOutcomeProviderEvidenceError,
+    RecoveryOutcomeReconciliationNotReadyError,
+    reconcile_recovery_payment_link_webhook,
 )
 
 
@@ -135,6 +141,56 @@ async def process_canonical_payment_webhook(
             disposition=PaymentWebhookDisposition.FAILED,
             processed_at=processed_at,
             error="Canonical webhook contains an invalid envelope",
+        )
+
+    try:
+        payment_link_event = normalize_razorpay_payment_link_event(
+            provider_event_id=webhook_event.provider_event_id,
+            envelope=envelope,
+        )
+    except UnsupportedPaymentEventError:
+        payment_link_event = None
+    except PaymentEventNormalizationError as error:
+        if webhook_event.event.startswith("payment_link."):
+            return await complete_without_projection(
+                session,
+                webhook_event,
+                disposition=PaymentWebhookDisposition.FAILED,
+                processed_at=processed_at,
+                error=str(error),
+            )
+        payment_link_event = None
+
+    if payment_link_event is not None:
+        try:
+            outcome = await reconcile_recovery_payment_link_webhook(
+                session,
+                payment_link=payment_link_event.payment_link,
+                provider_event_id=payment_link_event.provider_event_id,
+                reconciled_at=processed_at,
+            )
+        except (
+            RecoveryOutcomeProviderEvidenceError,
+            RecoveryOutcomeReconciliationNotReadyError,
+        ) as error:
+            return await complete_without_projection(
+                session,
+                webhook_event,
+                disposition=PaymentWebhookDisposition.FAILED,
+                processed_at=processed_at,
+                error=str(error),
+            )
+
+        return await complete_without_projection(
+            session,
+            webhook_event,
+            disposition=(
+                PaymentWebhookDisposition.PROJECTED
+                if outcome is not None
+                else PaymentWebhookDisposition.SKIPPED
+            ),
+            processed_at=processed_at,
+            error=None,
         )
 
     try:

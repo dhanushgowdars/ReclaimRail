@@ -10,6 +10,7 @@ from uuid import UUID
 
 from sqlalchemy import case, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.db.models.incident import RevenueIncident, RevenueIncidentStatus
 from app.domain.incidents import IncidentSeverity
@@ -31,7 +32,7 @@ class ActiveRecoveryIncidentContext:
     dimension_value: str
 
 
-def _severity_rank() -> object:
+def _severity_rank() -> ColumnElement[int]:
     return case(
         (RevenueIncident.severity == IncidentSeverity.CRITICAL.value, 4),
         (RevenueIncident.severity == IncidentSeverity.HIGH.value, 3),
@@ -45,7 +46,7 @@ async def load_active_recovery_incident_context(
     *,
     source_incident_id: UUID | None,
     currency: str,
-    payment_method: str,
+    payment_method: str | None,
 ) -> ActiveRecoveryIncidentContext | None:
     """Return the strongest active incident relevant to this recovery case.
 
@@ -53,13 +54,13 @@ async def load_active_recovery_incident_context(
     payment-method incidents are evaluated dynamically for every decision.
     """
 
-    dynamic_match = or_(
-        RevenueIncident.scope == "global",
-        (
+    dynamic_match = RevenueIncident.scope == "global"
+    if payment_method is not None:
+        dynamic_match = or_(
+            dynamic_match,
             (RevenueIncident.scope == "payment_method")
-            & (RevenueIncident.dimension_value == payment_method)
-        ),
-    )
+            & (RevenueIncident.dimension_value == payment_method),
+        )
     relevant_match = dynamic_match
     if source_incident_id is not None:
         relevant_match = or_(RevenueIncident.id == source_incident_id, dynamic_match)

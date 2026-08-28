@@ -151,7 +151,7 @@ async def process_canonical_payment_webhook(
     except UnsupportedPaymentEventError:
         payment_link_event = None
     except PaymentEventNormalizationError as error:
-        if webhook_event.event.startswith("payment_link."):
+        if webhook_event.event_type.startswith("payment_link."):
             return await complete_without_projection(
                 session,
                 webhook_event,

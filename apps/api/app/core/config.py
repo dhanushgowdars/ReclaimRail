@@ -32,6 +32,11 @@ class Settings(BaseSettings):
         ge=256,
         le=4096,
     )
+    gemini_request_timeout_seconds: float = Field(
+        default=8.0,
+        ge=1.0,
+        le=60.0,
+    )
 
     outbox_stream_name: str = "reclaimrail:webhook-events:v1"
     outbox_batch_size: int = Field(
@@ -197,6 +202,11 @@ class Settings(BaseSettings):
         default=1.0,
         ge=0.1,
         le=300.0,
+    )
+    payment_lab_recovery_claim_timeout_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=3600,
     )
 
     model_config = SettingsConfigDict(

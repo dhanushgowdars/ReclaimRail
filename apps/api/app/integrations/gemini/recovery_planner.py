@@ -1,3 +1,4 @@
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -328,6 +329,7 @@ class GoogleGenAIRecoveryPlanProvider:
         model_name: str,
         temperature: float = 0.1,
         max_output_tokens: int = 1024,
+        request_timeout_seconds: float = 8.0,
     ) -> None:
         normalized_api_key = api_key.strip()
         normalized_model_name = model_name.strip()
@@ -340,11 +342,14 @@ class GoogleGenAIRecoveryPlanProvider:
             raise ValueError("Gemini temperature must be between zero and one")
         if not 256 <= max_output_tokens <= 4096:
             raise ValueError("Gemini output-token limit must be between 256 and 4096")
+        if not 1.0 <= request_timeout_seconds <= 60.0:
+            raise ValueError("Gemini request timeout must be between 1 and 60 seconds")
 
         self._api_key = normalized_api_key
         self.model_name = normalized_model_name
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
+        self._request_timeout_seconds = request_timeout_seconds
 
     async def generate_plan(
         self,
@@ -354,21 +359,22 @@ class GoogleGenAIRecoveryPlanProvider:
         async_client = client.aio
 
         try:
-            response = await async_client.models.generate_content(
-                model=self.model_name,
-                contents=build_recovery_planning_prompt(context),
-                config=types.GenerateContentConfig(
-                    system_instruction=GEMINI_RECOVERY_SYSTEM_INSTRUCTION,
-                    temperature=self._temperature,
-                    candidate_count=1,
-                    max_output_tokens=self._max_output_tokens,
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level=types.ThinkingLevel.MINIMAL,
+            async with asyncio.timeout(self._request_timeout_seconds):
+                response = await async_client.models.generate_content(
+                    model=self.model_name,
+                    contents=build_recovery_planning_prompt(context),
+                    config=types.GenerateContentConfig(
+                        system_instruction=GEMINI_RECOVERY_SYSTEM_INSTRUCTION,
+                        temperature=self._temperature,
+                        candidate_count=1,
+                        max_output_tokens=self._max_output_tokens,
+                        thinking_config=types.ThinkingConfig(
+                            thinking_level=types.ThinkingLevel.MINIMAL,
+                        ),
+                        response_mime_type="application/json",
+                        response_json_schema=GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA,
                     ),
-                    response_mime_type="application/json",
-                    response_json_schema=GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA,
-                ),
-            )
+                )
 
             if not response.text:
                 raise GeminiPlannerProviderError(
@@ -408,6 +414,7 @@ def create_gemini_recovery_plan_provider(
         model_name=settings.gemini_model_name,
         temperature=settings.gemini_temperature,
         max_output_tokens=settings.gemini_max_output_tokens,
+        request_timeout_seconds=settings.gemini_request_timeout_seconds,
     )
 
 

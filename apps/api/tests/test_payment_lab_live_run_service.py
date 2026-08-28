@@ -10,6 +10,7 @@ from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
 from app.db.models.recovery import RecoveryAction, RecoveryAgentRun, RecoveryCase
 from app.db.models.recovery_outcome import RecoveryOutcome
 from app.services.payment_lab_live_run_service import (
+    PaymentLabLiveBusinessState,
     PaymentLabLiveRunNotFoundError,
     PaymentLabLiveStage,
     PaymentLabLiveStepStatus,
@@ -53,14 +54,14 @@ def build_run(*, status: str = PaymentLabRunStatus.CHECKOUT_READY.value) -> Magi
     return run
 
 
-def build_payment() -> MagicMock:
+def build_payment(*, state: str = "failed") -> MagicMock:
     payment = MagicMock(spec=PaymentAttempt)
     payment.id = ATTEMPT_ID
     payment.provider_payment_id = "pay_live_status"
     payment.method = "netbanking"
-    payment.current_state = "failed"
-    payment.error_code = "BAD_REQUEST_ERROR"
-    payment.error_reason = "payment_failed"
+    payment.current_state = state
+    payment.error_code = "BAD_REQUEST_ERROR" if state == "failed" else None
+    payment.error_reason = "payment_failed" if state == "failed" else None
     payment.state_event_created_at = NOW + timedelta(seconds=5)
     return payment
 
@@ -147,6 +148,10 @@ async def test_checkout_run_waits_for_signed_failure() -> None:
     )
 
     assert result.current_stage is PaymentLabLiveStage.CHECKOUT
+    assert result.business_state is (PaymentLabLiveBusinessState.AWAITING_ORIGINAL_PAYMENT)
+    assert result.active_step_key == "verified_failure"
+    assert result.automation_complete is False
+    assert result.financial_outcome_terminal is False
     assert result.terminal is False
     assert result.poll_after_milliseconds == 500
     assert result.payment is None
@@ -186,6 +191,9 @@ async def test_verified_failure_exposes_real_stabilization_state() -> None:
     result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
 
     assert result.current_stage is PaymentLabLiveStage.FAILURE
+    assert result.business_state is PaymentLabLiveBusinessState.FAILURE_STABILIZING
+    assert result.active_step_key == "recovery_case"
+    assert result.waiting_reason == "Five-second late-authorization safety window"
     assert result.steps[1].status is PaymentLabLiveStepStatus.COMPLETED
     assert result.steps[2].status is PaymentLabLiveStepStatus.ACTIVE
     assert result.steps[2].detail == (
@@ -221,6 +229,7 @@ async def test_completed_run_exposes_provider_agent_policy_and_outcome_evidence(
     )
 
     assert result.current_stage is PaymentLabLiveStage.COMPLETED
+    assert result.business_state is PaymentLabLiveBusinessState.RECOVERED
     assert result.terminal is True
     assert result.poll_after_milliseconds is None
     assert result.payment is not None
@@ -262,6 +271,9 @@ async def test_created_payment_link_waits_for_provider_outcome() -> None:
     result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
 
     assert result.current_stage is PaymentLabLiveStage.OUTCOME
+    assert result.business_state is (PaymentLabLiveBusinessState.AWAITING_RECOVERY_PAYMENT)
+    assert result.automation_complete is True
+    assert result.financial_outcome_terminal is False
     assert result.terminal is False
     assert result.outcome is None
     assert result.steps[-2].status is PaymentLabLiveStepStatus.COMPLETED
@@ -295,6 +307,7 @@ async def test_policy_escalation_is_a_terminal_safe_disposition() -> None:
     )
 
     assert result.current_stage is PaymentLabLiveStage.COMPLETED
+    assert result.business_state is PaymentLabLiveBusinessState.ESCALATED
     assert result.terminal is True
     assert result.poll_after_milliseconds is None
     assert result.outcome is None
@@ -304,6 +317,96 @@ async def test_policy_escalation_is_a_terminal_safe_disposition() -> None:
     assert result.steps[-2].label == "Safe disposition"
     assert result.steps[-1].status is PaymentLabLiveStepStatus.COMPLETED
     assert result.steps[-1].detail == ("Policy required human review; no financial action executed")
+
+
+@pytest.mark.asyncio
+async def test_successful_original_payment_never_enters_failure_or_recovery() -> None:
+    run = build_run(status=PaymentLabRunStatus.COMPLETED.value)
+    run.payment_attempt_id = ATTEMPT_ID
+    payment = build_payment(state="captured")
+    session = AsyncMock(spec=AsyncSession)
+    session.get.side_effect = (run, payment)
+    session.execute.return_value = scalar_result(None)
+
+    result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
+
+    assert result.business_state is (PaymentLabLiveBusinessState.ORIGINAL_PAYMENT_SUCCEEDED)
+    assert result.current_stage is PaymentLabLiveStage.COMPLETED
+    assert result.state_label == "Original payment completed; no recovery required"
+    assert result.terminal is True
+    assert result.automation_complete is True
+    assert result.financial_outcome_terminal is True
+    assert result.active_step_key is None
+    assert result.waiting_reason is None
+    assert [step.key for step in result.steps] == ["payment_attempt"]
+    assert result.steps[0].label == "Original payment"
+    assert "failure" not in result.steps[0].detail.casefold()
+    assert result.agent is None
+    assert result.actions == ()
+    assert result.outcome is None
+
+
+@pytest.mark.asyncio
+async def test_late_authorization_remains_live_until_compensation_finishes() -> None:
+    run = build_run(status=PaymentLabRunStatus.COMPLETED.value)
+    run.payment_attempt_id = ATTEMPT_ID
+    payment = build_payment(state="authorized")
+    recovery_case = build_case(status="ready")
+    agent = build_agent()
+    action = build_action()
+
+    action_result = MagicMock()
+    action_result.scalars.return_value.all.return_value = [action]
+    session = AsyncMock(spec=AsyncSession)
+    session.get.side_effect = (run, payment)
+    session.execute.side_effect = (
+        scalar_result(recovery_case),
+        scalar_result(agent),
+        action_result,
+        scalar_result(None),
+    )
+
+    result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
+
+    assert result.business_state is PaymentLabLiveBusinessState.STOPPING_RECOVERY
+    assert result.current_stage is PaymentLabLiveStage.OUTCOME
+    assert result.terminal is False
+    assert result.automation_complete is False
+    assert result.financial_outcome_terminal is False
+    assert result.active_step_key == "provider_action"
+    assert result.waiting_reason == "Waiting for late-authorization compensation"
+
+
+@pytest.mark.asyncio
+async def test_late_authorization_becomes_terminal_after_recovery_is_cancelled() -> None:
+    run = build_run(status=PaymentLabRunStatus.COMPLETED.value)
+    run.payment_attempt_id = ATTEMPT_ID
+    payment = build_payment(state="captured")
+    recovery_case = build_case(status="cancelled")
+    agent = build_agent()
+    action = build_action()
+
+    action_result = MagicMock()
+    action_result.scalars.return_value.all.return_value = [action]
+    session = AsyncMock(spec=AsyncSession)
+    session.get.side_effect = (run, payment)
+    session.execute.side_effect = (
+        scalar_result(recovery_case),
+        scalar_result(agent),
+        action_result,
+        scalar_result(None),
+    )
+
+    result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
+
+    assert result.business_state is PaymentLabLiveBusinessState.STOPPED
+    assert result.state_label == "Original payment completed; recovery stopped safely"
+    assert result.current_stage is PaymentLabLiveStage.COMPLETED
+    assert result.terminal is True
+    assert result.automation_complete is True
+    assert result.financial_outcome_terminal is True
+    assert result.active_step_key is None
+    assert result.poll_after_milliseconds is None
 
 
 @pytest.mark.asyncio

@@ -89,7 +89,13 @@ class PaymentLabLiveRunResponse(ResponseModel):
     mode: str
     provenance: str
     persisted_status: str
+    business_state: str
+    state_label: str
     current_stage: str
+    active_step_key: str | None
+    waiting_reason: str | None
+    automation_complete: bool
+    financial_outcome_terminal: bool
     terminal: bool
     poll_after_milliseconds: int | None
     amount_minor: int = Field(gt=0)

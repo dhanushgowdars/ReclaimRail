@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -26,6 +27,7 @@ from app.integrations.gemini import (
     create_gemini_recovery_plan_provider,
     plan_with_gemini_fallback,
 )
+from app.integrations.gemini import recovery_planner as gemini_recovery_planner
 
 NOW = datetime(2026, 8, 25, 13, 0, tzinfo=UTC)
 
@@ -155,6 +157,54 @@ async def test_provider_error_uses_deterministic_fallback() -> None:
 
     assert result.source is RecoveryPlannerSource.DETERMINISTIC
     assert result.fallback_reason is GeminiPlannerFallbackReason.PROVIDER_ERROR
+
+
+@pytest.mark.asyncio
+async def test_provider_timeout_uses_deterministic_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SlowModels:
+        async def generate_content(self, **_: object) -> object:
+            await asyncio.sleep(10)
+            raise AssertionError("unreachable")
+
+    class SlowAsyncClient:
+        def __init__(self) -> None:
+            self.models = SlowModels()
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    class SlowClient:
+        def __init__(self) -> None:
+            self.aio = SlowAsyncClient()
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = SlowClient()
+    monkeypatch.setattr(
+        gemini_recovery_planner.genai,
+        "Client",
+        lambda **_: client,
+    )
+    provider = GoogleGenAIRecoveryPlanProvider(
+        api_key="test-key",
+        model_name="gemini-test",
+        request_timeout_seconds=1.0,
+    )
+
+    result = await plan_with_gemini_fallback(
+        create_context(),
+        provider=provider,
+    )
+
+    assert result.source is RecoveryPlannerSource.DETERMINISTIC
+    assert result.fallback_reason is GeminiPlannerFallbackReason.PROVIDER_ERROR
+    assert client.aio.closed is True
+    assert client.closed is True
 
 
 @pytest.mark.asyncio
@@ -322,6 +372,7 @@ def test_provider_factory_uses_configured_model_without_exposing_key() -> None:
         ({"model_name": " "}, "model name"),
         ({"temperature": 1.1}, "temperature"),
         ({"max_output_tokens": 10}, "token"),
+        ({"request_timeout_seconds": 0.5}, "timeout"),
     ],
 )
 def test_provider_rejects_invalid_configuration(

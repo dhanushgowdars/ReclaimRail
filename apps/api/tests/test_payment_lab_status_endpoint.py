@@ -13,6 +13,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_database_session
 from app.main import app
 from app.services.payment_lab_live_run_service import (
+    PaymentLabLiveBusinessState,
     PaymentLabLiveRun,
     PaymentLabLiveRunNotFoundError,
     PaymentLabLiveStage,
@@ -48,7 +49,13 @@ def build_live_run() -> PaymentLabLiveRun:
         mode="guided",
         provenance="razorpay_test",
         persisted_status="checkout_ready",
+        business_state=PaymentLabLiveBusinessState.AWAITING_ORIGINAL_PAYMENT,
+        state_label="Waiting for provider payment result",
         current_stage=PaymentLabLiveStage.CHECKOUT,
+        active_step_key="verified_failure",
+        waiting_reason="Waiting for signed provider evidence",
+        automation_complete=False,
+        financial_outcome_terminal=False,
         terminal=False,
         poll_after_milliseconds=1000,
         amount_minor=349_900,
@@ -92,6 +99,9 @@ def test_reads_protected_provider_backed_live_run(
     body = response.json()
     assert body["payment_lab_run_id"] == str(RUN_ID)
     assert body["current_stage"] == "checkout"
+    assert body["business_state"] == "awaiting_original_payment"
+    assert body["active_step_key"] == "verified_failure"
+    assert body["automation_complete"] is False
     assert body["poll_after_milliseconds"] == 1000
     assert body["steps"][0]["status"] == "completed"
     assert "lab-secret" not in response.text

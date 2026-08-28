@@ -647,6 +647,15 @@ async def plan_and_persist_recovery_case(
                 "output_token_count": (planner_result.output_token_count),
                 "plan_decision": plan.decision,
                 "reasoning_summary": (plan.reasoning_summary),
+                "bounded_ai_analysis": (
+                    {
+                        "root_cause_category": planner_result.analysis.root_cause_category,
+                        "confidence": planner_result.analysis.confidence,
+                        "evidence_references": list(planner_result.analysis.evidence_references),
+                    }
+                    if planner_result.analysis is not None
+                    else None
+                ),
                 "actions": [
                     {
                         "action_id": action.id,

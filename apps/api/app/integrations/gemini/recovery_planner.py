@@ -613,6 +613,13 @@ async def plan_with_gemini_fallback(
             reason=GeminiPlannerFallbackReason.POLICY_CONFLICT,
         )
 
+    valid_evidence_references = set(build_recovery_evidence_tools(context))
+    if not set(payload.analysis.evidence_references).issubset(valid_evidence_references):
+        return _deterministic_fallback(
+            context,
+            reason=GeminiPlannerFallbackReason.INVALID_RESPONSE,
+        )
+
     return BoundedRecoveryPlannerResult(
         plan=plan,
         source=RecoveryPlannerSource.GEMINI,

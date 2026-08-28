@@ -23,6 +23,7 @@ from app.integrations.gemini import (
     GeminiProviderResponse,
     GoogleGenAIRecoveryPlanProvider,
     RecoveryPlannerSource,
+    build_recovery_evidence_tools,
     build_recovery_planning_prompt,
     create_gemini_recovery_plan_provider,
     plan_with_gemini_fallback,
@@ -141,6 +142,18 @@ async def test_uses_valid_structured_gemini_plan() -> None:
     assert result.analysis.confidence == 0.91
 
 
+def test_exposes_only_the_four_read_only_evidence_tools() -> None:
+    evidence_tools = build_recovery_evidence_tools(create_context())
+
+    assert set(evidence_tools) == {
+        "payment_state_snapshot",
+        "attempt_and_recovery_history",
+        "payment_rail_incident_context",
+        "merchant_recovery_policy",
+    }
+    assert all(payload["ref"] == name for name, payload in evidence_tools.items())
+
+
 @pytest.mark.asyncio
 async def test_missing_provider_uses_deterministic_fallback() -> None:
     result = await plan_with_gemini_fallback(
@@ -152,6 +165,28 @@ async def test_missing_provider_uses_deterministic_fallback() -> None:
     assert result.fallback_used is True
     assert result.fallback_reason is GeminiPlannerFallbackReason.NOT_CONFIGURED
     assert result.plan.planner_version == "deterministic-v1"
+
+
+@pytest.mark.asyncio
+async def test_unknown_analysis_evidence_reference_uses_fallback() -> None:
+    payload = valid_payload()
+    analysis = payload["analysis"]
+    assert isinstance(analysis, dict)
+    analysis["evidence_references"] = ["untrusted_customer_data"]
+    provider = StubProvider(
+        response=GeminiProviderResponse(
+            structured_plan=payload,
+            model_name="gemini-3.7-flash",
+        ),
+    )
+
+    result = await plan_with_gemini_fallback(
+        create_context(),
+        provider=provider,
+    )
+
+    assert result.source is RecoveryPlannerSource.DETERMINISTIC
+    assert result.fallback_reason is GeminiPlannerFallbackReason.INVALID_RESPONSE
 
 
 @pytest.mark.asyncio

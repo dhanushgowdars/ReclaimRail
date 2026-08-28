@@ -10,12 +10,13 @@ from app.db.models.payment import PaymentAttempt
 from app.db.models.recovery import (
     RecoveryActionStatus,
     RecoveryAgentRunStatus,
+    RecoveryApprovalStatus,
     RecoveryAuditEvent,
     RecoveryCase,
     RecoveryPlannerProvider,
 )
 from app.domain.recovery import RecoveryCaseStatus, RecoveryChannel, RecoveryPlanDecision
-from app.services import recovery_plan_service
+from app.services import recovery_approval_service, recovery_plan_service
 from app.services.recovery_plan_service import (
     RecoveryCaseNotPlannableError,
     RecoveryPlanningCaseNotFoundError,
@@ -171,6 +172,51 @@ async def test_persists_policy_evaluated_recovery_plan(
     assert audit_request.event_type == "agent.plan.persisted"
     assert audit_request.agent_run_id == result.agent_run.id
     assert len(audit_request.event_data["actions"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_high_value_payment_link_waits_for_human_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recovery_case = create_case()
+    session = create_session(
+        recovery_case=recovery_case,
+        payment=create_payment(),
+    )
+    append_audit, _ = patch_audit(monkeypatch)
+    monkeypatch.setattr(
+        recovery_approval_service,
+        "append_recovery_audit_event",
+        append_audit,
+    )
+
+    result = await plan_and_persist_recovery_case(
+        session,
+        recovery_case_id=CASE_ID,
+        available_channels=(RecoveryChannel.EMAIL,),
+        alternate_payment_methods=("card",),
+        planned_at=NOW,
+        approval_threshold_minor=200_000,
+        approval_window=timedelta(minutes=15),
+    )
+
+    payment_link_action = result.actions[0]
+    assert payment_link_action.action_type == "create_payment_link"
+    assert payment_link_action.status == RecoveryActionStatus.APPROVAL_REQUIRED.value
+    assert recovery_case.status == RecoveryCaseStatus.AWAITING_APPROVAL.value
+    assert recovery_case.next_action_at is None
+    assert len(result.approvals) == 1
+    approval = result.approvals[0]
+    assert approval.recovery_action_id == payment_link_action.id
+    assert approval.status == RecoveryApprovalStatus.PENDING.value
+    assert approval.amount_minor == 250_000
+    assert approval.threshold_minor == 200_000
+    assert approval.expires_at == NOW + timedelta(minutes=15)
+    assert append_audit.await_count == 2
+    assert [call.kwargs["request"].event_type for call in append_audit.await_args_list] == [
+        "agent.plan.persisted",
+        "approval.requested",
+    ]
 
 
 @pytest.mark.asyncio

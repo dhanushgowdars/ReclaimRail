@@ -21,6 +21,8 @@ def create_settings() -> SimpleNamespace:
         payment_lab_recovery_batch_size=25,
         payment_lab_recovery_poll_interval_seconds=1.0,
         payment_lab_recovery_claim_timeout_seconds=60,
+        recovery_approval_threshold_minor=300_000,
+        recovery_approval_ttl_seconds=900,
     )
 
 
@@ -100,6 +102,8 @@ async def test_run_once_executes_batch_and_closes_database(
         provider=provider,
         batch_size=25,
         claim_timeout=timedelta(seconds=60),
+        approval_threshold_minor=300_000,
+        approval_window=timedelta(seconds=900),
     )
     close_database.assert_awaited_once_with()
 

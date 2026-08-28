@@ -167,6 +167,7 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
         build_result(row=(build_case(), build_payment_attempt(), build_outcome())),
         build_result(values=[build_agent_run()]),
         build_result(values=[build_action()]),
+        build_result(),
         build_result(values=[build_transition()]),
     )
     audit_entries = (build_audit_entry(),)
@@ -204,7 +205,7 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
     assert detail.audit_chain.total_event_count == 1
     assert detail.audit_chain.events[0].event_hash == "a" * 64
     assert not hasattr(detail.audit_chain.events[0], "event_data")
-    assert session.execute.await_count == 4
+    assert session.execute.await_count == 5
 
 
 @pytest.mark.asyncio
@@ -231,6 +232,7 @@ async def test_audit_timeline_is_bounded_without_changing_chain_verification(
     session = AsyncMock(spec=AsyncSession)
     session.execute.side_effect = (
         build_result(row=(build_case(), build_payment_attempt(), None)),
+        build_result(),
         build_result(),
         build_result(),
         build_result(),

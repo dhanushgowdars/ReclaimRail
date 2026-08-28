@@ -11,7 +11,13 @@ from sqlalchemy.sql.base import Executable
 from app.core.config import Settings
 from app.db.models.outbox import OutboxMessage, OutboxMessageStatus
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
-from app.db.models.recovery import RecoveryAction, RecoveryActionStatus, RecoveryCase
+from app.db.models.recovery import (
+    RecoveryAction,
+    RecoveryActionStatus,
+    RecoveryApproval,
+    RecoveryApprovalStatus,
+    RecoveryCase,
+)
 from app.db.models.recovery_outcome import RecoveryOutcome, RecoveryOutcomeStatus
 from app.domain.recovery import RecoveryCaseStatus
 
@@ -108,6 +114,12 @@ async def load_database_queue_metrics(
             ),
         ),
         (
+            "recovery_approvals",
+            select(func.count(), func.min(RecoveryApproval.requested_at)).where(
+                RecoveryApproval.status == RecoveryApprovalStatus.PENDING.value,
+            ),
+        ),
+        (
             "recovery_actions",
             select(func.count(), func.min(RecoveryAction.created_at)).where(
                 RecoveryAction.status.in_(
@@ -139,6 +151,7 @@ async def load_database_queue_metrics(
                         RecoveryCaseStatus.OPEN.value,
                         RecoveryCaseStatus.PLANNING.value,
                         RecoveryCaseStatus.READY.value,
+                        RecoveryCaseStatus.AWAITING_APPROVAL.value,
                         RecoveryCaseStatus.EXECUTING.value,
                         RecoveryCaseStatus.WAITING.value,
                     ),

@@ -85,6 +85,10 @@ class SessionContext:
 
 class StubSessionFactory:
     def __init__(self) -> None:
+        self.expiry_session = AsyncMock(
+            spec=AsyncSession,
+        )
+        self.expiry_session.execute.return_value = scalar_result(())
         self.discovery_session = MagicMock(
             name="discovery_session",
         )
@@ -95,6 +99,11 @@ class StubSessionFactory:
 
         return SessionContext(
             self.discovery_session,
+        )
+
+    def begin(self) -> SessionContext:
+        return SessionContext(
+            self.expiry_session,
         )
 
 

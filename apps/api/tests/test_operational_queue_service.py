@@ -31,6 +31,7 @@ async def test_database_queue_metrics_include_all_operational_queues() -> None:
         query_result(4, NOW - timedelta(seconds=40)),
         query_result(5, NOW - timedelta(seconds=50)),
         query_result(6, NOW - timedelta(seconds=60)),
+        query_result(7, NOW - timedelta(seconds=70)),
     ]
 
     metrics = await load_database_queue_metrics(session, reference_time=NOW)
@@ -39,19 +40,21 @@ async def test_database_queue_metrics_include_all_operational_queues() -> None:
         "outbox_dispatch",
         "outbox_failed",
         "payment_lab_recovery",
+        "recovery_approvals",
         "recovery_actions",
         "recovery_outcomes",
         "late_authorization_compensation",
     ]
-    assert [metric.pending_count for metric in metrics] == [2, 1, 3, 4, 5, 6]
-    assert metrics[-1].oldest_age_seconds == 60
-    assert session.execute.await_count == 6
+    assert [metric.pending_count for metric in metrics] == [2, 1, 3, 4, 5, 6, 7]
+    assert metrics[-1].oldest_age_seconds == 70
+    assert session.execute.await_count == 7
 
 
 @pytest.mark.asyncio
 async def test_dead_letters_or_failed_outbox_require_attention() -> None:
     session = AsyncMock(spec=AsyncSession)
     session.execute.side_effect = [
+        query_result(0, None),
         query_result(0, None),
         query_result(1, NOW),
         query_result(0, None),
@@ -85,7 +88,7 @@ async def test_dead_letters_or_failed_outbox_require_attention() -> None:
 @pytest.mark.asyncio
 async def test_missing_consumer_group_reports_zero_pending() -> None:
     session = AsyncMock(spec=AsyncSession)
-    session.execute.side_effect = [query_result(0, None) for _ in range(6)]
+    session.execute.side_effect = [query_result(0, None) for _ in range(7)]
     redis_client = AsyncMock()
     redis_client.xlen.side_effect = (0, 0)
     redis_client.xpending.side_effect = ResponseError("NOGROUP")

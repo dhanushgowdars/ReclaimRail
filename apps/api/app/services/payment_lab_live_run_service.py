@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.payment import PaymentAttempt
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
-from app.db.models.recovery import RecoveryAction, RecoveryAgentRun, RecoveryCase
+from app.db.models.recovery import (
+    RecoveryAction,
+    RecoveryAgentRun,
+    RecoveryApproval,
+    RecoveryCase,
+)
 from app.db.models.recovery_outcome import RecoveryOutcome
 from app.domain.payments import STOP_RECOVERY_STATES, PaymentState
 from app.domain.recovery import RecoveryCaseStatus
@@ -40,6 +45,7 @@ class PaymentLabLiveBusinessState(StrEnum):
     FAILURE_STABILIZING = "failure_stabilizing"
     DIAGNOSING = "diagnosing"
     AWAITING_POLICY = "awaiting_policy"
+    AWAITING_HUMAN_REVIEW = "awaiting_human_review"
     EXECUTING_ACTION = "executing_action"
     AWAITING_RECOVERY_PAYMENT = "awaiting_recovery_payment"
     RECOVERED = "recovered"
@@ -119,6 +125,23 @@ class PaymentLabActionEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class PaymentLabApprovalEvidence:
+    approval_id: UUID
+    recovery_action_id: UUID
+    status: str
+    request_reason: str
+    amount_minor: int
+    currency: str
+    threshold_minor: int
+    requested_at: datetime
+    expires_at: datetime
+    decided_at: datetime | None
+    decided_by: str | None
+    decision_reason: str | None
+    version: int
+
+
+@dataclass(frozen=True, slots=True)
 class PaymentLabOutcomeEvidence:
     recovery_outcome_id: UUID
     status: str
@@ -159,6 +182,7 @@ class PaymentLabLiveRun:
     agent: PaymentLabAgentEvidence | None
     actions: tuple[PaymentLabActionEvidence, ...]
     outcome: PaymentLabOutcomeEvidence | None
+    approval: PaymentLabApprovalEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +288,28 @@ def _build_outcome_evidence(
     )
 
 
+def _build_approval_evidence(
+    approval: RecoveryApproval | None,
+) -> PaymentLabApprovalEvidence | None:
+    if approval is None:
+        return None
+    return PaymentLabApprovalEvidence(
+        approval_id=approval.id,
+        recovery_action_id=approval.recovery_action_id,
+        status=approval.status,
+        request_reason=approval.request_reason,
+        amount_minor=approval.amount_minor,
+        currency=approval.currency,
+        threshold_minor=approval.threshold_minor,
+        requested_at=approval.requested_at,
+        expires_at=approval.expires_at,
+        decided_at=approval.decided_at,
+        decided_by=approval.decided_by,
+        decision_reason=approval.decision_reason,
+        version=approval.version,
+    )
+
+
 def _payment_state(payment_attempt: PaymentAttempt | None) -> PaymentState | None:
     if payment_attempt is None:
         return None
@@ -280,6 +326,7 @@ def _derive_live_state(
     recovery_case: RecoveryCase | None,
     agent_run: RecoveryAgentRun | None,
     actions: tuple[RecoveryAction, ...],
+    approval: RecoveryApproval | None,
     outcome: RecoveryOutcome | None,
 ) -> _DerivedLiveState:
     payment_state = _payment_state(payment_attempt)
@@ -369,12 +416,12 @@ def _derive_live_state(
     if case_status == RecoveryCaseStatus.ESCALATED.value:
         return _DerivedLiveState(
             business_state=PaymentLabLiveBusinessState.ESCALATED,
-            state_label="Human review required",
+            state_label="Automatic recovery escalated safely",
             current_stage=PaymentLabLiveStage.COMPLETED,
             active_step_key=None,
-            waiting_reason="Deterministic policy stopped automatic execution",
+            waiting_reason=None,
             automation_complete=True,
-            financial_outcome_terminal=False,
+            financial_outcome_terminal=True,
             terminal=True,
         )
     if case_status in {
@@ -390,6 +437,22 @@ def _derive_live_state(
             automation_complete=True,
             financial_outcome_terminal=True,
             terminal=True,
+        )
+
+    if (
+        case_status == RecoveryCaseStatus.AWAITING_APPROVAL.value
+        and approval is not None
+        and approval.status == "pending"
+    ):
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.AWAITING_HUMAN_REVIEW,
+            state_label="Operator approval required",
+            current_stage=PaymentLabLiveStage.AGENT,
+            active_step_key="human_approval",
+            waiting_reason="A protected merchant decision is required before execution",
+            automation_complete=False,
+            financial_outcome_terminal=False,
+            terminal=False,
         )
 
     if outcome is not None or any(action.status == "succeeded" for action in actions):
@@ -467,6 +530,7 @@ def _build_steps(
     recovery_case: RecoveryCase | None,
     agent_run: RecoveryAgentRun | None,
     actions: tuple[RecoveryAction, ...],
+    approval: RecoveryApproval | None,
     outcome: RecoveryOutcome | None,
 ) -> tuple[PaymentLabLiveStep, ...]:
     payment_state = _payment_state(payment_attempt)
@@ -526,18 +590,45 @@ def _build_steps(
     elif agent_run is not None and agent_run.status == "succeeded":
         policy_status = PaymentLabLiveStepStatus.ACTIVE
 
+    approval_stopped_execution = approval is not None and approval.status in {
+        "rejected",
+        "expired",
+    }
     provider_status = PaymentLabLiveStepStatus.PENDING
     if derived_state.business_state is PaymentLabLiveBusinessState.STOPPING_RECOVERY:
         provider_status = PaymentLabLiveStepStatus.ACTIVE
+    elif approval_stopped_execution:
+        provider_status = PaymentLabLiveStepStatus.COMPLETED
     elif latest_action is not None:
         if latest_action.status == "succeeded":
             provider_status = PaymentLabLiveStepStatus.COMPLETED
         elif latest_action.status == "failed":
             provider_status = PaymentLabLiveStepStatus.FAILED
+        elif latest_action.status == "approval_required":
+            provider_status = PaymentLabLiveStepStatus.PENDING
         elif latest_action.policy_outcome in {"block", "escalate", "stop"}:
             provider_status = PaymentLabLiveStepStatus.COMPLETED
         else:
             provider_status = PaymentLabLiveStepStatus.ACTIVE
+
+    approval_status = PaymentLabLiveStepStatus.PENDING
+    approval_detail = "No human approval required"
+    approval_occurred_at: datetime | None = None
+    if approval is not None:
+        approval_occurred_at = approval.decided_at or approval.requested_at
+        approval_detail = {
+            "pending": "Waiting for a protected merchant decision",
+            "approved": "Merchant approved the bounded action",
+            "rejected": "Merchant rejected the bounded action",
+            "expired": "Approval window expired without execution",
+        }.get(approval.status, "Approval state is unavailable")
+        approval_status = (
+            PaymentLabLiveStepStatus.ACTIVE
+            if approval.status == "pending"
+            else PaymentLabLiveStepStatus.COMPLETED
+        )
+    elif latest_action is not None:
+        approval_status = PaymentLabLiveStepStatus.COMPLETED
 
     successful_actions = tuple(action for action in actions if action.status == "succeeded")
     safe_disposition = (
@@ -616,11 +707,21 @@ def _build_steps(
             ),
         ),
         PaymentLabLiveStep(
+            key="human_approval",
+            label="Human approval",
+            status=approval_status,
+            occurred_at=approval_occurred_at,
+            detail=approval_detail,
+        ),
+        PaymentLabLiveStep(
             key="provider_action",
             label=(
                 "Safe disposition"
-                if latest_action is not None
-                and latest_action.policy_outcome in {"block", "escalate", "stop"}
+                if approval_stopped_execution
+                or (
+                    latest_action is not None
+                    and latest_action.policy_outcome in {"block", "escalate", "stop"}
+                )
                 else "Provider action"
             ),
             status=provider_status,
@@ -632,6 +733,8 @@ def _build_steps(
             detail=(
                 "Stopping active recovery after original-payment completion"
                 if derived_state.business_state is PaymentLabLiveBusinessState.STOPPING_RECOVERY
+                else "Approval closed without provider execution"
+                if approval_stopped_execution
                 else "Razorpay payment link created"
                 if latest_action is not None and latest_action.provider_action_id is not None
                 else "Policy stopped money-facing execution"
@@ -694,6 +797,7 @@ async def load_payment_lab_live_run(
     agent_run: RecoveryAgentRun | None = None
     actions: tuple[RecoveryAction, ...] = ()
     outcome: RecoveryOutcome | None = None
+    approval: RecoveryApproval | None = None
 
     if run.payment_attempt_id is not None:
         case_result = await session.execute(
@@ -719,6 +823,14 @@ async def load_payment_lab_live_run(
         )
         actions = tuple(action_result.scalars().all())
 
+        approval_result = await session.execute(
+            select(RecoveryApproval)
+            .where(RecoveryApproval.recovery_case_id == recovery_case.id)
+            .order_by(RecoveryApproval.requested_at.desc())
+            .limit(1),
+        )
+        approval = approval_result.scalar_one_or_none()
+
         outcome_result = await session.execute(
             select(RecoveryOutcome).where(
                 RecoveryOutcome.recovery_case_id == recovery_case.id,
@@ -732,6 +844,7 @@ async def load_payment_lab_live_run(
         recovery_case=recovery_case,
         agent_run=agent_run,
         actions=actions,
+        approval=approval,
         outcome=outcome,
     )
     return PaymentLabLiveRun(
@@ -769,10 +882,12 @@ async def load_payment_lab_live_run(
             recovery_case=recovery_case,
             agent_run=agent_run,
             actions=actions,
+            approval=approval,
             outcome=outcome,
         ),
         payment=_build_payment_evidence(payment_attempt),
         agent=_build_agent_evidence(recovery_case, agent_run),
         actions=_build_action_evidence(actions),
+        approval=_build_approval_evidence(approval),
         outcome=_build_outcome_evidence(outcome),
     )

@@ -19,6 +19,10 @@ from app.services.recovery_agent_service import (
     RecoveryAgentExecution,
     execute_recovery_agent,
 )
+from app.services.recovery_approval_service import (
+    DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    DEFAULT_APPROVAL_WINDOW,
+)
 from app.services.recovery_case_service import (
     RecoveryCaseCreationDisposition,
     RecoveryCaseIneligibilityReason,
@@ -282,6 +286,8 @@ async def start_payment_lab_recovery(
     alternate_payment_methods: Sequence[str],
     provider: GeminiRecoveryPlanProvider | None,
     claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
+    approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
 ) -> PaymentLabRecoveryStartResult:
     """Claim a verified failure and start the existing bounded recovery agent."""
 
@@ -317,6 +323,8 @@ async def start_payment_lab_recovery(
             alternate_payment_methods=alternate_payment_methods,
             planned_at=started_at,
             provider=provider,
+            approval_threshold_minor=approval_threshold_minor,
+            approval_window=approval_window,
         )
     except asyncio.CancelledError:
         await asyncio.shield(

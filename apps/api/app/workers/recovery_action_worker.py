@@ -41,6 +41,7 @@ def log_batch_result(
             "Recovery action batch completed: "
             "discovered=%d succeeded=%d "
             "already_succeeded=%d policy_denied=%d "
+            "expired_approvals=%d "
             "retryable_failures=%d "
             "permanent_failures=%d skipped=%d"
         ),
@@ -48,6 +49,7 @@ def log_batch_result(
         result.succeeded,
         result.already_succeeded,
         result.policy_denied,
+        result.expired_approvals,
         result.retryable_failures,
         result.permanent_failures,
         result.skipped,
@@ -137,6 +139,7 @@ async def run_recovery_action_worker(
                     "discovered": result.discovered,
                     "succeeded": result.succeeded,
                     "retryable_failures": result.retryable_failures,
+                    "expired_approvals": result.expired_approvals,
                 },
             )
 

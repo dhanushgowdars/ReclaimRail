@@ -48,6 +48,31 @@ GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA: dict[str, object] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
+        "analysis": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "root_cause_category": {"type": "string"},
+                "recoverability_assessment": {"type": "string"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "allowed_action_recommendation": {"type": "string"},
+                "evidence_references": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "items": {"type": "string"},
+                },
+                "operator_explanation": {"type": "string"},
+            },
+            "required": [
+                "root_cause_category",
+                "recoverability_assessment",
+                "confidence",
+                "allowed_action_recommendation",
+                "evidence_references",
+                "operator_explanation",
+            ],
+        },
         "decision": {
             "type": "string",
             "enum": ["recover", "wait", "escalate", "stop"],
@@ -122,6 +147,7 @@ GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA: dict[str, object] = {
         },
     },
     "required": [
+        "analysis",
         "decision",
         "reasoning_summary",
         "proposals",
@@ -179,10 +205,22 @@ class GeminiRecoveryActionPayload(BaseModel):
         return self
 
 
+class GeminiRecoveryAnalysisPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    root_cause_category: str = Field(min_length=1, max_length=80)
+    recoverability_assessment: str = Field(min_length=1, max_length=240)
+    confidence: float = Field(ge=0, le=1)
+    allowed_action_recommendation: str = Field(min_length=1, max_length=80)
+    evidence_references: tuple[str, ...] = Field(min_length=1, max_length=4)
+    operator_explanation: str = Field(min_length=1, max_length=400)
+
+
 class GeminiRecoveryPlanPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decision: RecoveryPlanDecision
+    analysis: GeminiRecoveryAnalysisPayload
     reasoning_summary: str = Field(min_length=1, max_length=800)
     proposals: tuple[GeminiRecoveryActionPayload, ...] = Field(
         min_length=1,
@@ -245,6 +283,7 @@ class BoundedRecoveryPlannerResult:
     fallback_reason: GeminiPlannerFallbackReason | None
     input_token_count: int | None = None
     output_token_count: int | None = None
+    analysis: GeminiRecoveryAnalysisPayload | None = None
 
     def __post_init__(self) -> None:
         if self.source is RecoveryPlannerSource.GEMINI:
@@ -256,6 +295,43 @@ class BoundedRecoveryPlannerResult:
 
 def _timestamp(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def build_recovery_evidence_tools(context: RecoveryPlanningContext) -> dict[str, object]:
+    """The four fixed, read-only evidence surfaces available to Gemini."""
+    case = context.case
+    failure = context.failure
+    return {
+        "payment_state_snapshot": {
+            "ref": "payment_state_snapshot",
+            "state": case.payment_state.value,
+            "amount_minor": case.amount_minor,
+            "currency": case.currency,
+            "payment_method": case.payment_method,
+            "late_authorization_detected": case.late_authorization_detected_at is not None,
+        },
+        "attempt_and_recovery_history": {
+            "ref": "attempt_and_recovery_history",
+            "recovery_attempt_count": case.recovery_attempt_count,
+            "failure_count": failure.failure_count,
+            "active_payment_link": case.active_payment_link_id is not None,
+        },
+        "payment_rail_incident_context": {
+            "ref": "payment_rail_incident_context",
+            "active_incident_severity": case.active_incident_severity.value
+            if case.active_incident_severity
+            else None,
+        },
+        "merchant_recovery_policy": {
+            "ref": "merchant_recovery_policy",
+            "customer_contact_allowed": case.customer_contact_allowed,
+            "approved_channels": [channel.value for channel in context.available_channels],
+            "maximum_recovery_attempts": DEFAULT_RECOVERY_PLANNER_POLICY.maximum_recovery_attempts,
+            "automatic_amount_limit_minor": (
+                DEFAULT_RECOVERY_PLANNER_POLICY.automatic_amount_limit_minor
+            ),
+        },
+    }
 
 
 def build_recovery_planning_prompt(
@@ -313,6 +389,7 @@ def build_recovery_planning_prompt(
             ),
         },
         "planned_at": context.planned_at.isoformat(),
+        "read_only_evidence_tools": build_recovery_evidence_tools(context),
     }
     return "Plan the next bounded recovery step from this evidence:\n" + json.dumps(
         evidence,
@@ -544,4 +621,5 @@ async def plan_with_gemini_fallback(
         fallback_reason=None,
         input_token_count=response.input_token_count,
         output_token_count=response.output_token_count,
+        analysis=payload.analysis,
     )

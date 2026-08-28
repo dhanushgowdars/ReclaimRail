@@ -39,6 +39,7 @@ from app.integrations.gemini import (
     BoundedRecoveryPlannerResult,
     GeminiPlannerFallbackReason,
     RecoveryPlannerSource,
+    build_recovery_evidence_tools,
 )
 from app.services.recovery_approval_service import (
     DEFAULT_APPROVAL_THRESHOLD_MINOR,
@@ -220,6 +221,21 @@ def _planning_evidence(
             "input_token_count": planner_result.input_token_count,
             "output_token_count": planner_result.output_token_count,
         },
+        "bounded_ai_analysis": (
+            {
+                "root_cause_category": planner_result.analysis.root_cause_category,
+                "recoverability_assessment": planner_result.analysis.recoverability_assessment,
+                "confidence": planner_result.analysis.confidence,
+                "allowed_action_recommendation": (
+                    planner_result.analysis.allowed_action_recommendation
+                ),
+                "evidence_references": list(planner_result.analysis.evidence_references),
+                "operator_explanation": planner_result.analysis.operator_explanation,
+            }
+            if planner_result.analysis is not None
+            else None
+        ),
+        "bounded_ai_evidence_tools": build_recovery_evidence_tools(context),
     }
 
 

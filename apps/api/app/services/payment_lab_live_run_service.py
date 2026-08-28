@@ -10,6 +10,7 @@ from app.db.models.payment import PaymentAttempt
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
 from app.db.models.recovery import RecoveryAction, RecoveryAgentRun, RecoveryCase
 from app.db.models.recovery_outcome import RecoveryOutcome
+from app.domain.payments import STOP_RECOVERY_STATES, PaymentState
 from app.domain.recovery import RecoveryCaseStatus
 
 
@@ -33,6 +34,22 @@ class PaymentLabLiveStepStatus(StrEnum):
     FAILED = "failed"
 
 
+class PaymentLabLiveBusinessState(StrEnum):
+    AWAITING_ORIGINAL_PAYMENT = "awaiting_original_payment"
+    ORIGINAL_PAYMENT_SUCCEEDED = "original_payment_succeeded"
+    FAILURE_STABILIZING = "failure_stabilizing"
+    DIAGNOSING = "diagnosing"
+    AWAITING_POLICY = "awaiting_policy"
+    EXECUTING_ACTION = "executing_action"
+    AWAITING_RECOVERY_PAYMENT = "awaiting_recovery_payment"
+    RECOVERED = "recovered"
+    STOPPING_RECOVERY = "stopping_recovery"
+    STOPPED = "stopped"
+    ESCALATED = "escalated"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
 TERMINAL_OUTCOME_STATUSES = frozenset(
     {
         "recovered",
@@ -40,13 +57,6 @@ TERMINAL_OUTCOME_STATUSES = frozenset(
         "payment_link_cancelled",
         "duplicate_collection_prevented",
         "reversed",
-    },
-)
-TERMINAL_RUN_STATUSES = frozenset(
-    {
-        PaymentLabRunStatus.COMPLETED.value,
-        PaymentLabRunStatus.PROVIDER_FAILED.value,
-        PaymentLabRunStatus.EXPIRED.value,
     },
 )
 TERMINAL_CASE_STATUSES = frozenset(
@@ -126,7 +136,13 @@ class PaymentLabLiveRun:
     mode: str
     provenance: str
     persisted_status: str
+    business_state: PaymentLabLiveBusinessState
+    state_label: str
     current_stage: PaymentLabLiveStage
+    active_step_key: str | None
+    waiting_reason: str | None
+    automation_complete: bool
+    financial_outcome_terminal: bool
     terminal: bool
     poll_after_milliseconds: int | None
     amount_minor: int
@@ -143,6 +159,18 @@ class PaymentLabLiveRun:
     agent: PaymentLabAgentEvidence | None
     actions: tuple[PaymentLabActionEvidence, ...]
     outcome: PaymentLabOutcomeEvidence | None
+
+
+@dataclass(frozen=True, slots=True)
+class _DerivedLiveState:
+    business_state: PaymentLabLiveBusinessState
+    state_label: str
+    current_stage: PaymentLabLiveStage
+    active_step_key: str | None
+    waiting_reason: str | None
+    automation_complete: bool
+    financial_outcome_terminal: bool
+    terminal: bool
 
 
 def _fallback_metadata(
@@ -236,19 +264,16 @@ def _build_outcome_evidence(
     )
 
 
-def _derive_terminal(
-    run: PaymentLabRun,
-    recovery_case: RecoveryCase | None,
-    outcome: RecoveryOutcome | None,
-) -> bool:
-    return (
-        run.status in TERMINAL_RUN_STATUSES
-        or (recovery_case is not None and recovery_case.status in TERMINAL_CASE_STATUSES)
-        or (outcome is not None and outcome.status in TERMINAL_OUTCOME_STATUSES)
-    )
+def _payment_state(payment_attempt: PaymentAttempt | None) -> PaymentState | None:
+    if payment_attempt is None:
+        return None
+    try:
+        return PaymentState(payment_attempt.current_state)
+    except ValueError:
+        return None
 
 
-def _derive_stage(
+def _derive_live_state(
     run: PaymentLabRun,
     *,
     payment_attempt: PaymentAttempt | None,
@@ -256,34 +281,210 @@ def _derive_stage(
     agent_run: RecoveryAgentRun | None,
     actions: tuple[RecoveryAction, ...],
     outcome: RecoveryOutcome | None,
-) -> PaymentLabLiveStage:
-    if run.status in {
-        PaymentLabRunStatus.PROVIDER_FAILED.value,
-        PaymentLabRunStatus.EXPIRED.value,
-    }:
-        return PaymentLabLiveStage.FAILED
+) -> _DerivedLiveState:
+    payment_state = _payment_state(payment_attempt)
+    case_status = recovery_case.status if recovery_case is not None else None
+    latest_action = actions[-1] if actions else None
+
+    if run.status == PaymentLabRunStatus.PROVIDER_FAILED.value:
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.FAILED,
+            state_label="Provider run failed safely",
+            current_stage=PaymentLabLiveStage.FAILED,
+            active_step_key=None,
+            waiting_reason=None,
+            automation_complete=True,
+            financial_outcome_terminal=True,
+            terminal=True,
+        )
+    if run.status == PaymentLabRunStatus.EXPIRED.value:
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.EXPIRED,
+            state_label="Checkout expired",
+            current_stage=PaymentLabLiveStage.FAILED,
+            active_step_key=None,
+            waiting_reason=None,
+            automation_complete=True,
+            financial_outcome_terminal=True,
+            terminal=True,
+        )
+
+    if outcome is not None and outcome.status == "recovered":
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.RECOVERED,
+            state_label="Provider-confirmed recovery",
+            current_stage=PaymentLabLiveStage.COMPLETED,
+            active_step_key=None,
+            waiting_reason=None,
+            automation_complete=True,
+            financial_outcome_terminal=True,
+            terminal=True,
+        )
     if outcome is not None and outcome.status in TERMINAL_OUTCOME_STATUSES:
-        return PaymentLabLiveStage.COMPLETED
-    if recovery_case is not None and recovery_case.status in TERMINAL_CASE_STATUSES:
-        return PaymentLabLiveStage.COMPLETED
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.STOPPED,
+            state_label="Recovery closed with provider evidence",
+            current_stage=PaymentLabLiveStage.COMPLETED,
+            active_step_key=None,
+            waiting_reason=None,
+            automation_complete=True,
+            financial_outcome_terminal=True,
+            terminal=True,
+        )
+
+    if payment_state in STOP_RECOVERY_STATES:
+        if recovery_case is not None and case_status not in TERMINAL_CASE_STATUSES:
+            return _DerivedLiveState(
+                business_state=PaymentLabLiveBusinessState.STOPPING_RECOVERY,
+                state_label="Original payment completed; stopping recovery",
+                current_stage=PaymentLabLiveStage.OUTCOME,
+                active_step_key="provider_action",
+                waiting_reason="Waiting for late-authorization compensation",
+                automation_complete=False,
+                financial_outcome_terminal=False,
+                terminal=False,
+            )
+        if recovery_case is not None:
+            return _DerivedLiveState(
+                business_state=PaymentLabLiveBusinessState.STOPPED,
+                state_label="Original payment completed; recovery stopped safely",
+                current_stage=PaymentLabLiveStage.COMPLETED,
+                active_step_key=None,
+                waiting_reason=None,
+                automation_complete=True,
+                financial_outcome_terminal=True,
+                terminal=True,
+            )
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.ORIGINAL_PAYMENT_SUCCEEDED,
+            state_label="Original payment completed; no recovery required",
+            current_stage=PaymentLabLiveStage.COMPLETED,
+            active_step_key=None,
+            waiting_reason=None,
+            automation_complete=True,
+            financial_outcome_terminal=True,
+            terminal=True,
+        )
+
+    if case_status == RecoveryCaseStatus.ESCALATED.value:
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.ESCALATED,
+            state_label="Human review required",
+            current_stage=PaymentLabLiveStage.COMPLETED,
+            active_step_key=None,
+            waiting_reason="Deterministic policy stopped automatic execution",
+            automation_complete=True,
+            financial_outcome_terminal=False,
+            terminal=True,
+        )
+    if case_status in {
+        RecoveryCaseStatus.CANCELLED.value,
+        RecoveryCaseStatus.EXHAUSTED.value,
+    }:
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.STOPPED,
+            state_label="Recovery stopped safely",
+            current_stage=PaymentLabLiveStage.COMPLETED,
+            active_step_key=None,
+            waiting_reason=None,
+            automation_complete=True,
+            financial_outcome_terminal=True,
+            terminal=True,
+        )
+
     if outcome is not None or any(action.status == "succeeded" for action in actions):
-        return PaymentLabLiveStage.OUTCOME
-    if agent_run is not None or run.status == PaymentLabRunStatus.RECOVERY_RUNNING.value:
-        return PaymentLabLiveStage.AGENT
-    if payment_attempt is not None:
-        return PaymentLabLiveStage.FAILURE
-    return PaymentLabLiveStage.CHECKOUT
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.AWAITING_RECOVERY_PAYMENT,
+            state_label="Recovery action completed",
+            current_stage=PaymentLabLiveStage.OUTCOME,
+            active_step_key="measured_outcome",
+            waiting_reason="Waiting for provider-confirmed recovery payment",
+            automation_complete=True,
+            financial_outcome_terminal=False,
+            terminal=False,
+        )
+    if latest_action is not None:
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.EXECUTING_ACTION,
+            state_label="Bounded provider action in progress",
+            current_stage=PaymentLabLiveStage.AGENT,
+            active_step_key="provider_action",
+            waiting_reason=None,
+            automation_complete=False,
+            financial_outcome_terminal=False,
+            terminal=False,
+        )
+    if agent_run is not None and agent_run.status == "succeeded":
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.AWAITING_POLICY,
+            state_label="Awaiting deterministic policy",
+            current_stage=PaymentLabLiveStage.AGENT,
+            active_step_key="policy_decision",
+            waiting_reason="Waiting for deterministic guardrails",
+            automation_complete=False,
+            financial_outcome_terminal=False,
+            terminal=False,
+        )
+    if recovery_case is not None or run.status == PaymentLabRunStatus.RECOVERY_RUNNING.value:
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.DIAGNOSING,
+            state_label="Recovery diagnosis in progress",
+            current_stage=PaymentLabLiveStage.AGENT,
+            active_step_key="agent_recommendation",
+            waiting_reason=None,
+            automation_complete=False,
+            financial_outcome_terminal=False,
+            terminal=False,
+        )
+    if payment_state is PaymentState.FAILED:
+        return _DerivedLiveState(
+            business_state=PaymentLabLiveBusinessState.FAILURE_STABILIZING,
+            state_label="Failure verified; safety stabilization active",
+            current_stage=PaymentLabLiveStage.FAILURE,
+            active_step_key="recovery_case",
+            waiting_reason="Five-second late-authorization safety window",
+            automation_complete=False,
+            financial_outcome_terminal=False,
+            terminal=False,
+        )
+    return _DerivedLiveState(
+        business_state=PaymentLabLiveBusinessState.AWAITING_ORIGINAL_PAYMENT,
+        state_label="Waiting for provider payment result",
+        current_stage=PaymentLabLiveStage.CHECKOUT,
+        active_step_key="verified_failure",
+        waiting_reason="Waiting for signed provider evidence",
+        automation_complete=False,
+        financial_outcome_terminal=False,
+        terminal=False,
+    )
 
 
 def _build_steps(
     run: PaymentLabRun,
     *,
+    derived_state: _DerivedLiveState,
     payment_attempt: PaymentAttempt | None,
     recovery_case: RecoveryCase | None,
     agent_run: RecoveryAgentRun | None,
     actions: tuple[RecoveryAction, ...],
     outcome: RecoveryOutcome | None,
 ) -> tuple[PaymentLabLiveStep, ...]:
+    payment_state = _payment_state(payment_attempt)
+    if derived_state.business_state is PaymentLabLiveBusinessState.ORIGINAL_PAYMENT_SUCCEEDED:
+        return (
+            PaymentLabLiveStep(
+                key="payment_attempt",
+                label="Original payment",
+                status=PaymentLabLiveStepStatus.COMPLETED,
+                occurred_at=(
+                    payment_attempt.state_event_created_at
+                    if payment_attempt is not None
+                    else run.updated_at
+                ),
+                detail="Provider-confirmed payment succeeded; recovery was not required",
+            ),
+        )
+
     provider_failed = run.status == PaymentLabRunStatus.PROVIDER_FAILED.value
     run_expired = run.status == PaymentLabRunStatus.EXPIRED.value
     checkout_status = (
@@ -292,18 +493,22 @@ def _build_steps(
         else PaymentLabLiveStepStatus.ACTIVE
     )
 
+    failure_observed = payment_state is PaymentState.FAILED or recovery_case is not None
     failure_status = PaymentLabLiveStepStatus.PENDING
-    if payment_attempt is not None:
+    if failure_observed:
         failure_status = PaymentLabLiveStepStatus.COMPLETED
     elif provider_failed or run_expired:
         failure_status = PaymentLabLiveStepStatus.FAILED
-    elif run.status == PaymentLabRunStatus.CHECKOUT_READY.value:
+    elif run.status in {
+        PaymentLabRunStatus.CHECKOUT_READY.value,
+        PaymentLabRunStatus.COMPLETED.value,
+    }:
         failure_status = PaymentLabLiveStepStatus.ACTIVE
 
     case_status = PaymentLabLiveStepStatus.PENDING
     if recovery_case is not None:
         case_status = PaymentLabLiveStepStatus.COMPLETED
-    elif payment_attempt is not None:
+    elif payment_state is PaymentState.FAILED:
         case_status = PaymentLabLiveStepStatus.ACTIVE
 
     agent_status = PaymentLabLiveStepStatus.PENDING
@@ -322,7 +527,9 @@ def _build_steps(
         policy_status = PaymentLabLiveStepStatus.ACTIVE
 
     provider_status = PaymentLabLiveStepStatus.PENDING
-    if latest_action is not None:
+    if derived_state.business_state is PaymentLabLiveBusinessState.STOPPING_RECOVERY:
+        provider_status = PaymentLabLiveStepStatus.ACTIVE
+    elif latest_action is not None:
         if latest_action.status == "succeeded":
             provider_status = PaymentLabLiveStepStatus.COMPLETED
         elif latest_action.status == "failed":
@@ -358,14 +565,18 @@ def _build_steps(
         ),
         PaymentLabLiveStep(
             key="verified_failure",
-            label="Verified failure",
+            label="Verified failure" if failure_observed else "Provider result",
             status=failure_status,
             occurred_at=(
-                payment_attempt.state_event_created_at if payment_attempt is not None else None
+                payment_attempt.state_event_created_at
+                if payment_state is PaymentState.FAILED and payment_attempt is not None
+                else recovery_case.opened_at
+                if recovery_case is not None
+                else None
             ),
             detail=(
                 "Signed provider evidence linked"
-                if payment_attempt is not None
+                if failure_observed
                 else "Waiting for signed provider evidence"
             ),
         ),
@@ -419,7 +630,9 @@ def _build_steps(
                 else None
             ),
             detail=(
-                "Razorpay payment link created"
+                "Stopping active recovery after original-payment completion"
+                if derived_state.business_state is PaymentLabLiveBusinessState.STOPPING_RECOVERY
+                else "Razorpay payment link created"
                 if latest_action is not None and latest_action.provider_action_id is not None
                 else "Policy stopped money-facing execution"
                 if latest_action is not None
@@ -447,6 +660,8 @@ def _build_steps(
             detail=(
                 "Evidence-backed outcome recorded"
                 if outcome is not None and outcome_status is PaymentLabLiveStepStatus.COMPLETED
+                else "Waiting for late-authorization compensation"
+                if derived_state.business_state is PaymentLabLiveBusinessState.STOPPING_RECOVERY
                 else (
                     "Policy required human review; no financial action executed"
                     if safe_disposition == RecoveryCaseStatus.ESCALATED.value
@@ -511,23 +726,29 @@ async def load_payment_lab_live_run(
         )
         outcome = outcome_result.scalar_one_or_none()
 
-    terminal = _derive_terminal(run, recovery_case, outcome)
+    derived_state = _derive_live_state(
+        run,
+        payment_attempt=payment_attempt,
+        recovery_case=recovery_case,
+        agent_run=agent_run,
+        actions=actions,
+        outcome=outcome,
+    )
     return PaymentLabLiveRun(
         payment_lab_run_id=run.id,
         client_request_id=run.client_request_id,
         mode=run.mode,
         provenance=run.provenance,
         persisted_status=run.status,
-        current_stage=_derive_stage(
-            run,
-            payment_attempt=payment_attempt,
-            recovery_case=recovery_case,
-            agent_run=agent_run,
-            actions=actions,
-            outcome=outcome,
-        ),
-        terminal=terminal,
-        poll_after_milliseconds=None if terminal else 500,
+        business_state=derived_state.business_state,
+        state_label=derived_state.state_label,
+        current_stage=derived_state.current_stage,
+        active_step_key=derived_state.active_step_key,
+        waiting_reason=derived_state.waiting_reason,
+        automation_complete=derived_state.automation_complete,
+        financial_outcome_terminal=(derived_state.financial_outcome_terminal),
+        terminal=derived_state.terminal,
+        poll_after_milliseconds=None if derived_state.terminal else 500,
         amount_minor=run.amount_minor,
         currency=run.currency,
         payment_method=(
@@ -543,6 +764,7 @@ async def load_payment_lab_live_run(
         updated_at=run.updated_at,
         steps=_build_steps(
             run,
+            derived_state=derived_state,
             payment_attempt=payment_attempt,
             recovery_case=recovery_case,
             agent_run=agent_run,

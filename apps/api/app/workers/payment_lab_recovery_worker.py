@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.core.config import get_settings
 from app.core.database import close_database, get_session_factory
@@ -63,6 +63,9 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
         "gemini_with_deterministic_fallback" if provider is not None else "deterministic",
         "once" if run_once else "continuous",
     )
+    claim_timeout = timedelta(
+        seconds=settings.payment_lab_recovery_claim_timeout_seconds,
+    )
 
     try:
         while True:
@@ -72,6 +75,7 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
                     reference_time=utc_now(),
                     provider=provider,
                     batch_size=settings.payment_lab_recovery_batch_size,
+                    claim_timeout=claim_timeout,
                 )
             except asyncio.CancelledError:
                 raise

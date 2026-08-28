@@ -1,16 +1,24 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
+from app.db.models.recovery import RecoveryCase
 from app.domain.recovery import RecoveryChannel
 from app.integrations.gemini import RecoveryPlannerSource
 from app.services import payment_lab_recovery_service
 from app.services.payment_lab_recovery_service import (
     PaymentLabRecoveryStartDisposition,
+    _claim_payment_lab_recovery,
     _PaymentLabRecoveryClaim,
     start_payment_lab_recovery,
+)
+from app.services.recovery_case_service import (
+    RecoveryCaseCreationDisposition,
+    RecoveryCaseCreationResult,
 )
 
 NOW = datetime(2026, 8, 26, 17, 0, tzinfo=UTC)
@@ -204,3 +212,103 @@ async def test_rejects_naive_time_before_claiming(
         )
 
     claim.assert_not_awaited()
+
+
+def optional_scalar_result(value: object | None) -> MagicMock:
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = value
+    return result
+
+
+def build_running_run(*, updated_at: datetime) -> MagicMock:
+    run = MagicMock(spec=PaymentLabRun)
+    run.id = RUN_ID
+    run.status = PaymentLabRunStatus.RECOVERY_RUNNING.value
+    run.payment_attempt_id = PAYMENT_ATTEMPT_ID
+    run.updated_at = updated_at
+    run.version = 3
+    return run
+
+
+def build_open_case() -> MagicMock:
+    recovery_case = MagicMock(spec=RecoveryCase)
+    recovery_case.id = CASE_ID
+    recovery_case.status = "open"
+    return recovery_case
+
+
+@pytest.mark.asyncio
+async def test_active_recovery_claim_is_not_reclaimed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = build_running_run(updated_at=NOW - timedelta(seconds=30))
+    recovery_case = build_open_case()
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(run)
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "_find_recovery_case",
+        AsyncMock(return_value=recovery_case),
+    )
+    create_case = AsyncMock()
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "create_or_get_recovery_case",
+        create_case,
+    )
+
+    claim = await _claim_payment_lab_recovery(
+        session,
+        payment_lab_run_id=RUN_ID,
+        started_at=NOW,
+        customer_contact_allowed=False,
+        claim_timeout=timedelta(seconds=60),
+    )
+
+    assert claim.disposition is PaymentLabRecoveryStartDisposition.ALREADY_RUNNING
+    assert claim.should_execute_agent is False
+    assert run.version == 3
+    create_case.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stale_recovery_claim_is_reclaimed_for_plannable_case(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = build_running_run(updated_at=NOW - timedelta(seconds=61))
+    recovery_case = build_open_case()
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(run)
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "_find_recovery_case",
+        AsyncMock(return_value=recovery_case),
+    )
+    create_case = AsyncMock(
+        return_value=RecoveryCaseCreationResult(
+            disposition=RecoveryCaseCreationDisposition.EXISTING,
+            recovery_case=recovery_case,
+            audit_event=None,
+        ),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "create_or_get_recovery_case",
+        create_case,
+    )
+
+    claim = await _claim_payment_lab_recovery(
+        session,
+        payment_lab_run_id=RUN_ID,
+        started_at=NOW,
+        customer_contact_allowed=False,
+        claim_timeout=timedelta(seconds=60),
+    )
+
+    assert claim.disposition is PaymentLabRecoveryStartDisposition.STARTED
+    assert claim.should_execute_agent is True
+    assert claim.recovery_case_created is False
+    assert run.status == PaymentLabRunStatus.RECOVERY_RUNNING.value
+    assert run.updated_at == NOW
+    assert run.version == 4
+    create_case.assert_awaited_once()

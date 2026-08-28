@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from uuid import UUID
 
@@ -31,6 +31,7 @@ PLANNABLE_CASE_STATUSES = {
     RecoveryCaseStatus.OPEN,
     RecoveryCaseStatus.WAITING,
 }
+DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT = timedelta(seconds=60)
 
 
 class PaymentLabRecoveryError(RuntimeError):
@@ -109,7 +110,11 @@ async def _claim_payment_lab_recovery(
     payment_lab_run_id: UUID,
     started_at: datetime,
     customer_contact_allowed: bool,
+    claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
 ) -> _PaymentLabRecoveryClaim:
+    if claim_timeout <= timedelta(0):
+        raise ValueError("Payment Lab recovery claim timeout must be positive")
+
     run_result = await session.execute(
         select(PaymentLabRun).where(PaymentLabRun.id == payment_lab_run_id).with_for_update(),
     )
@@ -145,14 +150,38 @@ async def _claim_payment_lab_recovery(
                 "Recovery-running Payment Lab run has no recovery case",
             )
 
-        return _PaymentLabRecoveryClaim(
-            payment_lab_run_id=payment_lab_run.id,
-            payment_attempt_id=payment_attempt_id,
-            recovery_case_id=recovery_case.id,
-            disposition=PaymentLabRecoveryStartDisposition.ALREADY_RUNNING,
-            recovery_case_created=False,
-            should_execute_agent=False,
-        )
+        try:
+            recovery_case_status = RecoveryCaseStatus(recovery_case.status)
+        except ValueError as error:
+            raise PaymentLabRecoveryConflictError(
+                "Payment Lab recovery case contains an invalid status",
+            ) from error
+
+        claim_is_stale = payment_lab_run.updated_at <= started_at - claim_timeout
+        if not claim_is_stale:
+            return _PaymentLabRecoveryClaim(
+                payment_lab_run_id=payment_lab_run.id,
+                payment_attempt_id=payment_attempt_id,
+                recovery_case_id=recovery_case.id,
+                disposition=PaymentLabRecoveryStartDisposition.ALREADY_RUNNING,
+                recovery_case_created=False,
+                should_execute_agent=False,
+            )
+        if recovery_case_status not in PLANNABLE_CASE_STATUSES:
+            return _PaymentLabRecoveryClaim(
+                payment_lab_run_id=payment_lab_run.id,
+                payment_attempt_id=payment_attempt_id,
+                recovery_case_id=recovery_case.id,
+                disposition=PaymentLabRecoveryStartDisposition.ALREADY_PLANNED,
+                recovery_case_created=False,
+                should_execute_agent=False,
+            )
+
+        # A process may die after claiming a run and before persisting an agent
+        # result. Re-enter the normal, row-locked creation path after the lease
+        # expires instead of leaving the run permanently stuck.
+        payment_lab_run.status = PaymentLabRunStatus.PAYMENT_ATTEMPTED.value
+        run_status = PaymentLabRunStatus.PAYMENT_ATTEMPTED
 
     if run_status is not PaymentLabRunStatus.PAYMENT_ATTEMPTED:
         raise PaymentLabRecoveryRunNotReadyError(
@@ -252,6 +281,7 @@ async def start_payment_lab_recovery(
     available_channels: Sequence[RecoveryChannel],
     alternate_payment_methods: Sequence[str],
     provider: GeminiRecoveryPlanProvider | None,
+    claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
 ) -> PaymentLabRecoveryStartResult:
     """Claim a verified failure and start the existing bounded recovery agent."""
 
@@ -263,6 +293,7 @@ async def start_payment_lab_recovery(
             payment_lab_run_id=payment_lab_run_id,
             started_at=started_at,
             customer_contact_allowed=customer_contact_allowed,
+            claim_timeout=claim_timeout,
         )
 
     if not claim.should_execute_agent:

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
@@ -113,6 +113,7 @@ async def test_discovers_verified_failure_candidates_in_query_order() -> None:
     assert REFERENCE_TIME - payment_lab_recovery_batch.SIGNED_FAILURE_STABILIZATION_DELAY in (
         statement.compile().params.values()
     )
+    assert REFERENCE_TIME - timedelta(seconds=60) in statement.compile().params.values()
 
 
 @pytest.mark.asyncio
@@ -172,6 +173,7 @@ async def test_batch_runs_gemini_and_deterministic_fallback_without_contact(
         "wallet",
     )
     assert first_call["provider"] is provider
+    assert first_call["claim_timeout"] == timedelta(seconds=60)
 
 
 @pytest.mark.asyncio

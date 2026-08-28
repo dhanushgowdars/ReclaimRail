@@ -18,6 +18,7 @@ from app.domain.recovery import (
 from app.integrations.gemini import (
     BoundedRecoveryPlannerResult,
     GeminiPlannerFallbackReason,
+    GeminiRecoveryAnalysisPayload,
     RecoveryPlannerSource,
 )
 from app.services import recovery_plan_service
@@ -81,6 +82,7 @@ def planner_result(
     *,
     source: RecoveryPlannerSource = RecoveryPlannerSource.GEMINI,
     generated_at: datetime = NOW,
+    confidence: float | None = None,
 ) -> BoundedRecoveryPlannerResult:
     plan = RecoveryPlan(
         decision=RecoveryPlanDecision.RECOVER,
@@ -108,6 +110,23 @@ def planner_result(
             fallback_reason=None,
             input_token_count=321,
             output_token_count=87,
+            analysis=(
+                GeminiRecoveryAnalysisPayload(
+                    root_cause_category="customer_authentication_failure",
+                    recoverability_assessment="Eligible for one bounded recovery action",
+                    confidence=confidence,
+                    allowed_action_recommendation="create_payment_link",
+                    evidence_references=(
+                        "payment_state_snapshot",
+                        "merchant_recovery_policy",
+                    ),
+                    operator_explanation=(
+                        "Verified failure remains eligible under the merchant recovery policy."
+                    ),
+                )
+                if confidence is not None
+                else None
+            ),
         )
     return BoundedRecoveryPlannerResult(
         plan=plan,
@@ -187,7 +206,7 @@ async def test_persists_gemini_metadata_and_usage(
         available_channels=(RecoveryChannel.EMAIL,),
         alternate_payment_methods=("card",),
         planned_at=NOW,
-        planner_result=planner_result(),
+        planner_result=planner_result(confidence=0.91),
     )
 
     assert result.agent_run.planner_provider == "gemini"
@@ -202,10 +221,78 @@ async def test_persists_gemini_metadata_and_usage(
         "input_token_count": 321,
         "output_token_count": 87,
     }
+    assert result.agent_run.evidence["bounded_ai_analysis"] == {
+        "root_cause_category": "customer_authentication_failure",
+        "recoverability_assessment": "Eligible for one bounded recovery action",
+        "confidence": 0.91,
+        "allowed_action_recommendation": "create_payment_link",
+        "evidence_references": [
+            "payment_state_snapshot",
+            "merchant_recovery_policy",
+        ],
+        "operator_explanation": (
+            "Verified failure remains eligible under the merchant recovery policy."
+        ),
+    }
+    assert set(result.agent_run.evidence["bounded_ai_evidence_tools"]) == {
+        "payment_state_snapshot",
+        "attempt_and_recovery_history",
+        "payment_rail_incident_context",
+        "merchant_recovery_policy",
+    }
     audit_data = append_audit.await_args.kwargs["request"].event_data
     assert audit_data["model_name"] == "gemini-3.7-flash"
     assert audit_data["input_token_count"] == 321
+    assert audit_data["bounded_ai_analysis"] == {
+        "root_cause_category": "customer_authentication_failure",
+        "confidence": 0.91,
+        "evidence_references": [
+            "payment_state_snapshot",
+            "merchant_recovery_policy",
+        ],
+    }
     assert recovery_case.status == RecoveryCaseStatus.READY.value
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_gemini_plan_requires_operator_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = AsyncMock(spec=AsyncSession)
+    recovery_case = create_case()
+    session.execute.side_effect = [
+        query_result(recovery_case),
+        query_result(create_payment()),
+        query_result(None),
+        query_result(0),
+    ]
+    patch_audit(monkeypatch)
+    approval = MagicMock()
+    approval.request_reason = "ai_low_confidence"
+    approval.request_context = {"ai_confidence": 0.45}
+    create_approval = AsyncMock(return_value=approval)
+    monkeypatch.setattr(
+        recovery_plan_service,
+        "create_recovery_approval_request",
+        create_approval,
+    )
+
+    result = await plan_and_persist_recovery_case(
+        session,
+        recovery_case_id=CASE_ID,
+        available_channels=(RecoveryChannel.EMAIL,),
+        alternate_payment_methods=("card",),
+        planned_at=NOW,
+        planner_result=planner_result(confidence=0.45),
+    )
+
+    assert result.actions[0].status == RecoveryActionStatus.APPROVAL_REQUIRED.value
+    assert recovery_case.status == RecoveryCaseStatus.AWAITING_APPROVAL.value
+    assert len(result.approvals) == 1
+    assert result.approvals[0].request_reason == "ai_low_confidence"
+    assert result.approvals[0].request_context["ai_confidence"] == 0.45
+    requirement = create_approval.await_args.kwargs["requirement"]
+    assert requirement.context["ai_confidence"] == 0.45
 
 
 @pytest.mark.asyncio

@@ -43,7 +43,7 @@ from app.integrations.gemini import (
 from app.services.recovery_approval_service import (
     DEFAULT_APPROVAL_THRESHOLD_MINOR,
     DEFAULT_APPROVAL_WINDOW,
-    action_requires_human_approval,
+    build_recovery_approval_requirement,
     create_recovery_approval_request,
 )
 from app.services.recovery_audit_store import (
@@ -578,14 +578,22 @@ async def plan_and_persist_recovery_case(
 
     await session.flush()
 
-    approval_actions = tuple(
-        action
+    approval_requirements = {
+        action.id: requirement
         for action in actions
-        if action_requires_human_approval(
-            action,
-            threshold_minor=approval_threshold_minor,
+        if (
+            requirement := build_recovery_approval_requirement(
+                action,
+                threshold_minor=approval_threshold_minor,
+                recovery_attempt_count=recovery_case.recovery_attempt_count,
+                active_incident_severity=(
+                    incident_context.severity if incident_context is not None else None
+                ),
+            )
         )
-    )
+        is not None
+    }
+    approval_actions = tuple(action for action in actions if action.id in approval_requirements)
     for action in approval_actions:
         action.status = RecoveryActionStatus.APPROVAL_REQUIRED.value
 
@@ -641,7 +649,7 @@ async def plan_and_persist_recovery_case(
                 session,
                 recovery_case=recovery_case,
                 action=action,
-                threshold_minor=approval_threshold_minor,
+                requirement=approval_requirements[action.id],
                 requested_at=planned_at,
                 approval_window=approval_window,
             ),

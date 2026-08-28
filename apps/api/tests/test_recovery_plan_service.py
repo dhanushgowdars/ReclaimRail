@@ -219,6 +219,44 @@ async def test_high_value_payment_link_waits_for_human_approval(
 
 
 @pytest.mark.asyncio
+async def test_medium_incident_requires_operator_review_with_incident_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recovery_case = create_case()
+    incident = MagicMock(spec=RevenueIncident)
+    incident.id = INCIDENT_ID
+    incident.status = RevenueIncidentStatus.OPEN.value
+    incident.severity = "medium"
+    incident.scope = "payment_method"
+    incident.dimension_value = "upi"
+    session = create_session(
+        recovery_case=recovery_case,
+        payment=create_payment(),
+        incident=incident,
+    )
+    append_audit, _ = patch_audit(monkeypatch)
+    monkeypatch.setattr(
+        recovery_approval_service,
+        "append_recovery_audit_event",
+        append_audit,
+    )
+
+    result = await plan_and_persist_recovery_case(
+        session,
+        recovery_case_id=CASE_ID,
+        available_channels=(RecoveryChannel.EMAIL,),
+        alternate_payment_methods=("card",),
+        planned_at=NOW,
+    )
+
+    assert recovery_case.status == RecoveryCaseStatus.AWAITING_APPROVAL.value
+    assert result.actions[0].status == RecoveryActionStatus.APPROVAL_REQUIRED.value
+    assert result.approvals[0].request_reason == "active_incident_uncertainty"
+    assert result.approvals[0].threshold_minor is None
+    assert result.approvals[0].request_context["active_incident_severity"] == "medium"
+
+
+@pytest.mark.asyncio
 async def test_policy_blocks_contact_actions_during_quiet_period(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

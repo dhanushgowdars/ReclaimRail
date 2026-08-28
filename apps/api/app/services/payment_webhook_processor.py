@@ -169,10 +169,20 @@ async def process_canonical_payment_webhook(
                 provider_event_id=payment_link_event.provider_event_id,
                 reconciled_at=processed_at,
             )
-        except (
-            RecoveryOutcomeProviderEvidenceError,
-            RecoveryOutcomeReconciliationNotReadyError,
-        ) as error:
+        except RecoveryOutcomeReconciliationNotReadyError:
+            # Payment Link webhooks may arrive before the recovery-action
+            # transaction is visible to this consumer.  Do not dead-letter a
+            # valid signed provider event in that race: the outcome worker is
+            # the durable polling fallback and will reconcile the same link
+            # once the action becomes eligible.
+            return await complete_without_projection(
+                session,
+                webhook_event,
+                disposition=PaymentWebhookDisposition.SKIPPED,
+                processed_at=processed_at,
+                error=None,
+            )
+        except RecoveryOutcomeProviderEvidenceError as error:
             return await complete_without_projection(
                 session,
                 webhook_event,

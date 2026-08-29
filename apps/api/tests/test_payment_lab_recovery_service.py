@@ -236,6 +236,7 @@ def build_open_case() -> MagicMock:
     recovery_case = MagicMock(spec=RecoveryCase)
     recovery_case.id = CASE_ID
     recovery_case.status = "open"
+    recovery_case.next_action_at = None
     return recovery_case
 
 
@@ -314,3 +315,39 @@ async def test_stale_recovery_claim_is_reclaimed_for_plannable_case(
     assert run.updated_at == NOW
     assert run.version == 4
     create_case.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_scheduled_wait_is_not_reclaimed_after_worker_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = build_running_run(updated_at=NOW - timedelta(seconds=61))
+    recovery_case = build_open_case()
+    recovery_case.status = "waiting"
+    recovery_case.next_action_at = NOW + timedelta(minutes=15)
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(run)
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "_find_recovery_case",
+        AsyncMock(return_value=recovery_case),
+    )
+    create_case = AsyncMock()
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "create_or_get_recovery_case",
+        create_case,
+    )
+
+    claim = await _claim_payment_lab_recovery(
+        session,
+        payment_lab_run_id=RUN_ID,
+        started_at=NOW,
+        customer_contact_allowed=False,
+        claim_timeout=timedelta(seconds=60),
+    )
+
+    assert claim.disposition is PaymentLabRecoveryStartDisposition.ALREADY_PLANNED
+    assert claim.should_execute_agent is False
+    assert run.version == 3
+    create_case.assert_not_awaited()

@@ -129,6 +129,7 @@ class Settings(BaseSettings):
         ge=1.0,
         le=3600.0,
     )
+    incident_test_drill_enabled: bool = False
 
     recovery_action_batch_size: int = Field(
         default=25,

@@ -8,6 +8,8 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
+from app.db.models.recovery import RecoveryCase
+from app.domain.recovery import RecoveryCaseStatus
 from app.integrations.gemini import (
     GeminiRecoveryPlanProvider,
     RecoveryPlannerSource,
@@ -153,6 +155,10 @@ async def discover_payment_lab_recovery_candidates(
             PaymentLabRun.id,
             PaymentLabRun.payment_method,
         )
+        .outerjoin(
+            RecoveryCase,
+            RecoveryCase.payment_attempt_id == PaymentLabRun.payment_attempt_id,
+        )
         .where(
             PaymentLabRun.payment_attempt_id.is_not(None),
             or_(
@@ -163,6 +169,15 @@ async def discover_payment_lab_recovery_candidates(
                 and_(
                     PaymentLabRun.status == PaymentLabRunStatus.RECOVERY_RUNNING.value,
                     PaymentLabRun.updated_at <= reference_time - claim_timeout,
+                    or_(
+                        RecoveryCase.id.is_(None),
+                        RecoveryCase.status.in_(
+                            (
+                                RecoveryCaseStatus.OPEN.value,
+                                RecoveryCaseStatus.PLANNING.value,
+                            ),
+                        ),
+                    ),
                 ),
             ),
         )

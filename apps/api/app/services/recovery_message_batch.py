@@ -19,6 +19,7 @@ from app.integrations.razorpay.payment_customers import (
 from app.integrations.razorpay.payment_link_notifications import (
     RazorpayPaymentLinkNotificationProvider,
 )
+from app.integrations.resend.recovery_email import ResendRecoveryEmailProvider
 from app.services.recovery_action_executor import (
     DEFAULT_ACTION_CLAIM_TIMEOUT,
     DEFAULT_MAXIMUM_EXECUTION_ATTEMPTS,
@@ -104,6 +105,8 @@ async def run_recovery_message_batch(
     *,
     customer_provider: RazorpayPaymentCustomerProvider,
     notification_provider: RazorpayPaymentLinkNotificationProvider,
+    direct_email_provider: ResendRecoveryEmailProvider | None = None,
+    direct_email_recipient: str | None = None,
     reference_time: datetime,
     batch_size: int,
     claim_timeout: timedelta = DEFAULT_ACTION_CLAIM_TIMEOUT,
@@ -130,6 +133,8 @@ async def run_recovery_message_batch(
                 action_id=action_id,
                 customer_provider=customer_provider,
                 notification_provider=notification_provider,
+                direct_email_provider=direct_email_provider,
+                direct_email_recipient=direct_email_recipient,
                 executed_at=reference_time,
                 claim_timeout=claim_timeout,
                 maximum_attempts=maximum_attempts,

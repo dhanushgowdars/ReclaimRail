@@ -99,6 +99,14 @@ def build_notification_provider() -> MagicMock:
     return provider
 
 
+def build_direct_email_provider() -> MagicMock:
+    provider = MagicMock()
+    provider.send_recovery_email = AsyncMock(
+        return_value=SimpleNamespace(id="email_rr_001"),
+    )
+    return provider
+
+
 def test_notification_medium_accepts_email_and_sms() -> None:
     assert _notification_medium("email") is RazorpayPaymentLinkNotificationMedium.EMAIL
     assert _notification_medium("sms") is RazorpayPaymentLinkNotificationMedium.SMS
@@ -240,6 +248,57 @@ async def test_successfully_sends_email_without_persisting_contact(
     assert completed_prepared is prepared
     assert not hasattr(completed_prepared, "email")
     assert not hasattr(completed_prepared, "contact")
+
+
+@pytest.mark.asyncio
+async def test_uses_direct_email_only_for_consent_recorded_demo_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepared = PreparedRecoveryMessageAction(
+        action_id=ACTION_ID,
+        recovery_case_id=CASE_ID,
+        provider_payment_id="pay_rr_message_001",
+        payment_link_id="plink_rr_message_001",
+        medium=RazorpayPaymentLinkNotificationMedium.EMAIL,
+        attempt_number=1,
+        direct_email_eligible=True,
+        payment_link_url="https://rzp.io/i/test",
+        amount_minor=349_900,
+        currency="INR",
+    )
+    completed_result = build_result(RecoveryActionExecutionDisposition.SUCCEEDED)
+    prepare = AsyncMock(
+        return_value=RecoveryMessageActionPreparation(prepared=prepared),
+    )
+    complete = AsyncMock(return_value=completed_result)
+    monkeypatch.setattr(recovery_message_executor, "prepare_recovery_message_action", prepare)
+    monkeypatch.setattr(recovery_message_executor, "complete_recovery_message_action", complete)
+
+    customer_provider = build_customer_provider()
+    notification_provider = build_notification_provider()
+    direct_email_provider = build_direct_email_provider()
+
+    result = await execute_recovery_message_action(
+        build_session_factory(),
+        action_id=ACTION_ID,
+        customer_provider=customer_provider,
+        notification_provider=notification_provider,
+        direct_email_provider=direct_email_provider,
+        direct_email_recipient="demo@example.com",
+        executed_at=NOW,
+    )
+
+    assert result is completed_result
+    direct_email_provider.send_recovery_email.assert_awaited_once_with(
+        recipient="demo@example.com",
+        payment_link_url="https://rzp.io/i/test",
+        amount_minor=349_900,
+        currency="INR",
+    )
+    customer_provider.fetch_payment_customer.assert_not_awaited()
+    notification_provider.send_notification.assert_not_awaited()
+    assert complete.await_args.kwargs["provider_action_id"] == "email_rr_001"
+    assert complete.await_args.kwargs["provider_action_status"] == "direct_email_accepted"
 
 
 @pytest.mark.asyncio

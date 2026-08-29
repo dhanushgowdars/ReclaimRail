@@ -33,6 +33,10 @@ from app.services.recovery_case_service import (
     RecoveryCaseIneligibilityReason,
     create_or_get_recovery_case,
 )
+from app.services.recovery_incident_context import (
+    ActiveRecoveryIncidentContext,
+    load_active_recovery_incident_context,
+)
 
 SessionFactory = async_sessionmaker[AsyncSession]
 
@@ -111,6 +115,20 @@ async def _find_recovery_case(
         ),
     )
     return result.scalar_one_or_none()
+
+
+async def _load_active_incident_for_run(
+    session: AsyncSession,
+    *,
+    payment_lab_run: PaymentLabRun,
+) -> ActiveRecoveryIncidentContext | None:
+    """Resolve the incident that caused a newly opened Lab case to be controlled."""
+    return await load_active_recovery_incident_context(
+        session,
+        source_incident_id=None,
+        currency=payment_lab_run.currency,
+        payment_method=payment_lab_run.payment_method,
+    )
 
 
 async def _claim_payment_lab_recovery(
@@ -219,11 +237,17 @@ async def _claim_payment_lab_recovery(
             f"Payment Lab run cannot start recovery from {run_status.value}",
         )
 
+    active_incident = await _load_active_incident_for_run(
+        session,
+        payment_lab_run=payment_lab_run,
+    )
+
     creation = await create_or_get_recovery_case(
         session,
         payment_attempt_id=payment_attempt_id,
         opened_at=started_at,
         customer_contact_allowed=customer_contact_allowed,
+        source_incident_id=(active_incident.incident_id if active_incident is not None else None),
     )
 
     if creation.disposition is RecoveryCaseCreationDisposition.INELIGIBLE:

@@ -15,6 +15,9 @@ from app.integrations.razorpay.payment_customers import (
 from app.integrations.razorpay.payment_link_notifications import (
     create_razorpay_payment_link_notification_provider,
 )
+from app.integrations.resend.recovery_email import (
+    create_resend_recovery_email_provider,
+)
 from app.services.recovery_message_batch import (
     RecoveryMessageBatchResult,
     run_recovery_message_batch,
@@ -74,6 +77,13 @@ async def run_recovery_message_worker(
     notification_provider = create_razorpay_payment_link_notification_provider(
         settings,
     )
+    direct_email_provider = create_resend_recovery_email_provider(settings)
+    demo_recipient = getattr(settings, "payment_lab_demo_email_recipient", None)
+    direct_email_recipient = (
+        demo_recipient.get_secret_value().strip()
+        if demo_recipient is not None
+        else None
+    )
 
     if customer_provider is None or notification_provider is None:
         raise RuntimeError(
@@ -111,6 +121,8 @@ async def run_recovery_message_worker(
                     session_factory,
                     customer_provider=customer_provider,
                     notification_provider=notification_provider,
+                    direct_email_provider=direct_email_provider,
+                    direct_email_recipient=direct_email_recipient,
                     reference_time=utc_now(),
                     batch_size=settings.recovery_action_batch_size,
                     claim_timeout=claim_timeout,

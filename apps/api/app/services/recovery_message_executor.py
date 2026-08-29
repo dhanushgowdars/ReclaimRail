@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.db.models.payment import PaymentAttempt
+from app.db.models.payment_lab import PaymentLabRun
 from app.db.models.recovery import (
     RecoveryAction,
     RecoveryActionStatus,
@@ -31,6 +32,10 @@ from app.integrations.razorpay.payment_link_notifications import (
     RazorpayPaymentLinkNotificationError,
     RazorpayPaymentLinkNotificationMedium,
     RazorpayPaymentLinkNotificationProvider,
+)
+from app.integrations.resend.recovery_email import (
+    ResendRecoveryEmailError,
+    ResendRecoveryEmailProvider,
 )
 from app.services.recovery_action_executor import (
     DEFAULT_ACTION_CLAIM_TIMEOUT,
@@ -105,6 +110,10 @@ class PreparedRecoveryMessageAction:
     payment_link_id: str
     medium: RazorpayPaymentLinkNotificationMedium
     attempt_number: int
+    direct_email_eligible: bool = False
+    payment_link_url: str | None = None
+    amount_minor: int = 0
+    currency: str = "INR"
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,6 +340,26 @@ async def prepare_recovery_message_action(
         action.channel,
     )
 
+    direct_email_eligible = False
+    payment_link_url: str | None = None
+    if medium is RazorpayPaymentLinkNotificationMedium.EMAIL:
+        payment_lab_result = await session.execute(
+            select(PaymentLabRun.test_email_contact_consent).where(
+                PaymentLabRun.payment_attempt_id == payment_attempt.id,
+            ),
+        )
+        direct_email_eligible = bool(payment_lab_result.scalar_one_or_none())
+        if direct_email_eligible:
+            payment_link_result = await session.execute(
+                select(RecoveryAction.provider_action_url).where(
+                    RecoveryAction.recovery_case_id == recovery_case.id,
+                    RecoveryAction.action_type == RecoveryActionType.CREATE_PAYMENT_LINK.value,
+                    RecoveryAction.provider_action_id == recovery_case.active_payment_link_id,
+                ),
+            )
+            payment_link_url = payment_link_result.scalar_one_or_none()
+            direct_email_eligible = payment_link_url is not None
+
     action.status = RecoveryActionStatus.EXECUTING.value
     action.execution_attempt_count += 1
     action.started_at = executed_at
@@ -366,6 +395,10 @@ async def prepare_recovery_message_action(
             payment_link_id=recovery_case.active_payment_link_id,
             medium=medium,
             attempt_number=action.execution_attempt_count,
+            direct_email_eligible=direct_email_eligible,
+            payment_link_url=payment_link_url,
+            amount_minor=payment_attempt.amount_minor,
+            currency=payment_attempt.currency,
         ),
     )
 
@@ -375,6 +408,9 @@ async def complete_recovery_message_action(
     *,
     prepared: PreparedRecoveryMessageAction,
     completed_at: datetime,
+    provider_action_id: str | None = None,
+    provider_action_status: str | None = None,
+    audit_actor: RecoveryAuditActor = RecoveryAuditActor.RAZORPAY,
 ) -> RecoveryActionExecutionResult:
     _require_timezone_aware(completed_at)
 
@@ -419,8 +455,10 @@ async def complete_recovery_message_action(
         )
 
     action.status = RecoveryActionStatus.SUCCEEDED.value
-    action.provider_action_id = prepared.payment_link_id
-    action.provider_action_status = f"notified_{prepared.medium.value}"
+    action.provider_action_id = provider_action_id or prepared.payment_link_id
+    action.provider_action_status = (
+        provider_action_status or f"notified_{prepared.medium.value}"
+    )
     action.completed_at = completed_at
     action.last_error = None
 
@@ -434,13 +472,13 @@ async def complete_recovery_message_action(
         recovery_case_id=recovery_case.id,
         request=RecoveryAuditAppendRequest(
             event_type="action.recovery_message.succeeded",
-            actor_type=RecoveryAuditActor.RAZORPAY,
+            actor_type=audit_actor,
             recovery_action_id=action.id,
             agent_run_id=action.agent_run_id,
             event_data={
                 "attempt_number": action.execution_attempt_count,
                 "channel": prepared.medium.value,
-                "provider_action_id": prepared.payment_link_id,
+                "provider_action_id": action.provider_action_id,
                 "provider_action_status": action.provider_action_status,
             },
             occurred_at=completed_at,
@@ -552,6 +590,8 @@ async def execute_recovery_message_action(
     customer_provider: RazorpayPaymentCustomerProvider,
     notification_provider: RazorpayPaymentLinkNotificationProvider,
     executed_at: datetime,
+    direct_email_provider: ResendRecoveryEmailProvider | None = None,
+    direct_email_recipient: str | None = None,
     claim_timeout: timedelta = DEFAULT_ACTION_CLAIM_TIMEOUT,
     maximum_attempts: int = DEFAULT_MAXIMUM_EXECUTION_ATTEMPTS,
 ) -> RecoveryActionExecutionResult:
@@ -578,6 +618,28 @@ async def execute_recovery_message_action(
         )
 
     try:
+        if (
+            prepared.direct_email_eligible
+            and direct_email_provider is not None
+            and direct_email_recipient is not None
+            and prepared.payment_link_url is not None
+        ):
+            result = await direct_email_provider.send_recovery_email(
+                recipient=direct_email_recipient,
+                payment_link_url=prepared.payment_link_url,
+                amount_minor=prepared.amount_minor,
+                currency=prepared.currency,
+            )
+            async with session_factory.begin() as completion_session:
+                return await complete_recovery_message_action(
+                    completion_session,
+                    prepared=prepared,
+                    completed_at=executed_at,
+                    provider_action_id=result.id,
+                    provider_action_status="direct_email_accepted",
+                    audit_actor=RecoveryAuditActor.SYSTEM,
+                )
+
         customer = await customer_provider.fetch_payment_customer(
             prepared.provider_payment_id,
         )
@@ -608,6 +670,13 @@ async def execute_recovery_message_action(
         provider_error = RecoveryMessageProviderError(
             "Razorpay payment-link notification failed",
             retryable=False,
+            delivery_attempted=True,
+            status_code=error.status_code,
+        )
+    except ResendRecoveryEmailError as error:
+        provider_error = RecoveryMessageProviderError(
+            "Resend recovery email failed",
+            retryable=error.retryable,
             delivery_attempted=True,
             status_code=error.status_code,
         )

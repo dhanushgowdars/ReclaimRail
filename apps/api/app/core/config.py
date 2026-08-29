@@ -183,6 +183,9 @@ class Settings(BaseSettings):
     # Test-only, allowlisted recipient for the controlled notification demo.
     # Keep the value in the local .env file; it must never be committed.
     payment_lab_demo_email_recipient: SecretStr | None = None
+    # Direct transactional-email credential for the controlled Test Mode demo.
+    # Keep this local-only. A missing key retains Razorpay's provider notification path.
+    resend_api_key: SecretStr | None = None
     payment_lab_guided_amount_minor: int = Field(
         default=349_900,
         ge=100,

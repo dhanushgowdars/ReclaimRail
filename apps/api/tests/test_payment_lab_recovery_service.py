@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
-from app.db.models.recovery import RecoveryCase
+from app.db.models.recovery import RecoveryAction, RecoveryCase
 from app.domain.incidents import IncidentSeverity
 from app.domain.recovery import DEFAULT_RECOVERY_PLANNER_POLICY, RecoveryChannel
 from app.integrations.gemini import RecoveryPlannerSource
@@ -53,6 +53,11 @@ def no_active_incident(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         payment_lab_recovery_service,
         "_load_active_incident_for_run",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "_load_active_incident_for_recovery_case",
         AsyncMock(return_value=None),
     )
 
@@ -124,6 +129,7 @@ async def test_starts_existing_agent_with_bounded_inputs(
         "approval_window": timedelta(minutes=15),
         "planner_policy": DEFAULT_RECOVERY_PLANNER_POLICY,
     }
+    assert claim.await_args.kwargs["incident_recheck_delay"] == timedelta(minutes=15)
 
 
 @pytest.mark.asyncio
@@ -460,3 +466,66 @@ async def test_due_scheduled_wait_is_reclaimed_for_one_recheck(
     assert run.updated_at == NOW
     assert run.version == 4
     create_case.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_due_wait_is_rescheduled_without_a_second_agent_plan_when_incident_is_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = build_running_run(updated_at=NOW - timedelta(seconds=5))
+    recovery_case = build_open_case()
+    recovery_case.status = "waiting"
+    recovery_case.next_action_at = NOW
+    recovery_case.source_incident_id = INCIDENT_ID
+    recovery_case.currency = "INR"
+    recovery_case.payment_method = "netbanking"
+    recovery_case.updated_at = NOW - timedelta(seconds=30)
+    recovery_case.version = 7
+    wait_action = MagicMock(spec=RecoveryAction)
+    wait_action.execute_after = NOW
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.side_effect = [
+        optional_scalar_result(run),
+        optional_scalar_result(wait_action),
+    ]
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "_find_recovery_case",
+        AsyncMock(return_value=recovery_case),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "_load_active_incident_for_recovery_case",
+        AsyncMock(
+            return_value=ActiveRecoveryIncidentContext(
+                incident_id=INCIDENT_ID,
+                severity=IncidentSeverity.HIGH,
+                scope="payment_method",
+                dimension_value="netbanking",
+            ),
+        ),
+    )
+    create_case = AsyncMock()
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "create_or_get_recovery_case",
+        create_case,
+    )
+
+    claim = await _claim_payment_lab_recovery(
+        session,
+        payment_lab_run_id=RUN_ID,
+        started_at=NOW,
+        customer_contact_allowed=False,
+        claim_timeout=timedelta(seconds=60),
+        incident_recheck_delay=timedelta(seconds=30),
+    )
+
+    assert claim.disposition is PaymentLabRecoveryStartDisposition.ALREADY_PLANNED
+    assert claim.should_execute_agent is False
+    assert wait_action.execute_after == NOW + timedelta(seconds=30)
+    assert recovery_case.next_action_at == NOW + timedelta(seconds=30)
+    assert recovery_case.version == 8
+    assert run.updated_at == NOW
+    assert run.version == 4
+    create_case.assert_not_awaited()

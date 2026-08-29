@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
 from app.db.models.recovery import RecoveryCase
+from app.domain.incidents import IncidentSeverity
 from app.domain.recovery import DEFAULT_RECOVERY_PLANNER_POLICY, RecoveryChannel
 from app.integrations.gemini import RecoveryPlannerSource
 from app.services import payment_lab_recovery_service
@@ -20,11 +21,13 @@ from app.services.recovery_case_service import (
     RecoveryCaseCreationDisposition,
     RecoveryCaseCreationResult,
 )
+from app.services.recovery_incident_context import ActiveRecoveryIncidentContext
 
 NOW = datetime(2026, 8, 26, 17, 0, tzinfo=UTC)
 RUN_ID = UUID("91000000-0000-0000-0000-000000000001")
 PAYMENT_ATTEMPT_ID = UUID("91000000-0000-0000-0000-000000000002")
 CASE_ID = UUID("91000000-0000-0000-0000-000000000003")
+INCIDENT_ID = UUID("91000000-0000-0000-0000-000000000004")
 
 
 class SessionContext:
@@ -43,6 +46,15 @@ class SessionContext:
 class StubSessionFactory:
     def begin(self) -> SessionContext:
         return SessionContext()
+
+
+@pytest.fixture(autouse=True)
+def no_active_incident(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "_load_active_incident_for_run",
+        AsyncMock(return_value=None),
+    )
 
 
 def build_claim(
@@ -316,6 +328,58 @@ async def test_stale_recovery_claim_is_reclaimed_for_plannable_case(
     assert run.updated_at == NOW
     assert run.version == 4
     create_case.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_new_case_persists_active_incident_as_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = build_running_run(updated_at=NOW - timedelta(seconds=61))
+    run.status = PaymentLabRunStatus.PAYMENT_ATTEMPTED.value
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(run)
+    recovery_case = build_open_case()
+    create_case = AsyncMock(
+        return_value=RecoveryCaseCreationResult(
+            disposition=RecoveryCaseCreationDisposition.CREATED,
+            recovery_case=recovery_case,
+            audit_event=MagicMock(),
+        ),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "create_or_get_recovery_case",
+        create_case,
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "_load_active_incident_for_run",
+        AsyncMock(
+            return_value=ActiveRecoveryIncidentContext(
+                incident_id=INCIDENT_ID,
+                severity=IncidentSeverity.HIGH,
+                scope="payment_method",
+                dimension_value="netbanking",
+            ),
+        ),
+    )
+
+    claim = await _claim_payment_lab_recovery(
+        session,
+        payment_lab_run_id=RUN_ID,
+        started_at=NOW,
+        customer_contact_allowed=False,
+        claim_timeout=timedelta(seconds=60),
+    )
+
+    assert claim.disposition is PaymentLabRecoveryStartDisposition.STARTED
+    create_case.assert_awaited_once_with(
+        session,
+        payment_attempt_id=PAYMENT_ATTEMPT_ID,
+        opened_at=NOW,
+        customer_contact_allowed=False,
+        source_incident_id=INCIDENT_ID,
+    )
 
 
 @pytest.mark.asyncio

@@ -9,9 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
-from app.db.models.recovery import RecoveryCase
+from app.db.models.recovery import RecoveryAction, RecoveryActionStatus, RecoveryCase
 from app.domain.recovery import (
     DEFAULT_RECOVERY_PLANNER_POLICY,
+    RecoveryActionType,
     RecoveryCaseStatus,
     RecoveryChannel,
     RecoveryPlannerPolicy,
@@ -131,6 +132,51 @@ async def _load_active_incident_for_run(
     )
 
 
+async def _load_active_incident_for_recovery_case(
+    session: AsyncSession,
+    *,
+    recovery_case: RecoveryCase,
+) -> ActiveRecoveryIncidentContext | None:
+    """Resolve whether the incident that controls this case remains active."""
+    return await load_active_recovery_incident_context(
+        session,
+        source_incident_id=recovery_case.source_incident_id,
+        currency=recovery_case.currency,
+        payment_method=recovery_case.payment_method,
+    )
+
+
+async def _reschedule_active_incident_wait(
+    session: AsyncSession,
+    *,
+    recovery_case: RecoveryCase,
+    rechecked_at: datetime,
+    recheck_delay: timedelta,
+) -> bool:
+    """Move the existing wait forward without creating another agent plan."""
+    wait_result = await session.execute(
+        select(RecoveryAction)
+        .where(
+            RecoveryAction.recovery_case_id == recovery_case.id,
+            RecoveryAction.action_type == RecoveryActionType.WAIT.value,
+            RecoveryAction.status == RecoveryActionStatus.SCHEDULED.value,
+        )
+        .order_by(RecoveryAction.execute_after.desc(), RecoveryAction.id.desc())
+        .limit(1)
+        .with_for_update(),
+    )
+    wait_action = wait_result.scalar_one_or_none()
+    if wait_action is None:
+        return False
+
+    next_recheck_at = rechecked_at + recheck_delay
+    wait_action.execute_after = next_recheck_at
+    recovery_case.next_action_at = next_recheck_at
+    recovery_case.updated_at = rechecked_at
+    recovery_case.version += 1
+    return True
+
+
 async def _claim_payment_lab_recovery(
     session: AsyncSession,
     *,
@@ -138,9 +184,12 @@ async def _claim_payment_lab_recovery(
     started_at: datetime,
     customer_contact_allowed: bool,
     claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
+    incident_recheck_delay: timedelta = DEFAULT_RECOVERY_PLANNER_POLICY.incident_recheck_delay,
 ) -> _PaymentLabRecoveryClaim:
     if claim_timeout <= timedelta(0):
         raise ValueError("Payment Lab recovery claim timeout must be positive")
+    if incident_recheck_delay <= timedelta(0):
+        raise ValueError("Incident recheck delay must be positive")
 
     run_result = await session.execute(
         select(PaymentLabRun).where(PaymentLabRun.id == payment_lab_run_id).with_for_update(),
@@ -206,6 +255,27 @@ async def _claim_payment_lab_recovery(
             and recovery_case.next_action_at is not None
             and recovery_case.next_action_at <= started_at
         )
+        if wait_recheck_due:
+            active_incident = await _load_active_incident_for_recovery_case(
+                session,
+                recovery_case=recovery_case,
+            )
+            if active_incident is not None and await _reschedule_active_incident_wait(
+                session,
+                recovery_case=recovery_case,
+                rechecked_at=started_at,
+                recheck_delay=incident_recheck_delay,
+            ):
+                payment_lab_run.updated_at = started_at
+                payment_lab_run.version += 1
+                return _PaymentLabRecoveryClaim(
+                    payment_lab_run_id=payment_lab_run.id,
+                    payment_attempt_id=payment_attempt_id,
+                    recovery_case_id=recovery_case.id,
+                    disposition=PaymentLabRecoveryStartDisposition.ALREADY_PLANNED,
+                    recovery_case_created=False,
+                    should_execute_agent=False,
+                )
         claim_is_stale = payment_lab_run.updated_at <= started_at - claim_timeout
         if not wait_recheck_due and not claim_is_stale:
             return _PaymentLabRecoveryClaim(
@@ -352,6 +422,7 @@ async def start_payment_lab_recovery(
             started_at=started_at,
             customer_contact_allowed=customer_contact_allowed,
             claim_timeout=claim_timeout,
+            incident_recheck_delay=planner_policy.incident_recheck_delay,
         )
 
     if not claim.should_execute_agent:

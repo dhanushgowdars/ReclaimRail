@@ -5,6 +5,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.recovery import RecoveryChannel
 from app.integrations.gemini import RecoveryPlannerSource
 from app.services import payment_lab_recovery_batch
 from app.services.payment_lab_recovery_batch import (
@@ -92,8 +93,8 @@ async def test_discovery_rejects_naive_time_before_database_access() -> None:
 async def test_discovers_verified_failure_candidates_in_query_order() -> None:
     query_result = MagicMock()
     query_result.all.return_value = [
-        (RUN_ID_ONE, "upi"),
-        (RUN_ID_TWO, "card"),
+        (RUN_ID_ONE, "upi", False),
+        (RUN_ID_TWO, "card", True),
     ]
     session = AsyncMock(spec=AsyncSession)
     session.execute.return_value = query_result
@@ -105,8 +106,8 @@ async def test_discovers_verified_failure_candidates_in_query_order() -> None:
     )
 
     assert result == (
-        PaymentLabRecoveryCandidate(RUN_ID_ONE, "upi"),
-        PaymentLabRecoveryCandidate(RUN_ID_TWO, "card"),
+        PaymentLabRecoveryCandidate(RUN_ID_ONE, "upi", False),
+        PaymentLabRecoveryCandidate(RUN_ID_TWO, "card", True),
     )
     session.execute.assert_awaited_once()
     statement = session.execute.await_args.args[0]
@@ -122,8 +123,8 @@ async def test_batch_runs_gemini_and_deterministic_fallback_without_contact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidates = (
-        PaymentLabRecoveryCandidate(RUN_ID_ONE, "upi"),
-        PaymentLabRecoveryCandidate(RUN_ID_TWO, "card"),
+        PaymentLabRecoveryCandidate(RUN_ID_ONE, "upi", False),
+        PaymentLabRecoveryCandidate(RUN_ID_TWO, "card", True),
     )
     discover = AsyncMock(return_value=candidates)
     start = AsyncMock(
@@ -175,6 +176,9 @@ async def test_batch_runs_gemini_and_deterministic_fallback_without_contact(
     )
     assert first_call["provider"] is provider
     assert first_call["claim_timeout"] == timedelta(seconds=60)
+    second_call = start.await_args_list[1].kwargs
+    assert second_call["customer_contact_allowed"] is True
+    assert second_call["available_channels"] == (RecoveryChannel.EMAIL,)
 
 
 @pytest.mark.asyncio
@@ -182,11 +186,12 @@ async def test_batch_isolates_stale_conflicting_and_retryable_runs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidates = (
-        PaymentLabRecoveryCandidate(RUN_ID_ONE, "upi"),
-        PaymentLabRecoveryCandidate(RUN_ID_TWO, "card"),
+        PaymentLabRecoveryCandidate(RUN_ID_ONE, "upi", False),
+        PaymentLabRecoveryCandidate(RUN_ID_TWO, "card", False),
         PaymentLabRecoveryCandidate(
             UUID("92000000-0000-0000-0000-000000000003"),
             "wallet",
+            False,
         ),
     )
     monkeypatch.setattr(

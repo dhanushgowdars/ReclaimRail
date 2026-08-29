@@ -68,6 +68,7 @@ def build_ready_run() -> PaymentLabRun:
         amount_minor=349_900,
         currency="INR",
         payment_method="netbanking",
+        test_email_contact_consent=False,
         receipt=build_payment_lab_receipt(RUN_ID),
         provider_order_id="order_test_001",
         provider_order_status="created",

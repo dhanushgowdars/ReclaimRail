@@ -43,7 +43,11 @@ def dependency_overrides() -> Iterator[None]:
     app.dependency_overrides.clear()
 
 
-def build_result(*, created: bool = True) -> PaymentLabRunCreationResult:
+def build_result(
+    *,
+    created: bool = True,
+    test_email_contact_consent: bool = False,
+) -> PaymentLabRunCreationResult:
     return PaymentLabRunCreationResult(
         payment_lab_run_id=RUN_ID,
         client_request_id=CLIENT_REQUEST_ID,
@@ -52,6 +56,7 @@ def build_result(*, created: bool = True) -> PaymentLabRunCreationResult:
         amount_minor=349_900,
         currency="INR",
         payment_method="netbanking",
+        test_email_contact_consent=test_email_contact_consent,
         provider_order_id="order_test_001",
         checkout_expires_at=NOW + timedelta(minutes=10),
         created=created,
@@ -62,10 +67,16 @@ def configure_provider_and_service(
     monkeypatch: pytest.MonkeyPatch,
     *,
     created: bool = True,
+    test_email_contact_consent: bool = False,
 ) -> AsyncMock:
     provider = MagicMock(spec=RazorpayOrderProvider)
     provider.checkout_key_id = "rzp_test_key"
-    create_run = AsyncMock(return_value=build_result(created=created))
+    create_run = AsyncMock(
+        return_value=build_result(
+            created=created,
+            test_email_contact_consent=test_email_contact_consent,
+        ),
+    )
 
     monkeypatch.setattr(
         payment_lab,
@@ -106,6 +117,7 @@ def test_creates_guided_test_mode_checkout(
         "timeout_seconds": 600,
         "theme_color": "#0B5FFF",
         "payment_method_hint": "netbanking",
+        "prefill_email": None,
     }
     assert "test-secret" not in response.text
     assert "lab-secret" not in response.text
@@ -113,6 +125,40 @@ def test_creates_guided_test_mode_checkout(
     assert await_args is not None
     assert await_args.kwargs["amount_minor"] == 349_900
     assert await_args.kwargs["payment_method"] == "netbanking"
+    assert await_args.kwargs["test_email_contact_consent"] is False
+
+
+def test_creates_consent_recorded_test_email_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def settings_with_demo_email() -> Settings:
+        return Settings(
+            razorpay_key_id=SecretStr("rzp_test_key"),
+            razorpay_key_secret=SecretStr("test-secret"),
+            payment_lab_access_token=SecretStr("lab-secret"),
+            payment_lab_demo_email_recipient=SecretStr("demo@example.test"),
+        )
+
+    app.dependency_overrides[get_settings] = settings_with_demo_email
+    create_run = configure_provider_and_service(
+        monkeypatch,
+        test_email_contact_consent=True,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/payment-lab/runs",
+            headers={"X-ReclaimRail-Lab-Token": "lab-secret"},
+            json={
+                "client_request_id": str(CLIENT_REQUEST_ID),
+                "mode": "guided",
+                "enable_test_email_recovery_notification": True,
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()["checkout"]["prefill_email"] == "demo@example.test"
+    assert create_run.await_args.kwargs["test_email_contact_consent"] is True
 
 
 def test_creates_custom_run_with_bounded_inputs(

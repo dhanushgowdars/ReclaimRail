@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
@@ -61,6 +63,20 @@ class PaymentLifecycleSnapshotResponse(ResponseModel):
     late_authorization_detected_at: datetime | None
 
 
+class RecoveryAiTraceResponse(ResponseModel):
+    root_cause_category: str | None
+    recoverability_assessment: str | None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    recommended_action: str | None
+    evidence_references: list[str]
+    evidence_codes: list[str]
+    evidence_tool_names: list[str]
+    input_token_count: int | None = Field(default=None, ge=0)
+    output_token_count: int | None = Field(default=None, ge=0)
+    fallback_used: bool | None
+    fallback_reason: str | None
+
+
 class RecoveryAgentRunSummaryResponse(ResponseModel):
     agent_run_id: UUID
     run_number: int = Field(ge=1)
@@ -73,6 +89,7 @@ class RecoveryAgentRunSummaryResponse(ResponseModel):
     failure_code: str | None
     started_at: datetime
     completed_at: datetime | None
+    ai_trace: RecoveryAiTraceResponse
 
 
 class RecoveryActionSummaryResponse(ResponseModel):

@@ -87,8 +87,23 @@ def build_agent(*, fallback_used: bool = False) -> MagicMock:
     agent.planner_provider = "gemini" if not fallback_used else "deterministic"
     agent.model_name = "gemini-3.6-flash" if not fallback_used else None
     agent.evidence = {
-        "fallback_used": fallback_used,
-        "fallback_reason": "provider_failure" if fallback_used else None,
+        "planner": {
+            "fallback_used": fallback_used,
+            "fallback_reason": "provider_failure" if fallback_used else None,
+            "input_token_count": 176,
+            "output_token_count": 47,
+        },
+        "bounded_ai_analysis": {
+            "root_cause_category": "bank_authorization_failure",
+            "recoverability_assessment": "recoverable",
+            "confidence": 0.88,
+            "allowed_action_recommendation": "create_payment_link",
+            "evidence_references": ["payment_state_snapshot"],
+        },
+        "evidence_codes": ["payment_failed"],
+        "bounded_ai_evidence_tools": {
+            "payment_state_snapshot": {"ref": "payment_state_snapshot"},
+        },
     }
     agent.reasoning_summary = "Offer a bounded alternate payment path"
     agent.proposed_action_count = 1
@@ -265,6 +280,9 @@ async def test_completed_run_exposes_provider_agent_policy_and_outcome_evidence(
     assert result.agent is not None
     assert result.agent.planner_provider == "gemini"
     assert result.agent.fallback_used is False
+    assert result.agent.ai_trace is not None
+    assert result.agent.ai_trace.recommended_action == "create_payment_link"
+    assert result.agent.ai_trace.input_token_count == 176
     assert result.actions[0].policy_outcome == "allow"
     assert result.actions[0].provider_action_id == "plink_live_status"
     assert result.actions[0].provider_action_url == "https://rzp.io/i/live-status"

@@ -22,6 +22,7 @@ from app.services.recovery_case_detail_service import (
     RecoveryCaseSnapshot,
     RecoveryOutcomeSummary,
 )
+from app.services.recovery_ai_trace import RecoveryAiTrace
 
 CASE_ID = UUID("10000000-0000-0000-0000-000000000001")
 PAYMENT_ID = UUID("20000000-0000-0000-0000-000000000001")
@@ -91,6 +92,19 @@ def build_detail() -> RecoveryCaseDetail:
                 failure_code=None,
                 started_at=NOW,
                 completed_at=NOW,
+                ai_trace=RecoveryAiTrace(
+                    root_cause_category="bank_authorization_failure",
+                    recoverability_assessment="recoverable",
+                    confidence=0.91,
+                    recommended_action="create_payment_link",
+                    evidence_references=("payment_state_snapshot",),
+                    evidence_codes=("payment_failed",),
+                    evidence_tool_names=("payment_state_snapshot",),
+                    input_token_count=212,
+                    output_token_count=61,
+                    fallback_used=False,
+                    fallback_reason=None,
+                ),
             ),
         ),
         actions=(

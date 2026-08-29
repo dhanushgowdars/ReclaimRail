@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from app.core.cache import close_redis
 from app.core.config import get_settings
 from app.core.database import close_database, get_session_factory
+from app.domain.recovery import RecoveryPlannerPolicy
 from app.integrations.gemini import create_gemini_recovery_plan_provider
 from app.services.payment_lab_recovery_batch import (
     PaymentLabRecoveryBatchResult,
@@ -75,6 +76,11 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
     claim_timeout = timedelta(
         seconds=settings.payment_lab_recovery_claim_timeout_seconds,
     )
+    planner_policy = RecoveryPlannerPolicy(
+        incident_recheck_delay=timedelta(
+            seconds=settings.recovery_incident_recheck_delay_seconds,
+        ),
+    )
 
     await heartbeat.start()
     try:
@@ -90,6 +96,7 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
                     approval_window=timedelta(
                         seconds=settings.recovery_approval_ttl_seconds,
                     ),
+                    planner_policy=planner_policy,
                 )
             except asyncio.CancelledError:
                 raise

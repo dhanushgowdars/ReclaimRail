@@ -130,6 +130,11 @@ class Settings(BaseSettings):
         le=3600.0,
     )
     incident_test_drill_enabled: bool = False
+    recovery_incident_recheck_delay_seconds: int = Field(
+        default=900,
+        ge=5,
+        le=3600,
+    )
 
     recovery_action_batch_size: int = Field(
         default=25,

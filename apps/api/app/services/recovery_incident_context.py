@@ -6,6 +6,7 @@ incident identifier captured when the case was created.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import case, desc, or_, select
@@ -70,6 +71,7 @@ async def load_active_recovery_incident_context(
         .where(
             RevenueIncident.status.in_(ACTIVE_INCIDENT_STATUSES),
             RevenueIncident.currency == currency,
+            RevenueIncident.current_window_end >= datetime.now(UTC),
             relevant_match,
         )
         .order_by(desc(_severity_rank()), desc(RevenueIncident.last_detected_at))

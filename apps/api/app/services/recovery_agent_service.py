@@ -5,7 +5,11 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.domain.recovery import RecoveryChannel
+from app.domain.recovery import (
+    DEFAULT_RECOVERY_PLANNER_POLICY,
+    RecoveryChannel,
+    RecoveryPlannerPolicy,
+)
 from app.integrations.gemini import (
     BoundedRecoveryPlannerResult,
     GeminiRecoveryPlanProvider,
@@ -47,6 +51,7 @@ async def execute_recovery_agent(
     provider: GeminiRecoveryPlanProvider | None,
     approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
     approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
+    planner_policy: RecoveryPlannerPolicy = DEFAULT_RECOVERY_PLANNER_POLICY,
 ) -> RecoveryAgentExecution:
     """Plan outside a database transaction, then persist through the policy gate."""
 
@@ -64,6 +69,7 @@ async def execute_recovery_agent(
     planner_result = await plan_with_gemini_fallback(
         context,
         provider=provider,
+        policy=planner_policy,
     )
 
     async with session_factory.begin() as write_session:

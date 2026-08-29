@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
 from app.db.models.recovery import RecoveryCase
-from app.domain.recovery import RecoveryCaseStatus, RecoveryChannel
+from app.domain.recovery import (
+    DEFAULT_RECOVERY_PLANNER_POLICY,
+    RecoveryCaseStatus,
+    RecoveryChannel,
+    RecoveryPlannerPolicy,
+)
 from app.integrations.gemini import (
     GeminiRecoveryPlanProvider,
     RecoveryPlannerSource,
@@ -161,16 +166,6 @@ async def _claim_payment_lab_recovery(
                 "Payment Lab recovery case contains an invalid status",
             ) from error
 
-        claim_is_stale = payment_lab_run.updated_at <= started_at - claim_timeout
-        if not claim_is_stale:
-            return _PaymentLabRecoveryClaim(
-                payment_lab_run_id=payment_lab_run.id,
-                payment_attempt_id=payment_attempt_id,
-                recovery_case_id=recovery_case.id,
-                disposition=PaymentLabRecoveryStartDisposition.ALREADY_RUNNING,
-                recovery_case_created=False,
-                should_execute_agent=False,
-            )
         if (
             recovery_case_status is RecoveryCaseStatus.WAITING
             and recovery_case.next_action_at is not None
@@ -181,6 +176,25 @@ async def _claim_payment_lab_recovery(
                 payment_attempt_id=payment_attempt_id,
                 recovery_case_id=recovery_case.id,
                 disposition=PaymentLabRecoveryStartDisposition.ALREADY_PLANNED,
+                recovery_case_created=False,
+                should_execute_agent=False,
+            )
+
+        # A due waiting case is a deliberate recheck, not a stale-worker
+        # recovery.  Claim it immediately so an expired incident window can
+        # safely permit a new bounded decision.
+        wait_recheck_due = (
+            recovery_case_status is RecoveryCaseStatus.WAITING
+            and recovery_case.next_action_at is not None
+            and recovery_case.next_action_at <= started_at
+        )
+        claim_is_stale = payment_lab_run.updated_at <= started_at - claim_timeout
+        if not wait_recheck_due and not claim_is_stale:
+            return _PaymentLabRecoveryClaim(
+                payment_lab_run_id=payment_lab_run.id,
+                payment_attempt_id=payment_attempt_id,
+                recovery_case_id=recovery_case.id,
+                disposition=PaymentLabRecoveryStartDisposition.ALREADY_RUNNING,
                 recovery_case_created=False,
                 should_execute_agent=False,
             )
@@ -301,6 +315,7 @@ async def start_payment_lab_recovery(
     claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
     approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
     approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
+    planner_policy: RecoveryPlannerPolicy = DEFAULT_RECOVERY_PLANNER_POLICY,
 ) -> PaymentLabRecoveryStartResult:
     """Claim a verified failure and start the existing bounded recovery agent."""
 
@@ -338,6 +353,7 @@ async def start_payment_lab_recovery(
             provider=provider,
             approval_threshold_minor=approval_threshold_minor,
             approval_window=approval_window,
+            planner_policy=planner_policy,
         )
     except asyncio.CancelledError:
         await asyncio.shield(

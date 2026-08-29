@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
 from app.db.models.recovery import RecoveryCase
-from app.domain.recovery import RecoveryCaseStatus
+from app.domain.recovery import (
+    DEFAULT_RECOVERY_PLANNER_POLICY,
+    RecoveryCaseStatus,
+    RecoveryPlannerPolicy,
+)
 from app.integrations.gemini import (
     GeminiRecoveryPlanProvider,
     RecoveryPlannerSource,
@@ -179,6 +183,12 @@ async def discover_payment_lab_recovery_candidates(
                         ),
                     ),
                 ),
+                and_(
+                    PaymentLabRun.status == PaymentLabRunStatus.RECOVERY_RUNNING.value,
+                    RecoveryCase.status == RecoveryCaseStatus.WAITING.value,
+                    RecoveryCase.next_action_at.is_not(None),
+                    RecoveryCase.next_action_at <= reference_time,
+                ),
             ),
         )
         .order_by(
@@ -207,6 +217,7 @@ async def run_payment_lab_recovery_batch(
     claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
     approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
     approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
+    planner_policy: RecoveryPlannerPolicy = DEFAULT_RECOVERY_PLANNER_POLICY,
 ) -> PaymentLabRecoveryBatchResult:
     """Start bounded recovery for verified Payment Lab failures.
 
@@ -245,6 +256,7 @@ async def run_payment_lab_recovery_batch(
                 claim_timeout=claim_timeout,
                 approval_threshold_minor=approval_threshold_minor,
                 approval_window=approval_window,
+                planner_policy=planner_policy,
             )
             start_results.append(result)
         except asyncio.CancelledError:

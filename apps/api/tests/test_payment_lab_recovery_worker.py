@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.domain.recovery import RecoveryPlannerPolicy
 from app.services.payment_lab_recovery_batch import PaymentLabRecoveryBatchResult
 from app.workers import payment_lab_recovery_worker
 from app.workers.payment_lab_recovery_worker import (
@@ -23,6 +24,7 @@ def create_settings() -> SimpleNamespace:
         payment_lab_recovery_claim_timeout_seconds=60,
         recovery_approval_threshold_minor=300_000,
         recovery_approval_ttl_seconds=900,
+        recovery_incident_recheck_delay_seconds=900,
     )
 
 
@@ -104,6 +106,9 @@ async def test_run_once_executes_batch_and_closes_database(
         claim_timeout=timedelta(seconds=60),
         approval_threshold_minor=300_000,
         approval_window=timedelta(seconds=900),
+        planner_policy=RecoveryPlannerPolicy(
+            incident_recheck_delay=timedelta(seconds=900),
+        ),
     )
     close_database.assert_awaited_once_with()
 

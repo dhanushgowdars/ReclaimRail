@@ -171,6 +171,19 @@ async def _claim_payment_lab_recovery(
                 recovery_case_created=False,
                 should_execute_agent=False,
             )
+        if (
+            recovery_case_status is RecoveryCaseStatus.WAITING
+            and recovery_case.next_action_at is not None
+            and recovery_case.next_action_at > started_at
+        ):
+            return _PaymentLabRecoveryClaim(
+                payment_lab_run_id=payment_lab_run.id,
+                payment_attempt_id=payment_attempt_id,
+                recovery_case_id=recovery_case.id,
+                disposition=PaymentLabRecoveryStartDisposition.ALREADY_PLANNED,
+                recovery_case_created=False,
+                should_execute_agent=False,
+            )
         if recovery_case_status not in PLANNABLE_CASE_STATUSES:
             return _PaymentLabRecoveryClaim(
                 payment_lab_run_id=payment_lab_run.id,

@@ -1,13 +1,16 @@
+import secrets
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_database_session
+from app.domain.incidents import IncidentSeverity
+from app.services.incident_test_drill_service import create_test_mode_incident_drill
 from app.services.recovery_incident_feed_service import (
     MAX_ACTIVE_INCIDENTS,
     RecoveryIncidentFeedItem,
@@ -34,6 +37,7 @@ IncidentLimitQuery = Annotated[
         le=MAX_ACTIVE_INCIDENTS,
     ),
 ]
+TestDrillTokenHeader = Annotated[str | None, Header(alias="X-ReclaimRail-Lab-Token")]
 
 router = APIRouter(
     prefix="/recovery/dashboard",
@@ -58,6 +62,20 @@ class RecoveryIncidentFeedItemResponse(BaseModel):
     reason_codes: list[str]
     first_detected_at: datetime
     last_detected_at: datetime
+
+
+class TestModeIncidentDrillRequest(BaseModel):
+    payment_method: str = Field(pattern="^(upi|card|netbanking|wallet)$")
+    severity: IncidentSeverity = IncidentSeverity.HIGH
+    duration_minutes: int = Field(default=10, ge=1, le=60)
+
+
+class TestModeIncidentDrillResponse(BaseModel):
+    incident_id: UUID
+    label: str
+    severity: IncidentSeverity
+    payment_method: str
+    expires_at: datetime
 
 
 def to_recovery_incident_feed_item_response(
@@ -107,3 +125,42 @@ async def list_active_recovery_incidents(
         ) from error
 
     return [to_recovery_incident_feed_item_response(item) for item in incidents]
+
+
+@router.post(
+    "/incidents/test-drill",
+    response_model=TestModeIncidentDrillResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_test_mode_incident_drill(
+    request: TestModeIncidentDrillRequest,
+    session: DatabaseSessionDependency,
+    settings: SettingsDependency,
+    access_token: TestDrillTokenHeader = None,
+) -> TestModeIncidentDrillResponse:
+    if settings.app_env == "production" or not settings.incident_test_drill_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Test Mode incident drills are disabled"
+        )
+    configured_token = settings.payment_lab_access_token
+    expected = configured_token.get_secret_value() if configured_token is not None else None
+    if not expected or not access_token or not secrets.compare_digest(expected, access_token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Test Mode access token"
+        )
+    incident = await create_test_mode_incident_drill(
+        session,
+        payment_method=request.payment_method,
+        currency=settings.incident_currency,
+        severity=request.severity,
+        duration_minutes=request.duration_minutes,
+    )
+    await session.commit()
+    expires_at = incident.current_window_end
+    return TestModeIncidentDrillResponse(
+        incident_id=incident.id,
+        label="TEST MODE INCIDENT DRILL — not provider evidence",
+        severity=request.severity,
+        payment_method=request.payment_method,
+        expires_at=expires_at,
+    )

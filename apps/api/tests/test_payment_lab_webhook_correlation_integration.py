@@ -13,6 +13,7 @@ from app.db.models.payment_lab import (
     PaymentLabRunProvenance,
     PaymentLabRunStatus,
 )
+from app.db.models.recovery import RecoveryCase
 from app.db.models.webhook import WebhookEvent, WebhookProcessingStatus
 from app.domain.payments import PaymentState
 from app.services.payment_webhook_processor import (
@@ -165,6 +166,14 @@ async def test_signed_failure_atomically_links_provider_order_to_lab_run() -> No
             async with session_factory() as cleanup_session, cleanup_session.begin():
                 await cleanup_session.execute(
                     delete(PaymentLabRun).where(PaymentLabRun.id == run_id),
+                )
+                # A live recovery worker may legitimately open a case for this
+                # integration test's failed payment before cleanup runs. Remove
+                # that dependent projection before deleting its payment attempt.
+                await cleanup_session.execute(
+                    delete(RecoveryCase).where(
+                        RecoveryCase.payment_attempt_id == payment_attempt_id,
+                    ),
                 )
                 await cleanup_session.execute(
                     delete(PaymentStateTransition).where(

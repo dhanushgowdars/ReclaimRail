@@ -12,6 +12,7 @@ from app.db.models.recovery import RecoveryCase
 from app.domain.recovery import (
     DEFAULT_RECOVERY_PLANNER_POLICY,
     RecoveryCaseStatus,
+    RecoveryChannel,
     RecoveryPlannerPolicy,
 )
 from app.integrations.gemini import (
@@ -52,6 +53,7 @@ SIGNED_FAILURE_STABILIZATION_DELAY = timedelta(seconds=5)
 class PaymentLabRecoveryCandidate:
     payment_lab_run_id: UUID
     payment_method: str
+    test_email_contact_consent: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +160,7 @@ async def discover_payment_lab_recovery_candidates(
         select(
             PaymentLabRun.id,
             PaymentLabRun.payment_method,
+            PaymentLabRun.test_email_contact_consent,
         )
         .outerjoin(
             RecoveryCase,
@@ -202,8 +205,9 @@ async def discover_payment_lab_recovery_candidates(
         PaymentLabRecoveryCandidate(
             payment_lab_run_id=run_id,
             payment_method=payment_method,
+            test_email_contact_consent=test_email_contact_consent,
         )
-        for run_id, payment_method in result.all()
+        for run_id, payment_method, test_email_contact_consent in result.all()
     )
 
 
@@ -221,9 +225,9 @@ async def run_payment_lab_recovery_batch(
 ) -> PaymentLabRecoveryBatchResult:
     """Start bounded recovery for verified Payment Lab failures.
 
-    Payment Lab runs do not yet persist explicit notification consent, so this
-    orchestrator deliberately disables customer-contact actions. A later,
-    consent-aware notification flow may enable channels for an individual run.
+    Customer contact remains disabled unless the individual Test Mode run has
+    explicitly recorded test-email consent. This keeps the normal lab safe
+    while allowing one auditable, controlled notification scenario.
     """
 
     _require_timezone_aware(reference_time)
@@ -246,8 +250,12 @@ async def run_payment_lab_recovery_batch(
                 session_factory,
                 payment_lab_run_id=candidate.payment_lab_run_id,
                 started_at=reference_time,
-                customer_contact_allowed=False,
-                available_channels=(),
+                customer_contact_allowed=candidate.test_email_contact_consent,
+                available_channels=(
+                    (RecoveryChannel.EMAIL,)
+                    if candidate.test_email_contact_consent
+                    else ()
+                ),
                 alternate_payment_methods=build_alternate_payment_methods(
                     candidate.payment_method,
                     supported_methods=supported_payment_methods,

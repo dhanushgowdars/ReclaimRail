@@ -17,6 +17,7 @@ from app.db.models.recovery import (
 from app.db.models.recovery_outcome import RecoveryOutcome
 from app.domain.payments import STOP_RECOVERY_STATES, PaymentState
 from app.domain.recovery import RecoveryCaseStatus
+from app.services.recovery_ai_trace import RecoveryAiTrace, build_recovery_ai_trace
 
 
 class PaymentLabLiveRunNotFoundError(LookupError):
@@ -106,6 +107,7 @@ class PaymentLabAgentEvidence:
     reasoning_summary: str | None
     proposed_action_count: int
     completed_at: datetime | None
+    ai_trace: RecoveryAiTrace | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,12 +203,8 @@ class _DerivedLiveState:
 def _fallback_metadata(
     agent_run: RecoveryAgentRun,
 ) -> tuple[bool | None, str | None]:
-    fallback_used = agent_run.evidence.get("fallback_used")
-    fallback_reason = agent_run.evidence.get("fallback_reason")
-    return (
-        fallback_used if isinstance(fallback_used, bool) else None,
-        fallback_reason if isinstance(fallback_reason, str) else None,
-    )
+    trace = build_recovery_ai_trace(agent_run.evidence)
+    return trace.fallback_used, trace.fallback_reason
 
 
 def _build_payment_evidence(
@@ -248,6 +246,7 @@ def _build_agent_evidence(
         reasoning_summary=(agent_run.reasoning_summary if agent_run is not None else None),
         proposed_action_count=(agent_run.proposed_action_count if agent_run is not None else 0),
         completed_at=agent_run.completed_at if agent_run is not None else None,
+        ai_trace=(build_recovery_ai_trace(agent_run.evidence) if agent_run is not None else None),
     )
 
 

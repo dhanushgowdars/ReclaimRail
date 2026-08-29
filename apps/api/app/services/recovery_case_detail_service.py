@@ -14,6 +14,7 @@ from app.db.models.recovery import (
     RecoveryCase,
 )
 from app.db.models.recovery_outcome import RecoveryOutcome
+from app.services.recovery_ai_trace import RecoveryAiTrace, build_recovery_ai_trace
 from app.services.recovery_audit import (
     RecoveryAuditChainEntry,
     RecoveryAuditVerification,
@@ -82,6 +83,7 @@ class RecoveryAgentRunSummary:
     failure_code: str | None
     started_at: datetime
     completed_at: datetime | None
+    ai_trace: RecoveryAiTrace
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +249,7 @@ def build_agent_run_summary(agent_run: RecoveryAgentRun) -> RecoveryAgentRunSumm
         failure_code=agent_run.failure_code,
         started_at=agent_run.started_at,
         completed_at=agent_run.completed_at,
+        ai_trace=build_recovery_ai_trace(agent_run.evidence),
     )
 
 

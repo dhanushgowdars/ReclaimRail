@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -50,6 +52,20 @@ class PaymentLabPaymentEvidenceResponse(ResponseModel):
     observed_at: datetime
 
 
+class RecoveryAiTraceResponse(ResponseModel):
+    root_cause_category: str | None
+    recoverability_assessment: str | None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    recommended_action: str | None
+    evidence_references: list[str]
+    evidence_codes: list[str]
+    evidence_tool_names: list[str]
+    input_token_count: int | None = Field(default=None, ge=0)
+    output_token_count: int | None = Field(default=None, ge=0)
+    fallback_used: bool | None
+    fallback_reason: str | None
+
+
 class PaymentLabAgentEvidenceResponse(ResponseModel):
     recovery_case_id: UUID
     recovery_case_status: str
@@ -62,6 +78,7 @@ class PaymentLabAgentEvidenceResponse(ResponseModel):
     reasoning_summary: str | None
     proposed_action_count: int = Field(ge=0)
     completed_at: datetime | None
+    ai_trace: RecoveryAiTraceResponse | None
 
 
 class PaymentLabActionEvidenceResponse(ResponseModel):

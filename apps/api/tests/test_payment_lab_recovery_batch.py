@@ -114,6 +114,7 @@ async def test_discovers_verified_failure_candidates_in_query_order() -> None:
         statement.compile().params.values()
     )
     assert REFERENCE_TIME - timedelta(seconds=60) in statement.compile().params.values()
+    assert REFERENCE_TIME in statement.compile().params.values()
 
 
 @pytest.mark.asyncio

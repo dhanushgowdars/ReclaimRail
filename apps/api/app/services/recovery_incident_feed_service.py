@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Final
 from uuid import UUID
 
@@ -88,6 +88,7 @@ async def load_active_recovery_incidents(
         .where(
             RevenueIncident.currency == normalized_currency,
             RevenueIncident.status.in_(ACTIVE_INCIDENT_STATUSES),
+            RevenueIncident.current_window_end >= datetime.now(UTC),
         )
         .order_by(
             severity_rank.desc(),

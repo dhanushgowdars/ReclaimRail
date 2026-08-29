@@ -18,6 +18,7 @@ from app.domain.recovery import (
     RecoveryChannel,
     RecoveryPlan,
     RecoveryPlanDecision,
+    RecoveryPlannerPolicy,
     RecoveryPlanningContext,
     build_deterministic_recovery_plan,
     build_recovery_evidence_codes,
@@ -336,10 +337,12 @@ def build_recovery_evidence_tools(context: RecoveryPlanningContext) -> dict[str,
 
 def build_recovery_planning_prompt(
     context: RecoveryPlanningContext,
+    *,
+    policy: RecoveryPlannerPolicy = DEFAULT_RECOVERY_PLANNER_POLICY,
 ) -> str:
     case = context.case
     failure = context.failure
-    deterministic_baseline = build_deterministic_recovery_plan(context)
+    deterministic_baseline = build_deterministic_recovery_plan(context, policy=policy)
     evidence = {
         "case": {
             "case_id": str(case.case_id),
@@ -526,9 +529,10 @@ def _deterministic_fallback(
     context: RecoveryPlanningContext,
     *,
     reason: GeminiPlannerFallbackReason,
+    policy: RecoveryPlannerPolicy,
 ) -> BoundedRecoveryPlannerResult:
     return BoundedRecoveryPlannerResult(
-        plan=build_deterministic_recovery_plan(context),
+        plan=build_deterministic_recovery_plan(context, policy=policy),
         source=RecoveryPlannerSource.DETERMINISTIC,
         model_name=None,
         fallback_used=True,
@@ -540,11 +544,15 @@ def _violates_policy_contract(
     plan: RecoveryPlan,
     *,
     context: RecoveryPlanningContext,
+    policy: RecoveryPlannerPolicy,
 ) -> bool:
-    baseline = build_deterministic_recovery_plan(context)
+    baseline = build_deterministic_recovery_plan(context, policy=policy)
 
     if plan.decision is not baseline.decision:
         return True
+
+    if plan.decision is RecoveryPlanDecision.WAIT:
+        return plan.proposals != baseline.proposals
 
     if (not context.case.customer_contact_allowed or not context.available_channels) and any(
         proposal.action_type in CUSTOMER_CONTACT_ACTIONS for proposal in plan.proposals
@@ -576,11 +584,13 @@ async def plan_with_gemini_fallback(
     context: RecoveryPlanningContext,
     *,
     provider: GeminiRecoveryPlanProvider | None,
+    policy: RecoveryPlannerPolicy = DEFAULT_RECOVERY_PLANNER_POLICY,
 ) -> BoundedRecoveryPlannerResult:
     if provider is None:
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.NOT_CONFIGURED,
+            policy=policy,
         )
 
     try:
@@ -589,6 +599,7 @@ async def plan_with_gemini_fallback(
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.PROVIDER_ERROR,
+            policy=policy,
         )
 
     try:
@@ -605,12 +616,14 @@ async def plan_with_gemini_fallback(
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.INVALID_RESPONSE,
+            policy=policy,
         )
 
-    if _violates_policy_contract(plan, context=context):
+    if _violates_policy_contract(plan, context=context, policy=policy):
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.POLICY_CONFLICT,
+            policy=policy,
         )
 
     valid_evidence_references = set(build_recovery_evidence_tools(context))
@@ -618,6 +631,7 @@ async def plan_with_gemini_fallback(
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.INVALID_RESPONSE,
+            policy=policy,
         )
 
     return BoundedRecoveryPlannerResult(

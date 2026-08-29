@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
 from app.db.models.recovery import RecoveryCase
-from app.domain.recovery import RecoveryChannel
+from app.domain.recovery import DEFAULT_RECOVERY_PLANNER_POLICY, RecoveryChannel
 from app.integrations.gemini import RecoveryPlannerSource
 from app.services import payment_lab_recovery_service
 from app.services.payment_lab_recovery_service import (
@@ -110,6 +110,7 @@ async def test_starts_existing_agent_with_bounded_inputs(
         "provider": provider,
         "approval_threshold_minor": 1_000_000,
         "approval_window": timedelta(minutes=15),
+        "planner_policy": DEFAULT_RECOVERY_PLANNER_POLICY,
     }
 
 
@@ -351,3 +352,47 @@ async def test_scheduled_wait_is_not_reclaimed_after_worker_lease(
     assert claim.should_execute_agent is False
     assert run.version == 3
     create_case.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_due_scheduled_wait_is_reclaimed_for_one_recheck(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = build_running_run(updated_at=NOW - timedelta(seconds=5))
+    recovery_case = build_open_case()
+    recovery_case.status = "waiting"
+    recovery_case.next_action_at = NOW
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(run)
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "_find_recovery_case",
+        AsyncMock(return_value=recovery_case),
+    )
+    create_case = AsyncMock(
+        return_value=RecoveryCaseCreationResult(
+            disposition=RecoveryCaseCreationDisposition.EXISTING,
+            recovery_case=recovery_case,
+            audit_event=None,
+        ),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_service,
+        "create_or_get_recovery_case",
+        create_case,
+    )
+
+    claim = await _claim_payment_lab_recovery(
+        session,
+        payment_lab_run_id=RUN_ID,
+        started_at=NOW,
+        customer_contact_allowed=False,
+        claim_timeout=timedelta(seconds=60),
+    )
+
+    assert claim.disposition is PaymentLabRecoveryStartDisposition.STARTED
+    assert claim.should_execute_agent is True
+    assert run.status == PaymentLabRunStatus.RECOVERY_RUNNING.value
+    assert run.updated_at == NOW
+    assert run.version == 4
+    create_case.assert_awaited_once()

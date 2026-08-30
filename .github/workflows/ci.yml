@@ -120,8 +120,11 @@ jobs:
           node-version: "24"
           package-manager-cache: false
 
+      - name: Pin npm version
+        run: npm install --global npm@11.13.0
+
       - name: Install locked dependencies
-        run: npm ci
+        run: npm ci --include=optional
 
       - name: Run linting
         run: npm run lint

@@ -95,6 +95,8 @@ class RecoveryActionSummaryResponse(ResponseModel):
     execution_attempt_count: int = Field(ge=0)
     provider_action_id: str | None
     provider_action_status: str | None
+    provider_action_url: str | None
+    provider_action_expires_at: datetime | None
     started_at: datetime | None
     completed_at: datetime | None
 

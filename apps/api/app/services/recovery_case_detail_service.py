@@ -104,6 +104,8 @@ class RecoveryActionSummary:
     execution_attempt_count: int
     provider_action_id: str | None
     provider_action_status: str | None
+    provider_action_url: str | None
+    provider_action_expires_at: datetime | None
     started_at: datetime | None
     completed_at: datetime | None
 
@@ -212,9 +214,7 @@ def build_payment_lifecycle_snapshot(
     )
 
 
-def build_agent_run_summary(
-    agent_run: RecoveryAgentRun,
-) -> RecoveryAgentRunSummary:
+def build_agent_run_summary(agent_run: RecoveryAgentRun) -> RecoveryAgentRunSummary:
     return RecoveryAgentRunSummary(
         agent_run_id=agent_run.id,
         run_number=agent_run.run_number,
@@ -230,9 +230,7 @@ def build_agent_run_summary(
     )
 
 
-def build_action_summary(
-    action: RecoveryAction,
-) -> RecoveryActionSummary:
+def build_action_summary(action: RecoveryAction) -> RecoveryActionSummary:
     return RecoveryActionSummary(
         recovery_action_id=action.id,
         agent_run_id=action.agent_run_id,
@@ -253,14 +251,14 @@ def build_action_summary(
         execution_attempt_count=action.execution_attempt_count,
         provider_action_id=action.provider_action_id,
         provider_action_status=action.provider_action_status,
+        provider_action_url=action.provider_action_url,
+        provider_action_expires_at=action.provider_action_expires_at,
         started_at=action.started_at,
         completed_at=action.completed_at,
     )
 
 
-def build_outcome_summary(
-    outcome: RecoveryOutcome,
-) -> RecoveryOutcomeSummary:
+def build_outcome_summary(outcome: RecoveryOutcome) -> RecoveryOutcomeSummary:
     return RecoveryOutcomeSummary(
         recovery_outcome_id=outcome.id,
         status=outcome.status,
@@ -364,9 +362,7 @@ async def load_recovery_case_detail(
     )
     transitions_result = await session.execute(
         select(PaymentStateTransition)
-        .where(
-            PaymentStateTransition.payment_attempt_id == payment_attempt.id,
-        )
+        .where(PaymentStateTransition.payment_attempt_id == payment_attempt.id)
         .order_by(
             PaymentStateTransition.event_created_at,
             PaymentStateTransition.id,

@@ -5,6 +5,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.incident import RevenueIncident, RevenueIncidentStatus
 from app.db.models.payment import PaymentAttempt
 from app.db.models.recovery import (
     RecoveryAction,
@@ -30,6 +31,7 @@ from app.services.recovery_action_executor import (
     RecoveryActionExecutionResult,
     RecoveryActionInProgressError,
     RecoveryActionNotDueError,
+    RecoveryActionNotExecutableError,
     RecoveryActionPreparation,
     RecoveryActionProviderFailure,
     build_payment_link_reference_id,
@@ -209,6 +211,7 @@ async def test_prepares_allowed_payment_link_action(
         query_result(action),
         query_result(recovery_case),
         query_result(create_payment()),
+        query_result(None),
     ]
 
     append_audit = patch_audit(monkeypatch)
@@ -263,6 +266,26 @@ async def test_scheduled_action_cannot_execute_early() -> None:
         )
 
     assert session.execute.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_approval_required_action_cannot_reach_provider_execution() -> None:
+    action = create_action(status=RecoveryActionStatus.APPROVAL_REQUIRED)
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = query_result(action)
+
+    with pytest.raises(
+        RecoveryActionNotExecutableError,
+        match="cannot execute from approval_required",
+    ):
+        await prepare_recovery_payment_link_action(
+            session,
+            action_id=ACTION_ID,
+            executed_at=NOW,
+        )
+
+    assert session.execute.await_count == 1
+    assert action.execution_attempt_count == 0
 
 
 @pytest.mark.asyncio
@@ -329,6 +352,7 @@ async def test_late_authorization_stops_action_before_provider_call(
                 state=PaymentState.AUTHORIZED,
             ),
         ),
+        query_result(None),
     ]
 
     append_audit = patch_audit(monkeypatch)
@@ -347,6 +371,42 @@ async def test_late_authorization_stops_action_before_provider_call(
     assert recovery_case.status == (RecoveryCaseStatus.CANCELLED.value)
     assert recovery_case.closed_at == NOW
     append_audit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_new_high_rail_incident_blocks_provider_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    action = create_action()
+    recovery_case = create_case()
+    incident = MagicMock(spec=RevenueIncident)
+    incident.id = UUID("91000000-0000-0000-0000-000000000006")
+    incident.status = RevenueIncidentStatus.OPEN.value
+    incident.severity = "high"
+    incident.scope = "payment_method"
+    incident.dimension_value = "upi"
+
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.side_effect = [
+        query_result(action),
+        query_result(recovery_case),
+        query_result(create_payment()),
+        query_result(incident),
+    ]
+    append_audit = patch_audit(monkeypatch)
+
+    result = await prepare_recovery_payment_link_action(
+        session,
+        action_id=ACTION_ID,
+        executed_at=NOW,
+    )
+
+    assert result.terminal_result is not None
+    assert result.terminal_result.disposition is RecoveryActionExecutionDisposition.POLICY_BLOCKED
+    assert action.status == RecoveryActionStatus.BLOCKED.value
+    assert recovery_case.status == RecoveryCaseStatus.WAITING.value
+    audit_request = append_audit.await_args.kwargs["request"]
+    assert audit_request.event_data["active_incident"]["severity"] == "high"
 
 
 @pytest.mark.asyncio

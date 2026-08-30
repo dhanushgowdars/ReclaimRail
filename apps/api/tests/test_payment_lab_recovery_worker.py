@@ -1,11 +1,12 @@
 import asyncio
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.domain.recovery import RecoveryPlannerPolicy
 from app.services.payment_lab_recovery_batch import PaymentLabRecoveryBatchResult
 from app.workers import payment_lab_recovery_worker
 from app.workers.payment_lab_recovery_worker import (
@@ -20,6 +21,10 @@ def create_settings() -> SimpleNamespace:
     return SimpleNamespace(
         payment_lab_recovery_batch_size=25,
         payment_lab_recovery_poll_interval_seconds=1.0,
+        payment_lab_recovery_claim_timeout_seconds=60,
+        recovery_approval_threshold_minor=300_000,
+        recovery_approval_ttl_seconds=900,
+        recovery_incident_recheck_delay_seconds=900,
     )
 
 
@@ -98,6 +103,12 @@ async def test_run_once_executes_batch_and_closes_database(
         reference_time=NOW,
         provider=provider,
         batch_size=25,
+        claim_timeout=timedelta(seconds=60),
+        approval_threshold_minor=300_000,
+        approval_window=timedelta(seconds=900),
+        planner_policy=RecoveryPlannerPolicy(
+            incident_recheck_delay=timedelta(seconds=900),
+        ),
     )
     close_database.assert_awaited_once_with()
 

@@ -58,6 +58,7 @@ type PaymentLabResponse = {
     timeout_seconds: number;
     theme_color: string;
     payment_method_hint: PaymentMethod;
+    prefill_email: string | null;
   };
 };
 
@@ -77,6 +78,7 @@ type RazorpayOptions = {
   timeout: number;
   theme: { color: string };
   retry: { enabled: boolean };
+  prefill?: { email: string };
   modal: { ondismiss: () => void; confirm_close: boolean };
   handler: (response: RazorpaySuccess) => void;
 };
@@ -218,6 +220,8 @@ export function PaymentLabLauncher() {
   const [amountRupees, setAmountRupees] = useState("3499");
   const [paymentMethod, setPaymentMethod] =
     useState<PaymentMethod>("netbanking");
+  const [enableTestEmailNotification, setEnableTestEmailNotification] =
+    useState(false);
   const [runState, setRunState] = useState<RunState>("idle");
   const [run, setRun] = useState<PaymentLabResponse | null>(null);
   const [pollReviewerCode, setPollReviewerCode] = useState("");
@@ -396,6 +400,7 @@ export function PaymentLabLauncher() {
         ? {
             client_request_id: crypto.randomUUID(),
             mode,
+            enable_test_email_recovery_notification: enableTestEmailNotification,
           }
         : {
             client_request_id: crypto.randomUUID(),
@@ -440,6 +445,9 @@ export function PaymentLabLauncher() {
         timeout: responseBody.checkout.timeout_seconds,
         theme: { color: responseBody.checkout.theme_color },
         retry: { enabled: false },
+        ...(responseBody.checkout.prefill_email
+          ? { prefill: { email: responseBody.checkout.prefill_email } }
+          : {}),
         modal: {
           confirm_close: true,
           ondismiss: () =>
@@ -497,7 +505,10 @@ export function PaymentLabLauncher() {
             <button
               className={mode === "custom" ? "is-active" : ""}
               type="button"
-              onClick={() => setMode("custom")}
+              onClick={() => {
+                setMode("custom");
+                setEnableTestEmailNotification(false);
+              }}
             >
               Custom run
               <span>Choose inputs</span>
@@ -546,6 +557,20 @@ export function PaymentLabLauncher() {
               )}
             </div>
           </div>
+
+          {mode === "guided" ? (
+            <label className="lab-notification-consent">
+              <input
+                checked={enableTestEmailNotification}
+                type="checkbox"
+                onChange={(event) => setEnableTestEmailNotification(event.target.checked)}
+              />
+              <span>
+                <strong>Enable one controlled test-email recovery notification</strong>
+                <small>Uses only the local allowlisted demo inbox after policy approval.</small>
+              </span>
+            </label>
+          ) : null}
 
           <div className="lab-access">
             <label htmlFor="reviewer-code">Reviewer access code</label>

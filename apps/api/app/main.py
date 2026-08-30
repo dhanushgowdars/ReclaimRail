@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from app.api.routes.health import router as health_router
 from app.api.routes.payment_lab import router as payment_lab_router
 from app.api.routes.payment_lab_status import router as payment_lab_status_router
+from app.api.routes.recovery_approvals import router as recovery_approvals_router
 from app.api.routes.recovery_case_detail import router as recovery_case_detail_router
 from app.api.routes.recovery_dashboard import router as recovery_dashboard_router
 from app.api.routes.recovery_incidents import router as recovery_incidents_router
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     application.include_router(recovery_case_detail_router)
     application.include_router(recovery_incidents_router)
     application.include_router(recovery_outcomes_router)
+    application.include_router(recovery_approvals_router)
     application.include_router(webhook_router)
 
     return application

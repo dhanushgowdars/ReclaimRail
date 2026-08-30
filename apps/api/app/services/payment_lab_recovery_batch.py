@@ -4,15 +4,23 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
+from app.db.models.recovery import RecoveryCase
+from app.domain.recovery import (
+    DEFAULT_RECOVERY_PLANNER_POLICY,
+    RecoveryCaseStatus,
+    RecoveryChannel,
+    RecoveryPlannerPolicy,
+)
 from app.integrations.gemini import (
     GeminiRecoveryPlanProvider,
     RecoveryPlannerSource,
 )
 from app.services.payment_lab_recovery_service import (
+    DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
     PaymentLabRecoveryConflictError,
     PaymentLabRecoveryIneligibleError,
     PaymentLabRecoveryRunNotFoundError,
@@ -20,6 +28,10 @@ from app.services.payment_lab_recovery_service import (
     PaymentLabRecoveryStartDisposition,
     PaymentLabRecoveryStartResult,
     start_payment_lab_recovery,
+)
+from app.services.recovery_approval_service import (
+    DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    DEFAULT_APPROVAL_WINDOW,
 )
 
 SessionFactory = async_sessionmaker[AsyncSession]
@@ -41,6 +53,7 @@ SIGNED_FAILURE_STABILIZATION_DELAY = timedelta(seconds=5)
 class PaymentLabRecoveryCandidate:
     payment_lab_run_id: UUID
     payment_method: str
+    test_email_contact_consent: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,21 +147,52 @@ async def discover_payment_lab_recovery_candidates(
     *,
     reference_time: datetime,
     batch_size: int,
+    claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
 ) -> tuple[PaymentLabRecoveryCandidate, ...]:
     _require_timezone_aware(reference_time)
 
     if not 1 <= batch_size <= 100:
         raise ValueError("Payment Lab recovery batch size must be between 1 and 100")
+    if claim_timeout <= timedelta(0):
+        raise ValueError("Payment Lab recovery claim timeout must be positive")
 
     result = await session.execute(
         select(
             PaymentLabRun.id,
             PaymentLabRun.payment_method,
+            PaymentLabRun.test_email_contact_consent,
+        )
+        .outerjoin(
+            RecoveryCase,
+            RecoveryCase.payment_attempt_id == PaymentLabRun.payment_attempt_id,
         )
         .where(
-            PaymentLabRun.status == PaymentLabRunStatus.PAYMENT_ATTEMPTED.value,
             PaymentLabRun.payment_attempt_id.is_not(None),
-            PaymentLabRun.updated_at <= reference_time - SIGNED_FAILURE_STABILIZATION_DELAY,
+            or_(
+                and_(
+                    PaymentLabRun.status == PaymentLabRunStatus.PAYMENT_ATTEMPTED.value,
+                    PaymentLabRun.updated_at <= reference_time - SIGNED_FAILURE_STABILIZATION_DELAY,
+                ),
+                and_(
+                    PaymentLabRun.status == PaymentLabRunStatus.RECOVERY_RUNNING.value,
+                    PaymentLabRun.updated_at <= reference_time - claim_timeout,
+                    or_(
+                        RecoveryCase.id.is_(None),
+                        RecoveryCase.status.in_(
+                            (
+                                RecoveryCaseStatus.OPEN.value,
+                                RecoveryCaseStatus.PLANNING.value,
+                            ),
+                        ),
+                    ),
+                ),
+                and_(
+                    PaymentLabRun.status == PaymentLabRunStatus.RECOVERY_RUNNING.value,
+                    RecoveryCase.status == RecoveryCaseStatus.WAITING.value,
+                    RecoveryCase.next_action_at.is_not(None),
+                    RecoveryCase.next_action_at <= reference_time,
+                ),
+            ),
         )
         .order_by(
             PaymentLabRun.updated_at,
@@ -161,8 +205,9 @@ async def discover_payment_lab_recovery_candidates(
         PaymentLabRecoveryCandidate(
             payment_lab_run_id=run_id,
             payment_method=payment_method,
+            test_email_contact_consent=test_email_contact_consent,
         )
-        for run_id, payment_method in result.all()
+        for run_id, payment_method, test_email_contact_consent in result.all()
     )
 
 
@@ -173,12 +218,16 @@ async def run_payment_lab_recovery_batch(
     provider: GeminiRecoveryPlanProvider | None,
     batch_size: int = 25,
     supported_payment_methods: Sequence[str] = DEFAULT_ALTERNATE_PAYMENT_METHODS,
+    claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
+    approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
+    planner_policy: RecoveryPlannerPolicy = DEFAULT_RECOVERY_PLANNER_POLICY,
 ) -> PaymentLabRecoveryBatchResult:
     """Start bounded recovery for verified Payment Lab failures.
 
-    Payment Lab runs do not yet persist explicit notification consent, so this
-    orchestrator deliberately disables customer-contact actions. A later,
-    consent-aware notification flow may enable channels for an individual run.
+    Customer contact remains disabled unless the individual Test Mode run has
+    explicitly recorded test-email consent. This keeps the normal lab safe
+    while allowing one auditable, controlled notification scenario.
     """
 
     _require_timezone_aware(reference_time)
@@ -188,6 +237,7 @@ async def run_payment_lab_recovery_batch(
             discovery_session,
             reference_time=reference_time,
             batch_size=batch_size,
+            claim_timeout=claim_timeout,
         )
 
     start_results: list[PaymentLabRecoveryStartResult] = []
@@ -200,13 +250,19 @@ async def run_payment_lab_recovery_batch(
                 session_factory,
                 payment_lab_run_id=candidate.payment_lab_run_id,
                 started_at=reference_time,
-                customer_contact_allowed=False,
-                available_channels=(),
+                customer_contact_allowed=candidate.test_email_contact_consent,
+                available_channels=(
+                    (RecoveryChannel.EMAIL,) if candidate.test_email_contact_consent else ()
+                ),
                 alternate_payment_methods=build_alternate_payment_methods(
                     candidate.payment_method,
                     supported_methods=supported_payment_methods,
                 ),
                 provider=provider,
+                claim_timeout=claim_timeout,
+                approval_threshold_minor=approval_threshold_minor,
+                approval_window=approval_window,
+                planner_policy=planner_policy,
             )
             start_results.append(result)
         except asyncio.CancelledError:

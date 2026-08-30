@@ -10,12 +10,13 @@ from app.db.models.payment import PaymentAttempt
 from app.db.models.recovery import (
     RecoveryActionStatus,
     RecoveryAgentRunStatus,
+    RecoveryApprovalStatus,
     RecoveryAuditEvent,
     RecoveryCase,
     RecoveryPlannerProvider,
 )
 from app.domain.recovery import RecoveryCaseStatus, RecoveryChannel, RecoveryPlanDecision
-from app.services import recovery_plan_service
+from app.services import recovery_approval_service, recovery_plan_service
 from app.services.recovery_plan_service import (
     RecoveryCaseNotPlannableError,
     RecoveryPlanningCaseNotFoundError,
@@ -109,8 +110,7 @@ def create_session(
         RecoveryCaseStatus.WAITING.value,
     }:
         results.append(query_result(payment))
-        if recovery_case.source_incident_id is not None:
-            results.append(query_result(incident))
+        results.append(query_result(incident))
         if payment is not None:
             results.append(query_result(previous_run_number))
     session.execute.side_effect = results
@@ -174,6 +174,89 @@ async def test_persists_policy_evaluated_recovery_plan(
 
 
 @pytest.mark.asyncio
+async def test_high_value_payment_link_waits_for_human_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recovery_case = create_case()
+    session = create_session(
+        recovery_case=recovery_case,
+        payment=create_payment(),
+    )
+    append_audit, _ = patch_audit(monkeypatch)
+    monkeypatch.setattr(
+        recovery_approval_service,
+        "append_recovery_audit_event",
+        append_audit,
+    )
+
+    result = await plan_and_persist_recovery_case(
+        session,
+        recovery_case_id=CASE_ID,
+        available_channels=(RecoveryChannel.EMAIL,),
+        alternate_payment_methods=("card",),
+        planned_at=NOW,
+        approval_threshold_minor=200_000,
+        approval_window=timedelta(minutes=15),
+    )
+
+    payment_link_action = result.actions[0]
+    assert payment_link_action.action_type == "create_payment_link"
+    assert payment_link_action.status == RecoveryActionStatus.APPROVAL_REQUIRED.value
+    assert recovery_case.status == RecoveryCaseStatus.AWAITING_APPROVAL.value
+    assert recovery_case.next_action_at is None
+    assert len(result.approvals) == 1
+    approval = result.approvals[0]
+    assert approval.recovery_action_id == payment_link_action.id
+    assert approval.status == RecoveryApprovalStatus.PENDING.value
+    assert approval.amount_minor == 250_000
+    assert approval.threshold_minor == 200_000
+    assert approval.expires_at == NOW + timedelta(minutes=15)
+    assert append_audit.await_count == 2
+    assert [call.kwargs["request"].event_type for call in append_audit.await_args_list] == [
+        "agent.plan.persisted",
+        "approval.requested",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_medium_incident_requires_operator_review_with_incident_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recovery_case = create_case()
+    incident = MagicMock(spec=RevenueIncident)
+    incident.id = INCIDENT_ID
+    incident.status = RevenueIncidentStatus.OPEN.value
+    incident.severity = "medium"
+    incident.scope = "payment_method"
+    incident.dimension_value = "upi"
+    session = create_session(
+        recovery_case=recovery_case,
+        payment=create_payment(),
+        incident=incident,
+    )
+    append_audit, _ = patch_audit(monkeypatch)
+    monkeypatch.setattr(
+        recovery_approval_service,
+        "append_recovery_audit_event",
+        append_audit,
+    )
+
+    result = await plan_and_persist_recovery_case(
+        session,
+        recovery_case_id=CASE_ID,
+        available_channels=(RecoveryChannel.EMAIL,),
+        alternate_payment_methods=("card",),
+        planned_at=NOW,
+    )
+
+    assert recovery_case.status == RecoveryCaseStatus.AWAITING_APPROVAL.value
+    assert result.actions[0].status == RecoveryActionStatus.APPROVAL_REQUIRED.value
+    assert result.approvals[0].request_reason == "active_incident_uncertainty"
+    assert result.approvals[0].threshold_minor is None
+    assert result.approvals[0].request_context["active_incident_severity"] == "medium"
+
+
+@pytest.mark.asyncio
 async def test_policy_blocks_contact_actions_during_quiet_period(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -209,8 +292,11 @@ async def test_active_high_incident_schedules_wait(
 ) -> None:
     recovery_case = create_case(source_incident_id=INCIDENT_ID)
     incident = MagicMock(spec=RevenueIncident)
+    incident.id = INCIDENT_ID
     incident.status = RevenueIncidentStatus.OPEN.value
     incident.severity = "high"
+    incident.scope = "payment_method"
+    incident.dimension_value = "upi"
     session = create_session(
         recovery_case=recovery_case,
         payment=create_payment(),
@@ -231,6 +317,41 @@ async def test_active_high_incident_schedules_wait(
     assert result.actions[0].status == RecoveryActionStatus.SCHEDULED.value
     assert recovery_case.status == RecoveryCaseStatus.WAITING.value
     assert recovery_case.next_action_at == NOW + timedelta(minutes=15)
+
+
+@pytest.mark.asyncio
+async def test_new_matching_incident_blocks_recovery_without_source_incident(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recovery_case = create_case()
+    incident = MagicMock(spec=RevenueIncident)
+    incident.id = INCIDENT_ID
+    incident.status = RevenueIncidentStatus.OPEN.value
+    incident.severity = "critical"
+    incident.scope = "payment_method"
+    incident.dimension_value = "upi"
+    session = create_session(
+        recovery_case=recovery_case,
+        payment=create_payment(),
+        incident=incident,
+    )
+    patch_audit(monkeypatch)
+
+    result = await plan_and_persist_recovery_case(
+        session,
+        recovery_case_id=CASE_ID,
+        available_channels=(RecoveryChannel.EMAIL,),
+        alternate_payment_methods=("card",),
+        planned_at=NOW,
+    )
+
+    assert result.plan.decision is RecoveryPlanDecision.WAIT
+    assert result.agent_run.input_snapshot["active_incident"] == {
+        "incident_id": str(INCIDENT_ID),
+        "scope": "payment_method",
+        "dimension_value": "upi",
+        "severity": "critical",
+    }
 
 
 @pytest.mark.asyncio

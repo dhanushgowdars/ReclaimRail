@@ -43,6 +43,7 @@ class CreatePaymentLabRunRequest(BaseModel):
     mode: PaymentLabRunMode
     amount_minor: int | None = Field(default=None, ge=10, le=100_000_000)
     payment_method: Literal["upi", "card", "netbanking", "wallet"] | None = None
+    enable_test_email_recovery_notification: bool = False
 
     @model_validator(mode="after")
     def validate_mode_inputs(self) -> "CreatePaymentLabRunRequest":
@@ -50,6 +51,8 @@ class CreatePaymentLabRunRequest(BaseModel):
             if self.amount_minor is not None or self.payment_method is not None:
                 raise ValueError("Guided runs use the locked amount and payment method")
         elif self.mode is PaymentLabRunMode.CUSTOM:
+            if self.enable_test_email_recovery_notification:
+                raise ValueError("Test email notification is available only for guided runs")
             if self.amount_minor is None or self.payment_method is None:
                 raise ValueError("Custom runs require amount and payment method")
         else:
@@ -68,6 +71,7 @@ class PaymentLabCheckoutResponse(BaseModel):
     timeout_seconds: int = Field(ge=60, le=1800)
     theme_color: str
     payment_method_hint: str
+    prefill_email: str | None = None
 
 
 class PaymentLabRunResponse(BaseModel):
@@ -121,6 +125,7 @@ def build_payment_lab_response(
     *,
     checkout_key_id: str,
     timeout_seconds: int,
+    demo_email_recipient: str | None,
 ) -> PaymentLabRunResponse:
     return PaymentLabRunResponse(
         payment_lab_run_id=result.payment_lab_run_id,
@@ -140,6 +145,7 @@ def build_payment_lab_response(
             timeout_seconds=timeout_seconds,
             theme_color="#0B5FFF",
             payment_method_hint=result.payment_method,
+            prefill_email=(demo_email_recipient if result.test_email_contact_consent else None),
         ),
     )
 
@@ -171,6 +177,16 @@ async def create_payment_lab_run_endpoint(
         request,
         settings,
     )
+    demo_email_recipient = (
+        settings.payment_lab_demo_email_recipient.get_secret_value().strip()
+        if settings.payment_lab_demo_email_recipient is not None
+        else ""
+    )
+    if request.enable_test_email_recovery_notification and not demo_email_recipient:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Test email notification recipient is not configured",
+        )
 
     try:
         result = await create_payment_lab_run(
@@ -181,6 +197,7 @@ async def create_payment_lab_run_endpoint(
             amount_minor=amount_minor,
             currency="INR",
             payment_method=payment_method,
+            test_email_contact_consent=request.enable_test_email_recovery_notification,
             reference_time=datetime.now(UTC),
             minimum_amount_minor=settings.payment_lab_min_amount_minor,
             maximum_amount_minor=settings.payment_lab_max_amount_minor,
@@ -220,4 +237,5 @@ async def create_payment_lab_run_endpoint(
         result,
         checkout_key_id=provider.checkout_key_id,
         timeout_seconds=settings.payment_lab_checkout_timeout_seconds,
+        demo_email_recipient=demo_email_recipient or None,
     )

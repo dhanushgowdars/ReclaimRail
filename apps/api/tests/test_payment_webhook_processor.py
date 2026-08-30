@@ -24,6 +24,9 @@ from app.services.payment_webhook_processor import (
     PaymentWebhookEventNotFoundError,
     process_canonical_payment_webhook,
 )
+from app.services.recovery_outcome_reconciler import (
+    RecoveryOutcomeReconciliationNotReadyError,
+)
 
 WEBHOOK_ID = UUID("60000000-0000-0000-0000-000000000001")
 ATTEMPT_ID = UUID("70000000-0000-0000-0000-000000000001")
@@ -61,6 +64,34 @@ def valid_payment_payload(
                     "error_description": (
                         "Payment declined" if event_type == "payment.failed" else None
                     ),
+                },
+            },
+        },
+        "created_at": PROVIDER_TIMESTAMP,
+    }
+
+
+def valid_payment_link_payload(
+    *,
+    event_type: str = "payment_link.paid",
+) -> dict[str, object]:
+    status = event_type.removeprefix("payment_link.")
+    return {
+        "entity": "event",
+        "account_id": "acc_processor_test",
+        "event": event_type,
+        "contains": ["payment_link"],
+        "payload": {
+            "payment_link": {
+                "entity": {
+                    "id": "plink_processor_test",
+                    "short_url": "https://rzp.io/i/processor-test",
+                    "status": status,
+                    "amount": 50_000,
+                    "amount_paid": 50_000 if status == "paid" else 0,
+                    "currency": "INR",
+                    "reference_id": "rr_processor_test",
+                    "updated_at": PROVIDER_TIMESTAMP,
                 },
             },
         },
@@ -242,6 +273,102 @@ async def test_unsupported_webhook_is_skipped_without_projection(
     assert webhook_event.processing_status == (WebhookProcessingStatus.PROCESSED.value)
 
     projector.assert_not_awaited()
+    session.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_signed_payment_link_webhook_reconciles_owned_recovery_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    webhook_event = make_webhook_event(
+        event_type="payment_link.paid",
+        payload=valid_payment_link_payload(),
+    )
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(webhook_event)
+    reconciler = AsyncMock(return_value=MagicMock())
+    monkeypatch.setattr(
+        payment_webhook_processor,
+        "reconcile_recovery_payment_link_webhook",
+        reconciler,
+    )
+    projector = AsyncMock()
+    monkeypatch.setattr(
+        payment_webhook_processor,
+        "project_payment_lifecycle_event",
+        projector,
+    )
+
+    result = await process_canonical_payment_webhook(
+        session,
+        WEBHOOK_ID,
+        processed_at=PROCESSED_AT,
+    )
+
+    assert result.disposition is PaymentWebhookDisposition.PROJECTED
+    assert result.projection is None
+    reconciler.assert_awaited_once()
+    assert reconciler.await_args.kwargs["payment_link"].payment_link_id == "plink_processor_test"
+    projector.assert_not_awaited()
+    assert webhook_event.processing_status == WebhookProcessingStatus.PROCESSED.value
+
+
+@pytest.mark.asyncio
+async def test_unowned_payment_link_webhook_is_safely_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    webhook_event = make_webhook_event(
+        event_type="payment_link.paid",
+        payload=valid_payment_link_payload(),
+    )
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(webhook_event)
+    monkeypatch.setattr(
+        payment_webhook_processor,
+        "reconcile_recovery_payment_link_webhook",
+        AsyncMock(return_value=None),
+    )
+
+    result = await process_canonical_payment_webhook(
+        session,
+        WEBHOOK_ID,
+        processed_at=PROCESSED_AT,
+    )
+
+    assert result.disposition is PaymentWebhookDisposition.SKIPPED
+    assert result.error is None
+
+
+@pytest.mark.asyncio
+async def test_out_of_order_payment_link_webhook_defers_to_polling_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    webhook_event = make_webhook_event(
+        event_type="payment_link.paid",
+        payload=valid_payment_link_payload(),
+    )
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(webhook_event)
+    monkeypatch.setattr(
+        payment_webhook_processor,
+        "reconcile_recovery_payment_link_webhook",
+        AsyncMock(
+            side_effect=RecoveryOutcomeReconciliationNotReadyError(
+                "Recovery action is not committed yet",
+            ),
+        ),
+    )
+
+    result = await process_canonical_payment_webhook(
+        session,
+        WEBHOOK_ID,
+        processed_at=PROCESSED_AT,
+    )
+
+    assert result.disposition is PaymentWebhookDisposition.SKIPPED
+    assert result.error is None
+    assert webhook_event.processing_status == WebhookProcessingStatus.PROCESSED.value
+    assert webhook_event.processed_at == PROCESSED_AT
     session.flush.assert_awaited_once()
 
 

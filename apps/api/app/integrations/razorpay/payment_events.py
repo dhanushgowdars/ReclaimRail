@@ -15,6 +15,10 @@ from app.domain.payments import (
     PaymentLifecycleEvent,
     PaymentState,
 )
+from app.integrations.razorpay.payment_links import (
+    RazorpayPaymentLink,
+    RazorpayPaymentLinkStatus,
+)
 from app.integrations.razorpay.webhooks import (
     RazorpayWebhookEnvelope,
 )
@@ -27,6 +31,14 @@ PAYMENT_EVENT_STATES: Final[Mapping[str, PaymentState]] = {
     "payment.captured": PaymentState.CAPTURED,
     "payment.failed": PaymentState.FAILED,
     "payment.refunded": PaymentState.REFUNDED,
+}
+
+PAYMENT_LINK_EVENT_STATUSES: Final[Mapping[str, RazorpayPaymentLinkStatus]] = {
+    "payment_link.created": RazorpayPaymentLinkStatus.CREATED,
+    "payment_link.partially_paid": RazorpayPaymentLinkStatus.PARTIALLY_PAID,
+    "payment_link.paid": RazorpayPaymentLinkStatus.PAID,
+    "payment_link.expired": RazorpayPaymentLinkStatus.EXPIRED,
+    "payment_link.cancelled": RazorpayPaymentLinkStatus.CANCELLED,
 }
 
 
@@ -91,6 +103,16 @@ class RazorpayPaymentEntity(BaseModel):
     @classmethod
     def normalize_currency(cls, value: str) -> str:
         return value.upper()
+
+
+class RazorpayPaymentLinkWebhookEvent(BaseModel):
+    """Sanitised Payment Link state received through a signed webhook."""
+
+    provider_event_id: str = Field(min_length=1, max_length=128)
+    event_type: str = Field(min_length=1, max_length=128)
+    payment_link: RazorpayPaymentLink
+
+    model_config = ConfigDict(extra="forbid")
 
 
 def timestamp_to_datetime(timestamp: int) -> datetime:
@@ -176,4 +198,51 @@ def normalize_razorpay_payment_event(
         error_source=payment.error_source,
         error_step=payment.error_step,
         error_reason=payment.error_reason,
+    )
+
+
+def normalize_razorpay_payment_link_event(
+    *,
+    provider_event_id: str,
+    envelope: RazorpayWebhookEnvelope,
+) -> RazorpayPaymentLinkWebhookEvent:
+    """Validate one signed Razorpay Payment Link lifecycle event."""
+
+    expected_status = PAYMENT_LINK_EVENT_STATUSES.get(envelope.event)
+    if expected_status is None:
+        raise UnsupportedPaymentEventError(
+            f"Unsupported Razorpay Payment Link event: {envelope.event}",
+        )
+
+    payment_link_wrapper = envelope.payload.get("payment_link")
+    if not isinstance(payment_link_wrapper, dict):
+        raise PaymentEventNormalizationError(
+            "Webhook payload does not contain a payment_link object",
+        )
+
+    payment_link_payload = payment_link_wrapper.get("entity")
+    if not isinstance(payment_link_payload, dict):
+        raise PaymentEventNormalizationError(
+            "Webhook payment_link object does not contain an entity",
+        )
+
+    try:
+        payment_link = RazorpayPaymentLink.model_validate(payment_link_payload)
+    except ValidationError as error:
+        raise PaymentEventNormalizationError(
+            "Webhook contains an invalid Payment Link entity",
+        ) from error
+
+    if payment_link.status is not expected_status:
+        raise PaymentEventNormalizationError(
+            (
+                "Webhook event and Payment Link status do not match: "
+                f"{envelope.event} != {payment_link.status.value}"
+            ),
+        )
+
+    return RazorpayPaymentLinkWebhookEvent(
+        provider_event_id=provider_event_id,
+        event_type=envelope.event,
+        payment_link=payment_link,
     )

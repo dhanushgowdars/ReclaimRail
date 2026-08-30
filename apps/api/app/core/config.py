@@ -1,7 +1,7 @@
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +31,11 @@ class Settings(BaseSettings):
         default=4096,
         ge=256,
         le=4096,
+    )
+    gemini_request_timeout_seconds: float = Field(
+        default=8.0,
+        ge=1.0,
+        le=60.0,
     )
 
     outbox_stream_name: str = "reclaimrail:webhook-events:v1"
@@ -124,6 +129,12 @@ class Settings(BaseSettings):
         ge=1.0,
         le=3600.0,
     )
+    incident_test_drill_enabled: bool = False
+    recovery_incident_recheck_delay_seconds: int = Field(
+        default=900,
+        ge=5,
+        le=3600,
+    )
 
     recovery_action_batch_size: int = Field(
         default=25,
@@ -145,6 +156,17 @@ class Settings(BaseSettings):
         ge=1,
         le=20,
     )
+    recovery_approval_threshold_minor: int = Field(
+        default=300_000,
+        ge=100,
+        le=100_000_000,
+    )
+    recovery_approval_ttl_seconds: int = Field(
+        default=900,
+        ge=60,
+        le=86_400,
+    )
+    recovery_operator_access_token: SecretStr | None = None
 
     recovery_outcome_batch_size: int = Field(
         default=25,
@@ -158,6 +180,12 @@ class Settings(BaseSettings):
     )
 
     payment_lab_access_token: SecretStr | None = None
+    # Test-only, allowlisted recipient for the controlled notification demo.
+    # Keep the value in the local .env file; it must never be committed.
+    payment_lab_demo_email_recipient: SecretStr | None = None
+    # Direct transactional-email credential for the controlled Test Mode demo.
+    # Keep this local-only. A missing key retains Razorpay's provider notification path.
+    resend_api_key: SecretStr | None = None
     payment_lab_guided_amount_minor: int = Field(
         default=349_900,
         ge=100,
@@ -198,6 +226,44 @@ class Settings(BaseSettings):
         ge=0.1,
         le=300.0,
     )
+    payment_lab_recovery_claim_timeout_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=3600,
+    )
+
+    worker_heartbeat_interval_seconds: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=60.0,
+    )
+    worker_heartbeat_ttl_seconds: int = Field(
+        default=30,
+        ge=10,
+        le=300,
+    )
+    worker_delayed_after_seconds: float = Field(
+        default=15.0,
+        ge=2.0,
+        le=180.0,
+    )
+    worker_degraded_failure_threshold: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+    )
+
+    @model_validator(mode="after")
+    def validate_worker_supervision_intervals(self) -> Self:
+        if self.worker_heartbeat_ttl_seconds <= self.worker_heartbeat_interval_seconds * 2:
+            raise ValueError(
+                "Worker heartbeat TTL must exceed two heartbeat intervals",
+            )
+        if self.worker_delayed_after_seconds >= self.worker_heartbeat_ttl_seconds:
+            raise ValueError(
+                "Worker delayed threshold must be lower than heartbeat TTL",
+            )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

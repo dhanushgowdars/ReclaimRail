@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
@@ -13,11 +14,19 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_database_session
 from app.main import app
 from app.services.payment_lab_live_run_service import (
+    PaymentLabLiveBusinessState,
     PaymentLabLiveRun,
     PaymentLabLiveRunNotFoundError,
     PaymentLabLiveStage,
     PaymentLabLiveStep,
     PaymentLabLiveStepStatus,
+)
+from app.services.worker_supervision_service import (
+    WorkerFleetHealth,
+    WorkerFleetStatus,
+    WorkerHealth,
+    WorkerHealthStatus,
+    WorkerName,
 )
 
 NOW = datetime(2026, 8, 26, 19, 30, tzinfo=UTC)
@@ -48,7 +57,13 @@ def build_live_run() -> PaymentLabLiveRun:
         mode="guided",
         provenance="razorpay_test",
         persisted_status="checkout_ready",
+        business_state=PaymentLabLiveBusinessState.AWAITING_ORIGINAL_PAYMENT,
+        state_label="Waiting for provider payment result",
         current_stage=PaymentLabLiveStage.CHECKOUT,
+        active_step_key="verified_failure",
+        waiting_reason="Waiting for signed provider evidence",
+        automation_complete=False,
+        financial_outcome_terminal=False,
         terminal=False,
         poll_after_milliseconds=1000,
         amount_minor=349_900,
@@ -92,9 +107,72 @@ def test_reads_protected_provider_backed_live_run(
     body = response.json()
     assert body["payment_lab_run_id"] == str(RUN_ID)
     assert body["current_stage"] == "checkout"
+    assert body["business_state"] == "awaiting_original_payment"
+    assert body["active_step_key"] == "verified_failure"
+    assert body["automation_complete"] is False
+    assert body["responsible_worker"] is None
+    assert body["stalled_reason"] is None
     assert body["poll_after_milliseconds"] == 1000
     assert body["steps"][0]["status"] == "completed"
     assert "lab-secret" not in response.text
+
+
+def test_live_run_identifies_unhealthy_responsible_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_run = replace(
+        build_live_run(),
+        business_state=PaymentLabLiveBusinessState.DIAGNOSING,
+        current_stage=PaymentLabLiveStage.AGENT,
+        active_step_key="agent_recommendation",
+    )
+    worker = WorkerHealth(
+        name=WorkerName.PAYMENT_LAB_RECOVERY,
+        status=WorkerHealthStatus.DOWN,
+        instance_id=None,
+        heartbeat_age_seconds=None,
+        started_at=None,
+        last_heartbeat_at=None,
+        last_success_at=None,
+        last_failure_at=None,
+        consecutive_failures=0,
+        last_error_type=None,
+        metrics={},
+    )
+    fleet = WorkerFleetHealth(
+        status=WorkerFleetStatus.DEGRADED,
+        workers=(worker,),
+        healthy_count=0,
+        expected_count=8,
+        generated_at=NOW,
+    )
+    monkeypatch.setattr(
+        payment_lab_status,
+        "load_payment_lab_live_run",
+        AsyncMock(return_value=live_run),
+    )
+    monkeypatch.setattr(
+        payment_lab_status,
+        "get_redis_client",
+        MagicMock(return_value=object()),
+    )
+    monkeypatch.setattr(
+        payment_lab_status,
+        "load_worker_fleet_health",
+        AsyncMock(return_value=fleet),
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/payment-lab/runs/{RUN_ID}",
+            headers={"X-ReclaimRail-Lab-Token": "lab-secret"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["responsible_worker"] == "payment_lab_recovery"
+    assert body["responsible_worker_status"] == "down"
+    assert "payment_lab_recovery worker is down" in body["stalled_reason"]
 
 
 def test_rejects_missing_access_before_reading_run(

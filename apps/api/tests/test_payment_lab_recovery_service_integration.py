@@ -47,6 +47,19 @@ class StubGeminiProvider:
 
         return GeminiProviderResponse(
             structured_plan={
+                "analysis": {
+                    "root_cause_category": "test_mode_payment_failure",
+                    "recoverability_assessment": "Verified failure is eligible for recovery",
+                    "confidence": 0.92,
+                    "allowed_action_recommendation": "create_payment_link",
+                    "evidence_references": [
+                        "payment_state_snapshot",
+                        "merchant_recovery_policy",
+                    ],
+                    "operator_explanation": (
+                        "The test payment failed and policy permits one exact-amount link."
+                    ),
+                },
                 "decision": "recover",
                 "reasoning_summary": ("Offer one bounded retry for the verified Test Mode failure"),
                 "proposals": [

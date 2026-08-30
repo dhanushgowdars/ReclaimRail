@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.routes import recovery_case_detail
 from app.core.database import get_database_session
 from app.main import app
+from app.services.recovery_ai_trace import RecoveryAiTrace
 from app.services.recovery_case_detail_service import (
     PaymentLifecycleSnapshot,
     PaymentTransitionSummary,
@@ -91,6 +92,19 @@ def build_detail() -> RecoveryCaseDetail:
                 failure_code=None,
                 started_at=NOW,
                 completed_at=NOW,
+                ai_trace=RecoveryAiTrace(
+                    root_cause_category="bank_authorization_failure",
+                    recoverability_assessment="recoverable",
+                    confidence=0.91,
+                    recommended_action="create_payment_link",
+                    evidence_references=("payment_state_snapshot",),
+                    evidence_codes=("payment_failed",),
+                    evidence_tool_names=("payment_state_snapshot",),
+                    input_token_count=212,
+                    output_token_count=61,
+                    fallback_used=False,
+                    fallback_reason=None,
+                ),
             ),
         ),
         actions=(

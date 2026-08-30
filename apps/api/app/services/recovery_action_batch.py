@@ -31,6 +31,9 @@ from app.services.recovery_action_executor import (
     RecoveryActionProviderFailure,
     execute_recovery_payment_link_action,
 )
+from app.services.recovery_approval_service import (
+    expire_pending_recovery_approvals,
+)
 
 SessionFactory = async_sessionmaker[AsyncSession]
 
@@ -54,6 +57,7 @@ class RecoveryActionBatchResult:
         ...,
     ]
     skipped_action_ids: tuple[UUID, ...]
+    expired_approvals: int = 0
 
     @property
     def discovered(self) -> int:
@@ -187,6 +191,12 @@ async def run_recovery_action_batch(
         reference_time,
     )
 
+    async with session_factory.begin() as expiry_session:
+        expired_approvals = await expire_pending_recovery_approvals(
+            expiry_session,
+            reference_time=reference_time,
+        )
+
     async with session_factory() as discovery_session:
         action_ids = await discover_executable_recovery_action_ids(
             discovery_session,
@@ -255,4 +265,5 @@ async def run_recovery_action_batch(
         skipped_action_ids=tuple(
             skipped_action_ids,
         ),
+        expired_approvals=expired_approvals,
     )

@@ -3,6 +3,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+from app.core.cache import close_redis
 from app.core.config import get_settings
 from app.core.database import close_database, get_session_factory
 from app.integrations.razorpay.payment_links import (
@@ -11,6 +12,10 @@ from app.integrations.razorpay.payment_links import (
 from app.services.recovery_compensation_batch import (
     RecoveryCompensationBatchResult,
     run_recovery_compensation_batch,
+)
+from app.services.worker_supervision_service import (
+    WorkerName,
+    create_worker_heartbeat_reporter,
 )
 
 LOGGER = logging.getLogger("reclaimrail.recovery-compensation-worker")
@@ -58,6 +63,10 @@ async def run_recovery_compensation_worker(
         )
 
     session_factory = get_session_factory()
+    heartbeat = create_worker_heartbeat_reporter(
+        settings,
+        worker_name=WorkerName.RECOVERY_COMPENSATION,
+    )
 
     LOGGER.info(
         "Recovery compensation worker started: batch_size=%d mode=%s",
@@ -65,6 +74,7 @@ async def run_recovery_compensation_worker(
         "once" if run_once else "continuous",
     )
 
+    await heartbeat.start()
     try:
         while True:
             try:
@@ -76,7 +86,8 @@ async def run_recovery_compensation_worker(
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as error:
+                await heartbeat.record_failure(error)
                 LOGGER.exception("Recovery compensation batch failed")
 
                 if run_once:
@@ -86,6 +97,14 @@ async def run_recovery_compensation_worker(
                     settings.recovery_action_poll_interval_seconds,
                 )
                 continue
+
+            await heartbeat.record_success(
+                {
+                    "discovered": result.discovered,
+                    "cancelled": result.cancelled,
+                    "escalated": result.escalated,
+                },
+            )
 
             if result.discovered > 0:
                 log_batch_result(result)
@@ -98,7 +117,8 @@ async def run_recovery_compensation_worker(
                     settings.recovery_action_poll_interval_seconds,
                 )
     finally:
-        await close_database()
+        await heartbeat.stop()
+        await asyncio.gather(close_redis(), close_database())
         LOGGER.info("Recovery compensation worker stopped")
 
 

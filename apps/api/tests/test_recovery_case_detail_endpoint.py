@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.routes import recovery_case_detail
 from app.core.database import get_database_session
 from app.main import app
+from app.services.recovery_ai_trace import RecoveryAiTrace
 from app.services.recovery_case_detail_service import (
     PaymentLifecycleSnapshot,
     PaymentTransitionSummary,
@@ -22,7 +23,6 @@ from app.services.recovery_case_detail_service import (
     RecoveryCaseSnapshot,
     RecoveryOutcomeSummary,
 )
-from app.services.recovery_ai_trace import RecoveryAiTrace
 
 CASE_ID = UUID("10000000-0000-0000-0000-000000000001")
 PAYMENT_ID = UUID("20000000-0000-0000-0000-000000000001")

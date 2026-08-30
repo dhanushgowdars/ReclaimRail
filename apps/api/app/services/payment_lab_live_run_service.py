@@ -377,7 +377,7 @@ def _build_steps(
             detail=(
                 "Failure promoted into a bounded recovery case"
                 if recovery_case is not None
-                else "Opening an idempotent recovery case"
+                else "Five-second signed-evidence stabilization window before recovery begins"
             ),
         ),
         PaymentLabLiveStep(
@@ -527,10 +527,14 @@ async def load_payment_lab_live_run(
             outcome=outcome,
         ),
         terminal=terminal,
-        poll_after_milliseconds=None if terminal else 1000,
+        poll_after_milliseconds=None if terminal else 500,
         amount_minor=run.amount_minor,
         currency=run.currency,
-        payment_method=run.payment_method,
+        payment_method=(
+            payment_attempt.method
+            if payment_attempt is not None and payment_attempt.method is not None
+            else run.payment_method
+        ),
         provider_order_id=run.provider_order_id,
         provider_order_status=run.provider_order_status,
         failure_code=run.failure_code,

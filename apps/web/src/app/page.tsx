@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import { DashboardLiveRefresh } from "@/components/dashboard-live-refresh";
 import { RelativeTimestamp } from "@/components/live-time";
 import { RecoveryNavigation } from "@/components/recovery-navigation";
 import {
@@ -56,7 +57,7 @@ function IncidentPanel({ incidents, currency }: { incidents: RecoveryIncident[];
   </article>)}</div>;
 }
 
-function RecoveryQueue({ cases, currency }: { cases: RecoveryCaseQueueItem[]; currency: string }) {
+function RecoveryQueue({ cases, currency, liveCaseId }: { cases: RecoveryCaseQueueItem[]; currency: string; liveCaseId: string | null }) {
   if (cases.length === 0) {
     return <div className="queue-empty"><strong>No active recovery cases</strong><p>Run a scenario to see ReclaimRail detect, plan, execute, and reconcile a recovery safely.</p></div>;
   }
@@ -65,11 +66,23 @@ function RecoveryQueue({ cases, currency }: { cases: RecoveryCaseQueueItem[]; cu
     {cases.map((recoveryCase) => {
       const policy = recoveryCase.latest_action_policy_outcome;
       const PolicyIcon = policy === "allow" ? CheckCircle2 : AlertTriangle;
-      return <Link className="recovery-queue-row" href={`/cases/${recoveryCase.recovery_case_id}`} key={recoveryCase.recovery_case_id}>
-        <span className="recovery-queue-row__case"><strong>CASE-{shortId(recoveryCase.recovery_case_id)}</strong><Badge value={recoveryCase.status} /></span>
+      const isLiveCase = recoveryCase.recovery_case_id === liveCaseId;
+      const awaitingPayment = recoveryCase.latest_action_type === "create_payment_link" && recoveryCase.latest_action_status === "succeeded" && (recoveryCase.outcome_status === null || recoveryCase.outcome_status === "payment_link_pending");
+      const nextAction = awaitingPayment
+        ? "Awaiting recovery payment"
+        : recoveryCase.outcome_status
+          ? titleCase(recoveryCase.outcome_status)
+          : recoveryCase.latest_action_type === null
+            ? "Awaiting plan"
+            : titleCase(recoveryCase.latest_action_type);
+      const nextActionDetail = awaitingPayment
+        ? "Provider reconciliation pending"
+        : formatTimestamp(recoveryCase.next_action_at);
+      return <Link className={`recovery-queue-row${isLiveCase ? " recovery-queue-row--live" : ""}`} href={`/cases/${recoveryCase.recovery_case_id}`} key={recoveryCase.recovery_case_id}>
+        <span className="recovery-queue-row__case"><strong>CASE-{shortId(recoveryCase.recovery_case_id)}</strong>{isLiveCase ? <span className="live-case-badge"><i />Live now</span> : <Badge value={awaitingPayment ? "payment_link_pending" : recoveryCase.status} />}</span>
         <span>{recoveryCase.payment_method === null ? "Unknown" : titleCase(recoveryCase.payment_method)}</span>
         <span className={`recovery-queue-row__policy recovery-queue-row__policy--${badgeTone(policy)}`}><PolicyIcon size={16} /><span><strong>{policy === null ? "Pending" : titleCase(policy)}</strong><small>{policy === null ? "Awaiting evaluation" : "Deterministic policy"}</small></span></span>
-        <span><strong>{recoveryCase.latest_action_type === null ? "Awaiting plan" : titleCase(recoveryCase.latest_action_type)}</strong><small>{formatTimestamp(recoveryCase.next_action_at)}</small></span>
+        <span><strong>{nextAction}</strong><small>{nextActionDetail}</small></span>
         <span className="amount-cell">{formatMoney(recoveryCase.amount_minor, currency)}</span>
         <ArrowRight className="recovery-queue-row__arrow" size={18} />
       </Link>;
@@ -82,29 +95,32 @@ function OutcomeList({ outcomes, currency }: { outcomes: RecoveryOutcome[]; curr
   return <div className="outcome-list">{outcomes.map((outcome) => {
     const recovered = outcome.gross_recovered_minor - outcome.reversed_minor;
     const isRecovered = recovered > 0;
-    const value = isRecovered ? recovered : outcome.duplicate_collection_prevented_minor;
+    const isDuplicatePrevention = outcome.status === "duplicate_collection_prevented";
+    const value = isRecovered ? recovered : isDuplicatePrevention ? outcome.duplicate_collection_prevented_minor : 0;
+    const valueLabel = isRecovered ? "Verified recovered" : isDuplicatePrevention ? "Duplicate prevented" : "Awaiting provider payment";
     return <article className="outcome-row" key={outcome.recovery_outcome_id}>
       <div><Badge value={outcome.status} /><p>{titleCase(outcome.attribution)}</p><Link className="outcome-case-link" href={`/cases/${outcome.recovery_case_id}`}>View case evidence</Link><small>{outcome.evidence_event_count} linked evidence events</small></div>
-      <div className={`outcome-row__amount ${isRecovered ? "outcome-row__amount--verified" : "outcome-row__amount--protected"}`}><strong>{formatMoney(value, currency)}</strong><span>{isRecovered ? "Verified recovered" : "Duplicate prevented"}</span></div>
+      <div className={`outcome-row__amount ${isRecovered ? "outcome-row__amount--verified" : isDuplicatePrevention ? "outcome-row__amount--protected" : ""}`}><strong>{formatMoney(value, currency)}</strong><span>{valueLabel}</span></div>
     </article>;
   })}</div>;
 }
 
-function CommandCenter({ summary, incidents, cases, outcomes }: { summary: RecoveryDashboardSummary; incidents: RecoveryIncident[]; cases: RecoveryCaseQueueItem[]; outcomes: RecoveryOutcome[] }) {
+function CommandCenter({ summary, incidents, cases, outcomes, liveCaseId }: { summary: RecoveryDashboardSummary; incidents: RecoveryIncident[]; cases: RecoveryCaseQueueItem[]; outcomes: RecoveryOutcome[]; liveCaseId: string | null }) {
   const currency = summary.currency;
   return <div className="app-shell"><RecoveryNavigation /><main className="workspace" id="overview">
+    <DashboardLiveRefresh />
     <header className="workspace-header"><div><p className="kicker">Merchant operations</p><h1>Recovery command center</h1><p className="workspace-header__lede">Revenue risk, bounded decisions, and provider-verified outcomes in one control surface.</p></div><div className="workspace-header__actions"><span className="test-mode"><i />Razorpay test mode</span><span className="updated-at"><Clock3 size={15} /> Synced <RelativeTimestamp value={summary.generated_at} /></span></div></header>
     <Link className="judge-demo-cta" href="/payment-lab"><span className="judge-demo-cta__icon"><Play size={22} fill="currentColor" /></span><span><em>Start the live demo</em><strong>Fail a real Test Mode payment and watch the recovery rail activate.</strong></span><span className="judge-demo-cta__action">Open Payment Lab <ArrowRight size={18} /></span></Link>
     <section className="metrics-grid" aria-label="Verified recovery metrics">
       <MetricCard icon={TrendingUp} label="Revenue at risk" value={formatMoney(summary.revenue_at_risk_minor, currency)} description={`${summary.active_case_count} active recovery cases`} tone="risk" />
       <MetricCard icon={CircleDollarSign} label="Verified recovered" value={formatMoney(summary.verified_recovered_minor, currency)} description={`${summary.recovered_case_count} provider-confirmed cases`} tone="verified" />
-      <MetricCard icon={ShieldCheck} label="Duplicate prevented" value={formatMoney(summary.duplicate_collection_prevented_minor, currency)} description="Late-authorization safety value" tone="protected" />
+      <MetricCard icon={ShieldCheck} label="Historical safety protected" value={formatMoney(summary.duplicate_collection_prevented_minor, currency)} description="Across reconciled late-authorization cases" tone="protected" />
       <MetricCard icon={AlertTriangle} label="Open incidents" value={String(summary.open_incident_count)} description={`${formatMoney(summary.active_incident_revenue_at_risk_minor, currency)} currently exposed`} tone="neutral" />
     </section>
     <section className="workspace-grid" id="incidents"><section className="panel panel--wide"><div className="panel-heading"><div><p className="kicker">Payment-rail context</p><h2>Incidents that change recovery decisions</h2></div><span className="count-label">{summary.open_incident_count} active</span></div><IncidentPanel incidents={incidents} currency={currency} /></section>
       <aside className="panel policy-summary" id="safety-controls"><ShieldCheck className="policy-summary__icon" size={30} /><p className="kicker">Bounded automation</p><h2>AI proposes. Policy decides.</h2><p>Gemini can recommend an intervention. Deterministic controls decide whether money-facing actions may happen.</p><ul><li><Check size={16} />Consent and quiet-hour checks</li><li><Check size={16} />Active-incident circuit breaker</li><li><Check size={16} />Idempotent payment-link execution</li><li><Check size={16} />Late-authorization stop rules</li><li><Check size={16} />Tamper-evident audit chain</li></ul></aside>
     </section>
-    <section className="panel" id="recovery-queue"><div className="panel-heading"><div><p className="kicker">Bounded execution queue</p><h2>Recovery cases requiring attention</h2></div><span className="count-label">{summary.active_case_count} active</span></div><RecoveryQueue cases={cases} currency={currency} /></section>
+    <section className="panel" id="recovery-queue"><div className="panel-heading"><div><p className="kicker">Bounded execution queue</p><h2>Recovery cases requiring attention</h2></div><span className="count-label">{summary.active_case_count} active</span></div><RecoveryQueue cases={cases} currency={currency} liveCaseId={liveCaseId} /></section>
     <section className="workspace-grid workspace-grid--outcomes" id="outcomes"><section className="panel"><div className="panel-heading"><div><p className="kicker">Verified outcome ledger</p><h2>Measured recovery, backed by evidence</h2></div><span className="count-label">{summary.pending_outcome_count} pending</span></div><OutcomeList outcomes={outcomes} currency={currency} /></section>
       <aside className="audit-callout"><FileSearch size={31} /><p className="kicker">Audit-ready</p><h2>Every action can be traced to a verified outcome.</h2><p>Case detail exposes the failure, Gemini proposal, policy decision, provider action, outcome proof, and hash-chain timeline.</p><Link href="#recovery-queue">Inspect a recovery case <ExternalLink size={16} /></Link></aside>
     </section>
@@ -115,8 +131,9 @@ function UnavailableDashboard() {
   return <div className="app-shell"><RecoveryNavigation /><main className="workspace workspace--unavailable"><section className="unavailable-card"><p className="kicker">Live data unavailable</p><h1>Start the ReclaimRail API to open the command center.</h1><p>This interface never substitutes invented numbers. Once the API is running, refresh to load the real recovery ledger.</p><code>uv --directory apps/api run fastapi dev app/main.py</code></section></main></div>;
 }
 
-export default async function Home() {
+export default async function Home({ searchParams }: { searchParams: Promise<{ liveCase?: string }> }) {
+  const { liveCase } = await searchParams;
   const dashboard = await loadRecoveryDashboard().catch(() => null);
   if (dashboard === null) return <UnavailableDashboard />;
-  return <CommandCenter summary={dashboard.summary} incidents={dashboard.incidents} cases={dashboard.cases.items} outcomes={dashboard.outcomes.items} />;
+  return <CommandCenter summary={dashboard.summary} incidents={dashboard.incidents} cases={dashboard.cases.items} outcomes={dashboard.outcomes.items} liveCaseId={liveCase ?? null} />;
 }

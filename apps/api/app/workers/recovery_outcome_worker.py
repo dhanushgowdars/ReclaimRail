@@ -110,10 +110,9 @@ async def run_recovery_outcome_worker(
             if run_once:
                 return
 
-            if result.discovered == 0:
-                await asyncio.sleep(
-                    settings.recovery_outcome_poll_interval_seconds,
-                )
+            await asyncio.sleep(
+                settings.recovery_outcome_poll_interval_seconds,
+            )
     finally:
         await close_database()
 

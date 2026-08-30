@@ -1,3 +1,5 @@
+import { ArrowDown, BadgeIndianRupee, Radio, ShieldCheck } from "lucide-react";
+
 import { RecoveryNavigation } from "@/components/recovery-navigation";
 import { PaymentLabLauncher } from "@/components/payment-lab-launcher";
 
@@ -8,12 +10,11 @@ export default function PaymentLabPage() {
       <main className="workspace payment-lab-workspace">
         <header className="payment-lab-header">
           <div>
-            <p className="kicker">Provider-live recovery lab</p>
-            <h1>Fail a real test payment. Watch recovery begin.</h1>
+            <p className="kicker"><Radio size={14} /> Provider-live recovery lab</p>
+            <h1>Watch a failed payment become a <span>controlled recovery.</span></h1>
             <p>
-              Create a genuine Razorpay Test Mode Order, complete the hosted
-              payment journey, and let signed provider evidence trigger the bounded
-              recovery system.
+              One real Razorpay Test Mode failure. Seven durable backend events.
+              One auditable recovery decision—revealed as it happens.
             </p>
           </div>
           <span className="test-mode test-mode--large">
@@ -21,33 +22,35 @@ export default function PaymentLabPage() {
           </span>
         </header>
 
-        <div className="lab-value-strip" aria-label="Live workflow summary">
-          <div>
-            <span>01</span>
-            <strong>Payment attempt</strong>
-            <p>Razorpay-hosted Checkout</p>
+        <section className="lab-demo-guide" aria-labelledby="demo-guide-title">
+          <div className="lab-demo-guide__intro">
+            <span>Judge demo</span>
+            <h2 id="demo-guide-title">Three moves. The system does the rest.</h2>
           </div>
           <div>
-            <span>02</span>
-            <strong>Verified failure</strong>
-            <p>Signed webhook ingestion</p>
+            <span className="lab-demo-guide__number">1</span>
+            <strong>Start the live run</strong>
+            <p>Use the supplied reviewer code.</p>
           </div>
           <div>
-            <span>03</span>
-            <strong>Bounded agent</strong>
-            <p>Gemini proposal + policy</p>
+            <span className="lab-demo-guide__number">2</span>
+            <strong>Fail Razorpay Checkout</strong>
+            <p>Choose Netbanking and trigger Test Mode failure.</p>
           </div>
           <div>
-            <span>04</span>
-            <strong>Measured outcome</strong>
-            <p>Evidence-backed ledger</p>
+            <span className="lab-demo-guide__number">3</span>
+            <strong>Watch verified events</strong>
+            <p>Each stage appears only after backend evidence exists.</p>
           </div>
-        </div>
+        </section>
+
+        <div className="lab-start-pointer"><ArrowDown size={17} /><span>Configure the provider attempt</span></div>
 
         <PaymentLabLauncher />
 
-        <section className="lab-assurance-grid">
+        <section className="lab-assurance-grid" aria-label="Recovery guarantees">
           <article>
+            <BadgeIndianRupee size={22} />
             <p className="kicker">Provider truth</p>
             <h2>Not a simulated dashboard trigger</h2>
             <p>
@@ -56,6 +59,7 @@ export default function PaymentLabPage() {
             </p>
           </article>
           <article>
+            <ShieldCheck size={22} />
             <p className="kicker">Bounded autonomy</p>
             <h2>AI cannot move money by itself</h2>
             <p>
@@ -64,6 +68,7 @@ export default function PaymentLabPage() {
             </p>
           </article>
           <article>
+            <Radio size={22} />
             <p className="kicker">Privacy by construction</p>
             <h2>Payment credentials stay with Razorpay</h2>
             <p>

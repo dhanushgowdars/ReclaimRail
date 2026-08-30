@@ -1,38 +1,31 @@
 import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  CircleDollarSign,
+  Clock3,
+  ExternalLink,
+  FileSearch,
+  Play,
+  ShieldCheck,
+  TrendingUp,
+  type LucideIcon,
+} from "lucide-react";
+import Link from "next/link";
+
+import { RelativeTimestamp } from "@/components/live-time";
+import { RecoveryNavigation } from "@/components/recovery-navigation";
+import {
   type RecoveryCaseQueueItem,
   type RecoveryDashboardSummary,
   type RecoveryIncident,
   type RecoveryOutcome,
   loadRecoveryDashboard,
 } from "@/lib/recovery-api";
-import { RecoveryNavigation } from "@/components/recovery-navigation";
-import Link from "next/link";
+import { formatMoney, formatTimestamp, shortId, titleCase } from "@/lib/presentation";
 
 export const dynamic = "force-dynamic";
-
-function formatMoney(amountMinor: number, currency: string): string {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(amountMinor / 100);
-}
-
-function formatTimestamp(timestamp: string | null): string {
-  if (timestamp === null) return "Not scheduled";
-  return new Intl.DateTimeFormat("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(timestamp));
-}
-
-function titleCase(value: string): string {
-  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function shortId(value: string): string {
-  return value.slice(0, 8).toUpperCase();
-}
 
 function badgeTone(value: string | null): string {
   if (value === null) return "neutral";
@@ -47,8 +40,8 @@ function Badge({ value }: { value: string | null }) {
   return <span className={`badge badge--${badgeTone(value)}`}>{value === null ? "Not available" : titleCase(value)}</span>;
 }
 
-function MetricCard({ label, value, description, tone }: { label: string; value: string; description: string; tone: "risk" | "verified" | "protected" | "neutral" }) {
-  return <article className={`metric-card metric-card--${tone}`}><p>{label}</p><strong>{value}</strong><span>{description}</span></article>;
+function MetricCard({ label, value, description, tone, icon: Icon }: { label: string; value: string; description: string; tone: "risk" | "verified" | "protected" | "neutral"; icon: LucideIcon }) {
+  return <article className={`metric-card metric-card--${tone}`}><div className="metric-card__label"><Icon size={19} /><p>{label}</p></div><strong>{value}</strong><span>{description}</span><i aria-hidden="true" /></article>;
 }
 
 function IncidentPanel({ incidents, currency }: { incidents: RecoveryIncident[]; currency: string }) {
@@ -67,13 +60,21 @@ function RecoveryQueue({ cases, currency }: { cases: RecoveryCaseQueueItem[]; cu
   if (cases.length === 0) {
     return <div className="queue-empty"><strong>No active recovery cases</strong><p>Run a scenario to see ReclaimRail detect, plan, execute, and reconcile a recovery safely.</p></div>;
   }
-  return <div className="table-wrap"><table><thead><tr><th>Recovery case</th><th>Payment rail</th><th>Policy</th><th>Next action</th><th className="align-right">Amount</th></tr></thead><tbody>{cases.map((recoveryCase) => <tr key={recoveryCase.recovery_case_id}>
-    <td><Link className="case-id case-id--link" href={`/cases/${recoveryCase.recovery_case_id}`}>CASE-{shortId(recoveryCase.recovery_case_id)}</Link><Badge value={recoveryCase.status} /></td>
-    <td>{recoveryCase.payment_method === null ? "Unknown" : titleCase(recoveryCase.payment_method)}</td>
-    <td><Badge value={recoveryCase.latest_action_policy_outcome} /><small>{recoveryCase.latest_action_policy_outcome === null ? "Awaiting policy evaluation" : "Deterministic policy evaluated"}</small></td>
-    <td><strong>{recoveryCase.latest_action_type === null ? "Awaiting plan" : titleCase(recoveryCase.latest_action_type)}</strong><small>{formatTimestamp(recoveryCase.next_action_at)}</small></td>
-    <td className="align-right amount-cell">{formatMoney(recoveryCase.amount_minor, currency)}</td>
-  </tr>)}</tbody></table></div>;
+  return <div className="recovery-queue-table">
+    <div className="recovery-queue-table__header"><span>Recovery case</span><span>Payment rail</span><span>Policy</span><span>Next action</span><span>Amount</span><span /></div>
+    {cases.map((recoveryCase) => {
+      const policy = recoveryCase.latest_action_policy_outcome;
+      const PolicyIcon = policy === "allow" ? CheckCircle2 : AlertTriangle;
+      return <Link className="recovery-queue-row" href={`/cases/${recoveryCase.recovery_case_id}`} key={recoveryCase.recovery_case_id}>
+        <span className="recovery-queue-row__case"><strong>CASE-{shortId(recoveryCase.recovery_case_id)}</strong><Badge value={recoveryCase.status} /></span>
+        <span>{recoveryCase.payment_method === null ? "Unknown" : titleCase(recoveryCase.payment_method)}</span>
+        <span className={`recovery-queue-row__policy recovery-queue-row__policy--${badgeTone(policy)}`}><PolicyIcon size={16} /><span><strong>{policy === null ? "Pending" : titleCase(policy)}</strong><small>{policy === null ? "Awaiting evaluation" : "Deterministic policy"}</small></span></span>
+        <span><strong>{recoveryCase.latest_action_type === null ? "Awaiting plan" : titleCase(recoveryCase.latest_action_type)}</strong><small>{formatTimestamp(recoveryCase.next_action_at)}</small></span>
+        <span className="amount-cell">{formatMoney(recoveryCase.amount_minor, currency)}</span>
+        <ArrowRight className="recovery-queue-row__arrow" size={18} />
+      </Link>;
+    })}
+  </div>;
 }
 
 function OutcomeList({ outcomes, currency }: { outcomes: RecoveryOutcome[]; currency: string }) {
@@ -92,19 +93,20 @@ function OutcomeList({ outcomes, currency }: { outcomes: RecoveryOutcome[]; curr
 function CommandCenter({ summary, incidents, cases, outcomes }: { summary: RecoveryDashboardSummary; incidents: RecoveryIncident[]; cases: RecoveryCaseQueueItem[]; outcomes: RecoveryOutcome[] }) {
   const currency = summary.currency;
   return <div className="app-shell"><RecoveryNavigation /><main className="workspace" id="overview">
-    <header className="workspace-header"><div><p className="kicker">Merchant operations</p><h1>Recovery command center</h1></div><div className="workspace-header__actions"><Link className="lab-launch-link" href="/payment-lab">Run live recovery</Link><span className="test-mode"><i />Test mode</span><span className="updated-at">Updated {formatTimestamp(summary.generated_at)}</span><Link className="refresh-link" href="/">Refresh data</Link></div></header>
+    <header className="workspace-header"><div><p className="kicker">Merchant operations</p><h1>Recovery command center</h1><p className="workspace-header__lede">Revenue risk, bounded decisions, and provider-verified outcomes in one control surface.</p></div><div className="workspace-header__actions"><span className="test-mode"><i />Razorpay test mode</span><span className="updated-at"><Clock3 size={15} /> Synced <RelativeTimestamp value={summary.generated_at} /></span></div></header>
+    <Link className="judge-demo-cta" href="/payment-lab"><span className="judge-demo-cta__icon"><Play size={22} fill="currentColor" /></span><span><em>Start the live demo</em><strong>Fail a real Test Mode payment and watch the recovery rail activate.</strong></span><span className="judge-demo-cta__action">Open Payment Lab <ArrowRight size={18} /></span></Link>
     <section className="metrics-grid" aria-label="Verified recovery metrics">
-      <MetricCard label="Revenue at risk" value={formatMoney(summary.revenue_at_risk_minor, currency)} description={`${summary.active_case_count} active recovery cases`} tone="risk" />
-      <MetricCard label="Verified recovered" value={formatMoney(summary.verified_recovered_minor, currency)} description={`${summary.recovered_case_count} confirmed cases`} tone="verified" />
-      <MetricCard label="Duplicate prevented" value={formatMoney(summary.duplicate_collection_prevented_minor, currency)} description="Late-authorization safety value" tone="protected" />
-      <MetricCard label="Open incidents" value={String(summary.open_incident_count)} description={`${formatMoney(summary.active_incident_revenue_at_risk_minor, currency)} currently exposed`} tone="neutral" />
+      <MetricCard icon={TrendingUp} label="Revenue at risk" value={formatMoney(summary.revenue_at_risk_minor, currency)} description={`${summary.active_case_count} active recovery cases`} tone="risk" />
+      <MetricCard icon={CircleDollarSign} label="Verified recovered" value={formatMoney(summary.verified_recovered_minor, currency)} description={`${summary.recovered_case_count} provider-confirmed cases`} tone="verified" />
+      <MetricCard icon={ShieldCheck} label="Duplicate prevented" value={formatMoney(summary.duplicate_collection_prevented_minor, currency)} description="Late-authorization safety value" tone="protected" />
+      <MetricCard icon={AlertTriangle} label="Open incidents" value={String(summary.open_incident_count)} description={`${formatMoney(summary.active_incident_revenue_at_risk_minor, currency)} currently exposed`} tone="neutral" />
     </section>
     <section className="workspace-grid" id="incidents"><section className="panel panel--wide"><div className="panel-heading"><div><p className="kicker">Payment-rail context</p><h2>Incidents that change recovery decisions</h2></div><span className="count-label">{summary.open_incident_count} active</span></div><IncidentPanel incidents={incidents} currency={currency} /></section>
-      <aside className="panel policy-summary" id="safety-controls"><p className="kicker">Bounded automation</p><h2>AI proposes. Policy decides.</h2><p>Gemini can recommend an intervention. Deterministic controls decide whether money-facing actions may happen.</p><ul><li>Consent and quiet-hour checks</li><li>Active-incident circuit breaker</li><li>Idempotent payment-link execution</li><li>Late-authorization stop rules</li><li>Tamper-evident audit chain</li></ul></aside>
+      <aside className="panel policy-summary" id="safety-controls"><ShieldCheck className="policy-summary__icon" size={30} /><p className="kicker">Bounded automation</p><h2>AI proposes. Policy decides.</h2><p>Gemini can recommend an intervention. Deterministic controls decide whether money-facing actions may happen.</p><ul><li><Check size={16} />Consent and quiet-hour checks</li><li><Check size={16} />Active-incident circuit breaker</li><li><Check size={16} />Idempotent payment-link execution</li><li><Check size={16} />Late-authorization stop rules</li><li><Check size={16} />Tamper-evident audit chain</li></ul></aside>
     </section>
     <section className="panel" id="recovery-queue"><div className="panel-heading"><div><p className="kicker">Bounded execution queue</p><h2>Recovery cases requiring attention</h2></div><span className="count-label">{summary.active_case_count} active</span></div><RecoveryQueue cases={cases} currency={currency} /></section>
     <section className="workspace-grid workspace-grid--outcomes" id="outcomes"><section className="panel"><div className="panel-heading"><div><p className="kicker">Verified outcome ledger</p><h2>Measured recovery, backed by evidence</h2></div><span className="count-label">{summary.pending_outcome_count} pending</span></div><OutcomeList outcomes={outcomes} currency={currency} /></section>
-      <aside className="audit-callout"><p className="kicker">Audit-ready</p><h2>Every action can be traced to a verified outcome.</h2><p>Case detail will expose the payment lifecycle, Gemini proposal, policy decision, provider action, outcome proof, and hash-chain timeline.</p></aside>
+      <aside className="audit-callout"><FileSearch size={31} /><p className="kicker">Audit-ready</p><h2>Every action can be traced to a verified outcome.</h2><p>Case detail exposes the failure, Gemini proposal, policy decision, provider action, outcome proof, and hash-chain timeline.</p><Link href="#recovery-queue">Inspect a recovery case <ExternalLink size={16} /></Link></aside>
     </section>
   </main></div>;
 }

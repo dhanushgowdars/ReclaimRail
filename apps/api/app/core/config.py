@@ -157,6 +157,48 @@ class Settings(BaseSettings):
         le=3600.0,
     )
 
+    payment_lab_access_token: SecretStr | None = None
+    payment_lab_guided_amount_minor: int = Field(
+        default=349_900,
+        ge=100,
+        le=5_000_000,
+    )
+    payment_lab_min_amount_minor: int = Field(
+        default=100,
+        ge=10,
+        le=5_000_000,
+    )
+    payment_lab_max_amount_minor: int = Field(
+        default=5_000_000,
+        ge=100,
+        le=100_000_000,
+    )
+    payment_lab_hourly_run_limit: int = Field(
+        default=20,
+        ge=1,
+        le=1000,
+    )
+    payment_lab_max_active_runs: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+    )
+    payment_lab_checkout_timeout_seconds: int = Field(
+        default=600,
+        ge=60,
+        le=1800,
+    )
+    payment_lab_recovery_batch_size: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+    )
+    payment_lab_recovery_poll_interval_seconds: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=300.0,
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

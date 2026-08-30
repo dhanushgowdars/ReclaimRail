@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -126,7 +126,7 @@ async def test_uses_valid_structured_gemini_plan() -> None:
         RecoveryActionType.OFFER_ALTERNATE_METHOD,
     ]
     assert result.plan.evidence_codes[0] == "payment_state:failed"
-    assert result.plan.planner_version == "gemini-structured-v1"
+    assert result.plan.planner_version == "gemini-structured-v2"
 
 
 @pytest.mark.asyncio
@@ -207,12 +207,85 @@ async def test_invalid_structured_response_uses_fallback(
     assert result.fallback_reason is GeminiPlannerFallbackReason.INVALID_RESPONSE
 
 
+@pytest.mark.asyncio
+async def test_low_risk_escalation_uses_policy_contract_fallback() -> None:
+    context = create_context()
+    context = replace(
+        context,
+        case=replace(
+            context.case,
+            amount_minor=349_900,
+            payment_method="netbanking",
+            customer_contact_allowed=False,
+        ),
+        available_channels=(),
+    )
+    provider = StubProvider(
+        response=GeminiProviderResponse(
+            structured_plan={
+                "decision": "escalate",
+                "reasoning_summary": "Escalate despite no hard guardrail",
+                "proposals": [
+                    {
+                        "action_type": "escalate_human",
+                        "reason": "Request manual review",
+                    },
+                ],
+            },
+            model_name="gemini-3.7-flash",
+        ),
+    )
+
+    result = await plan_with_gemini_fallback(
+        context,
+        provider=provider,
+    )
+
+    assert result.source is RecoveryPlannerSource.DETERMINISTIC
+    assert result.fallback_used is True
+    assert result.fallback_reason is GeminiPlannerFallbackReason.POLICY_CONFLICT
+    assert result.plan.decision is RecoveryPlanDecision.RECOVER
+    assert [proposal.action_type for proposal in result.plan.proposals] == [
+        RecoveryActionType.CREATE_PAYMENT_LINK,
+    ]
+    assert result.plan.proposals[0].amount_minor == 349_900
+    assert result.plan.proposals[0].currency == "INR"
+
+
+@pytest.mark.asyncio
+async def test_wrong_payment_link_amount_uses_policy_contract_fallback() -> None:
+    payload = valid_payload()
+    proposals = payload["proposals"]
+    assert isinstance(proposals, list)
+    first_proposal = proposals[0]
+    assert isinstance(first_proposal, dict)
+    first_proposal["amount_minor"] = 1
+    provider = StubProvider(
+        response=GeminiProviderResponse(
+            structured_plan=payload,
+            model_name="gemini-3.7-flash",
+        ),
+    )
+
+    result = await plan_with_gemini_fallback(
+        create_context(),
+        provider=provider,
+    )
+
+    assert result.source is RecoveryPlannerSource.DETERMINISTIC
+    assert result.fallback_reason is GeminiPlannerFallbackReason.POLICY_CONFLICT
+    assert result.plan.proposals[0].amount_minor == 450_000
+
+
 def test_prompt_contains_only_bounded_payment_evidence() -> None:
     prompt = build_recovery_planning_prompt(create_context())
 
     assert "pay_gemini_plan_test" in prompt
     assert '"amount_minor":450000' in prompt
     assert '"approved_channels":["email"]' in prompt
+    assert '"automatic_amount_limit_minor":1000000' in prompt
+    assert '"required_decision":"recover"' in prompt
+    assert '"baseline_action_types":["create_payment_link"' in prompt
     assert "customer_name" not in prompt
     assert "phone" not in prompt
     assert "email_address" not in prompt

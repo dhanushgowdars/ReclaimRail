@@ -8,6 +8,7 @@ from pydantic import SecretStr, ValidationError
 
 from app.core.config import Settings
 from app.integrations.razorpay.payment_links import (
+    RazorpayPaymentLink,
     RazorpayPaymentLinkProvider,
     RazorpayPaymentLinkProviderError,
     RazorpayPaymentLinkRequest,
@@ -44,6 +45,7 @@ def success_payload() -> dict[str, object]:
         "amount": 450_000,
         "currency": "INR",
         "reference_id": "recovery-action-001",
+        "expire_by": 1787745600,
     }
 
 
@@ -133,6 +135,26 @@ async def test_creates_payment_link_with_basic_auth_and_safe_payload() -> None:
     assert result.payment_link_id == "plink_test_001"
     assert result.status is RazorpayPaymentLinkStatus.CREATED
     assert result.amount_minor == 450_000
+    assert result.short_url == "https://rzp.io/i/test001"
+    assert result.provider_expires_at == datetime(
+        2026,
+        8,
+        26,
+        12,
+        0,
+        tzinfo=UTC,
+    )
+
+
+def test_rejects_non_https_provider_link() -> None:
+    payload = success_payload()
+    payload["short_url"] = "http://rzp.io/i/unsafe"
+
+    with pytest.raises(
+        ValidationError,
+        match="must use HTTPS",
+    ):
+        RazorpayPaymentLink.model_validate(payload)
 
 
 @pytest.mark.asyncio

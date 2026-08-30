@@ -1,6 +1,7 @@
-import { ArrowLeft, ArrowUpRight, FileCheck2, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
+import { CaseEvidenceTabs } from "@/components/case-evidence-tabs";
 import { RecoveryNavigation } from "@/components/recovery-navigation";
 import {
   type RecoveryCaseDetail,
@@ -72,7 +73,7 @@ function ProviderActions({ detail }: { detail: RecoveryCaseDetail }) {
   return <DetailCard eyebrow="Provider execution" title="Bounded Razorpay actions">
     <div className="action-list">{detail.actions.length === 0 ? <p>No recovery actions were persisted.</p> : detail.actions.map((action) => <article className="provider-action" key={action.recovery_action_id}>
       <div className="provider-action__heading"><div><strong>{action.sequence_number}. {titleCase(action.action_type)}</strong><span>{action.execution_attempt_count} execution attempt{action.execution_attempt_count === 1 ? "" : "s"}</span></div><Badge value={action.status} /></div>
-      <dl><div><dt>Provider reference</dt><dd className="mono-value">{action.provider_action_id ?? "Not created"}</dd></div><div><dt>Provider status</dt><dd>{action.provider_action_status === null ? "Not available" : titleCase(action.provider_action_status)}</dd></div><div><dt>Expires</dt><dd>{action.provider_action_expires_at === null ? "Provider managed" : formatTimestamp(action.provider_action_expires_at)}</dd></div><div><dt>Recovery link</dt><dd>{action.provider_action_url === null ? "Not created" : <a className="provider-action__link" href={action.provider_action_url} target="_blank" rel="noreferrer noopener">Open Razorpay link <ArrowUpRight size={16} /></a>}</dd></div></dl>
+      <dl><div><dt>Provider reference</dt><dd className="mono-value">{action.provider_action_id ?? "Not created"}</dd></div><div><dt>Provider status</dt><dd>{action.provider_action_status === null ? "Not available" : titleCase(action.provider_action_status)}</dd></div><div><dt>Expires</dt><dd>{action.provider_action_expires_at === null ? "Provider managed" : formatTimestamp(action.provider_action_expires_at)}</dd></div><div><dt>Recovery link</dt><dd>{action.provider_action_url === null ? "Not created" : <a className="provider-action__link" href={action.provider_action_url} target="_blank" rel="noreferrer noopener">Open hosted Razorpay Test Link <ArrowUpRight size={16} /></a>}</dd></div></dl>
     </article>)}</div>
   </DetailCard>;
 }
@@ -82,9 +83,14 @@ function OutcomeProof({ detail }: { detail: RecoveryCaseDetail }) {
   if (outcome === null) return <DetailCard eyebrow="Outcome proof" title="Awaiting provider evidence"><p className="detail-empty">No verified recovery outcome has been reconciled for this case yet.</p></DetailCard>;
   const recovered = outcome.gross_recovered_minor - outcome.reversed_minor;
   const isRecovered = recovered > 0;
-  const amount = isRecovered ? recovered : outcome.duplicate_collection_prevented_minor;
-  return <DetailCard eyebrow="Outcome proof" title="Verified reconciliation result">
-    <div className="outcome-proof"><Badge value={outcome.status} /><strong className={isRecovered ? "outcome-proof__money outcome-proof__money--recovered" : "outcome-proof__money outcome-proof__money--protected"}>{formatMoney(amount, detail.recovery_case.currency)}</strong><span>{isRecovered ? "Verified recovered" : "Duplicate collection prevented"}</span></div>
+  const duplicatePrevented = outcome.status === "duplicate_collection_prevented";
+  const pending = outcome.status === "payment_link_pending";
+  const amount = isRecovered ? recovered : duplicatePrevented ? outcome.duplicate_collection_prevented_minor : 0;
+  const title = pending ? "Awaiting recovery-link payment" : "Verified reconciliation result";
+  const amountClass = isRecovered ? "outcome-proof__money outcome-proof__money--recovered" : duplicatePrevented ? "outcome-proof__money outcome-proof__money--protected" : "outcome-proof__money";
+  const amountLabel = isRecovered ? "Verified recovered" : duplicatePrevented ? "Duplicate collection prevented" : "Recovered so far";
+  return <DetailCard eyebrow="Outcome proof" title={title}>
+    <div className="outcome-proof"><Badge value={outcome.status} /><strong className={amountClass}>{formatMoney(amount, detail.recovery_case.currency)}</strong><span>{amountLabel}</span>{pending ? <p className="outcome-proof__waiting">The Test Payment Link exists, but Razorpay has not confirmed a recovery payment.</p> : null}</div>
     <dl className="outcome-facts"><div><dt>Attribution</dt><dd>{titleCase(outcome.attribution)}</dd></div><div><dt>Evidence</dt><dd>{outcome.evidence_event_count} linked events</dd></div><div><dt>Occurred</dt><dd>{formatTimestamp(outcome.occurred_at)}</dd></div></dl>
   </DetailCard>;
 }
@@ -97,12 +103,16 @@ function AuditTimeline({ detail }: { detail: RecoveryCaseDetail }) {
 }
 
 function CaseDetail({ detail }: { detail: RecoveryCaseDetail }) {
+  const displayStatus = detail.outcome?.status === "payment_link_pending" ? "payment_link_pending" : detail.recovery_case.status;
   return <div className="app-shell"><RecoveryNavigation active="case" /><main className="workspace case-workspace">
-    <header className="case-header"><div><Link className="back-link" href="/"><ArrowLeft size={16} /> Command center</Link><p className="kicker">Recovery case evidence</p><h1>CASE-{shortValue(detail.recovery_case.recovery_case_id)}</h1><p>Opened {formatTimestamp(detail.recovery_case.opened_at)} IST</p></div><div className="case-header__hero"><span>Amount under control</span><strong>{formatMoney(detail.recovery_case.amount_minor, detail.recovery_case.currency)}</strong><div><Badge value={detail.recovery_case.status} /><span>{detail.recovery_case.active_payment_link_id === null ? "No active payment link" : `Link ${shortValue(detail.recovery_case.active_payment_link_id)}`}</span></div></div></header>
+    <header className="case-header"><div><Link className="back-link" href="/"><ArrowLeft size={16} /> Command center</Link><p className="kicker">Recovery case evidence</p><h1>CASE-{shortValue(detail.recovery_case.recovery_case_id)}</h1><p>Opened {formatTimestamp(detail.recovery_case.opened_at)} IST</p></div><div className="case-header__hero"><span>Amount under control</span><strong>{formatMoney(detail.recovery_case.amount_minor, detail.recovery_case.currency)}</strong><div><Badge value={displayStatus} /><span>{detail.recovery_case.active_payment_link_id === null ? "No active payment link" : `Test Link ${shortValue(detail.recovery_case.active_payment_link_id)}`}</span></div></div></header>
     <section className="case-summary"><div><span>Payment lifecycle</span><strong>{titleCase(detail.payment_lifecycle.current_state)}</strong></div><div><span>Recovery attempts</span><strong>{detail.recovery_case.recovery_attempt_count}</strong></div><div><span>Actions planned</span><strong>{detail.actions.length}</strong></div><div><span>Audit events</span><strong>{detail.audit_chain.total_event_count}</strong></div></section>
-    <div className="case-flow-heading"><FileCheck2 size={22} /><div><p className="kicker">End-to-end decision trace</p><h2>From provider failure to measured outcome</h2></div></div>
-    <section className="case-flow"><div className="case-flow__item"><span className="case-flow__number">1</span><FailureContext detail={detail} /></div><div className="case-flow__item"><span className="case-flow__number">2</span><DecisionTrace detail={detail} /></div><div className="case-flow__item"><span className="case-flow__number">3</span><PolicyExecution detail={detail} /></div><div className="case-flow__item"><span className="case-flow__number">4</span><ProviderActions detail={detail} /></div><div className="case-flow__item"><span className="case-flow__number">5</span><OutcomeProof detail={detail} /></div></section>
-    <AuditTimeline detail={detail} />
+    <CaseEvidenceTabs
+      lifecycle={<FailureContext detail={detail} />}
+      decision={<div className="case-tab-grid"><DecisionTrace detail={detail} /><PolicyExecution detail={detail} /></div>}
+      provider={<ProviderActions detail={detail} />}
+      outcome={<div className="case-tab-stack"><OutcomeProof detail={detail} /><AuditTimeline detail={detail} /></div>}
+    />
   </main></div>;
 }
 

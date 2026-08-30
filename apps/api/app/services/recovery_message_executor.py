@@ -456,9 +456,7 @@ async def complete_recovery_message_action(
 
     action.status = RecoveryActionStatus.SUCCEEDED.value
     action.provider_action_id = provider_action_id or prepared.payment_link_id
-    action.provider_action_status = (
-        provider_action_status or f"notified_{prepared.medium.value}"
-    )
+    action.provider_action_status = provider_action_status or f"notified_{prepared.medium.value}"
     action.completed_at = completed_at
     action.last_error = None
 

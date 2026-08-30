@@ -80,9 +80,7 @@ async def run_recovery_message_worker(
     direct_email_provider = create_resend_recovery_email_provider(settings)
     demo_recipient = getattr(settings, "payment_lab_demo_email_recipient", None)
     direct_email_recipient = (
-        demo_recipient.get_secret_value().strip()
-        if demo_recipient is not None
-        else None
+        demo_recipient.get_secret_value().strip() if demo_recipient is not None else None
     )
 
     if customer_provider is None or notification_provider is None:

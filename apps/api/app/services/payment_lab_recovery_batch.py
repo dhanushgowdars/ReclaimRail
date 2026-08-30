@@ -252,9 +252,7 @@ async def run_payment_lab_recovery_batch(
                 started_at=reference_time,
                 customer_contact_allowed=candidate.test_email_contact_consent,
                 available_channels=(
-                    (RecoveryChannel.EMAIL,)
-                    if candidate.test_email_contact_consent
-                    else ()
+                    (RecoveryChannel.EMAIL,) if candidate.test_email_contact_consent else ()
                 ),
                 alternate_payment_methods=build_alternate_payment_methods(
                     candidate.payment_method,

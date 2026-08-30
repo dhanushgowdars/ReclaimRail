@@ -1,15 +1,23 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.domain.recovery import RecoveryChannel
+from app.domain.recovery import (
+    DEFAULT_RECOVERY_PLANNER_POLICY,
+    RecoveryChannel,
+    RecoveryPlannerPolicy,
+)
 from app.integrations.gemini import (
     BoundedRecoveryPlannerResult,
     GeminiRecoveryPlanProvider,
     plan_with_gemini_fallback,
+)
+from app.services.recovery_approval_service import (
+    DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    DEFAULT_APPROVAL_WINDOW,
 )
 from app.services.recovery_plan_service import (
     PersistedRecoveryPlan,
@@ -41,6 +49,9 @@ async def execute_recovery_agent(
     alternate_payment_methods: Sequence[str],
     planned_at: datetime,
     provider: GeminiRecoveryPlanProvider | None,
+    approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
+    planner_policy: RecoveryPlannerPolicy = DEFAULT_RECOVERY_PLANNER_POLICY,
 ) -> RecoveryAgentExecution:
     """Plan outside a database transaction, then persist through the policy gate."""
 
@@ -58,6 +69,7 @@ async def execute_recovery_agent(
     planner_result = await plan_with_gemini_fallback(
         context,
         provider=provider,
+        policy=planner_policy,
     )
 
     async with session_factory.begin() as write_session:
@@ -68,6 +80,8 @@ async def execute_recovery_agent(
             alternate_payment_methods=alternate_payment_methods,
             planned_at=planned_at,
             planner_result=planner_result,
+            approval_threshold_minor=approval_threshold_minor,
+            approval_window=approval_window,
         )
 
     return RecoveryAgentExecution(

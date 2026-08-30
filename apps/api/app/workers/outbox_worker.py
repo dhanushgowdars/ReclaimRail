@@ -12,6 +12,10 @@ from app.services.outbox_dispatcher import (
     create_dispatcher_config,
     dispatch_outbox_batch,
 )
+from app.services.worker_supervision_service import (
+    WorkerName,
+    create_worker_heartbeat_reporter,
+)
 
 LOGGER = logging.getLogger("reclaimrail.outbox-worker")
 
@@ -24,6 +28,11 @@ async def run_outbox_worker(
     dispatcher_config = create_dispatcher_config(settings)
     session_factory = get_session_factory()
     redis_client = get_redis_client()
+    heartbeat = create_worker_heartbeat_reporter(
+        settings,
+        worker_name=WorkerName.OUTBOX,
+        redis_client=redis_client,
+    )
 
     LOGGER.info(
         "Outbox worker started: stream=%s batch_size=%d mode=%s",
@@ -32,6 +41,7 @@ async def run_outbox_worker(
         "once" if run_once else "continuous",
     )
 
+    await heartbeat.start()
     try:
         while True:
             try:
@@ -42,7 +52,8 @@ async def run_outbox_worker(
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as error:
+                await heartbeat.record_failure(error)
                 LOGGER.exception("Outbox dispatch batch failed")
 
                 if run_once:
@@ -52,6 +63,14 @@ async def run_outbox_worker(
                     settings.outbox_poll_interval_seconds,
                 )
                 continue
+
+            await heartbeat.record_success(
+                {
+                    "claimed": result.claimed,
+                    "published": result.published,
+                    "failed": result.failed,
+                },
+            )
 
             if result.claimed > 0:
                 LOGGER.info(
@@ -70,6 +89,7 @@ async def run_outbox_worker(
                     settings.outbox_poll_interval_seconds,
                 )
     finally:
+        await heartbeat.stop()
         await asyncio.gather(
             close_redis(),
             close_database(),

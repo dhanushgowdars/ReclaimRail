@@ -16,6 +16,10 @@ from app.services.payment_stream_consumer import (
     create_payment_consumer_config,
     ensure_payment_consumer_group,
 )
+from app.services.worker_supervision_service import (
+    WorkerName,
+    create_worker_heartbeat_reporter,
+)
 
 LOGGER = logging.getLogger("reclaimrail.payment-consumer-worker")
 
@@ -33,6 +37,11 @@ async def run_payment_consumer_worker(
     settings = get_settings()
     session_factory = get_session_factory()
     redis_client = get_redis_client()
+    heartbeat = create_worker_heartbeat_reporter(
+        settings,
+        worker_name=WorkerName.PAYMENT_CONSUMER,
+        redis_client=redis_client,
+    )
 
     consumer_config = create_payment_consumer_config(
         settings,
@@ -59,6 +68,7 @@ async def run_payment_consumer_worker(
         "once" if run_once else "continuous",
     )
 
+    await heartbeat.start()
     try:
         while True:
             try:
@@ -69,7 +79,8 @@ async def run_payment_consumer_worker(
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as error:
+                await heartbeat.record_failure(error)
                 LOGGER.exception(
                     "Payment stream consumer batch failed",
                 )
@@ -81,6 +92,15 @@ async def run_payment_consumer_worker(
                     settings.payment_consumer_error_retry_seconds,
                 )
                 continue
+
+            await heartbeat.record_success(
+                {
+                    "received": result.received,
+                    "projected": result.projected,
+                    "failed": result.failed,
+                    "dead_lettered": result.dead_lettered,
+                },
+            )
 
             if result.received > 0:
                 LOGGER.info(
@@ -102,6 +122,7 @@ async def run_payment_consumer_worker(
             if run_once:
                 return
     finally:
+        await heartbeat.stop()
         await asyncio.gather(
             close_redis(),
             close_database(),

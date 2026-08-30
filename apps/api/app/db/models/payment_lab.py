@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -146,6 +147,12 @@ class PaymentLabRun(Base):
     payment_method: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
+    )
+    test_email_contact_consent: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
     )
     receipt: Mapped[str] = mapped_column(
         String(40),

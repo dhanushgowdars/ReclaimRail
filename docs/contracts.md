@@ -740,33 +740,40 @@ Execution requirements:
 
 ## 21. Human Review Contract
 
-### Endpoint
+### Endpoints
 
 ```http
-POST /api/v1/recovery-cases/{recovery_case_id}/review
+GET /recovery/approvals?status=pending
+POST /recovery/approvals/{approval_id}/decision
 ```
+
+Both endpoints require `X-ReclaimRail-Operator-Token`. The operator token is distinct
+from reviewer identity and is never returned by an API response.
 
 ### Request
 
 ```json
 {
-  "decision": "APPROVE",
-  "comment": "Verified that the merchant permits an alternate method.",
-  "expected_case_version": 5
+  "decision": "approve",
+  "reviewer_id": "merchant-operator-17",
+  "reason": "Verified exact amount and current policy evidence.",
+  "expected_version": 0
 }
 ```
 
 ### Decision enum
 
-- `APPROVE`
-- `REJECT`
+- `approve`
+- `reject`
 
 Approval requirements:
 
 - Authenticate the reviewer.
-- Validate the expected case version.
+- Validate the expected approval version.
 - Store the reviewer identity.
 - Re-run payment-status and policy checks.
+- Expire unanswered requests and cancel their actions.
+- Treat an identical replay as idempotent and a conflicting replay as `409 Conflict`.
 - Never treat human approval as permission to bypass safety invariants.
 
 ## 22. Dashboard API Surface
@@ -779,7 +786,8 @@ Approval requirements:
 | `GET` | `/api/v1/incidents/{id}` | Incident timeline and affected payments |
 | `GET` | `/api/v1/recovery-cases` | Prioritised recovery queue |
 | `GET` | `/api/v1/recovery-cases/{id}` | Full recovery and agent trace |
-| `POST` | `/api/v1/recovery-cases/{id}/review` | Approve or reject review |
+| `GET` | `/recovery/approvals` | List the protected operator approval queue |
+| `POST` | `/recovery/approvals/{id}/decision` | Approve or reject one gated action |
 | `GET` | `/api/v1/metrics/recovery` | Recovery and safety metrics |
 | `POST` | `/api/v1/replay-runs` | Execute a seeded Replay Lab batch |
 | `GET` | `/api/v1/replay-runs/{id}` | Fetch replay comparison |

@@ -12,6 +12,7 @@ class RecoveryCaseStatus(StrEnum):
     OPEN = "open"
     PLANNING = "planning"
     READY = "ready"
+    AWAITING_APPROVAL = "awaiting_approval"
     EXECUTING = "executing"
     WAITING = "waiting"
     RECOVERED = "recovered"

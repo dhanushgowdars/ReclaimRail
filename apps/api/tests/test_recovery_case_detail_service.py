@@ -82,6 +82,26 @@ def build_agent_run() -> MagicMock:
     value.failure_code = None
     value.started_at = NOW
     value.completed_at = NOW
+    value.evidence = {
+        "evidence_codes": ["payment_failed", "recovery_eligible"],
+        "planner": {
+            "fallback_used": False,
+            "fallback_reason": None,
+            "input_token_count": 212,
+            "output_token_count": 61,
+        },
+        "bounded_ai_analysis": {
+            "root_cause_category": "bank_authorization_failure",
+            "recoverability_assessment": "recoverable",
+            "confidence": 0.91,
+            "allowed_action_recommendation": "create_payment_link",
+            "evidence_references": ["payment_state_snapshot", "merchant_recovery_policy"],
+        },
+        "bounded_ai_evidence_tools": {
+            "payment_state_snapshot": {"ref": "payment_state_snapshot"},
+            "merchant_recovery_policy": {"ref": "merchant_recovery_policy"},
+        },
+    }
     return value
 
 
@@ -167,6 +187,7 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
         build_result(row=(build_case(), build_payment_attempt(), build_outcome())),
         build_result(values=[build_agent_run()]),
         build_result(values=[build_action()]),
+        build_result(),
         build_result(values=[build_transition()]),
     )
     audit_entries = (build_audit_entry(),)
@@ -195,6 +216,12 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
     assert detail.recovery_case.recovery_case_id == CASE_ID
     assert detail.payment_lifecycle.current_state == "failed"
     assert detail.agent_runs[0].planner_provider == "gemini"
+    assert detail.agent_runs[0].ai_trace.confidence == 0.91
+    assert detail.agent_runs[0].ai_trace.root_cause_category == "bank_authorization_failure"
+    assert detail.agent_runs[0].ai_trace.evidence_tool_names == (
+        "merchant_recovery_policy",
+        "payment_state_snapshot",
+    )
     assert detail.actions[0].policy_outcome == "allow"
     assert detail.actions[0].provider_action_url == "https://rzp.io/i/case-detail"
     assert detail.outcome is not None
@@ -204,7 +231,7 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
     assert detail.audit_chain.total_event_count == 1
     assert detail.audit_chain.events[0].event_hash == "a" * 64
     assert not hasattr(detail.audit_chain.events[0], "event_data")
-    assert session.execute.await_count == 4
+    assert session.execute.await_count == 5
 
 
 @pytest.mark.asyncio
@@ -231,6 +258,7 @@ async def test_audit_timeline_is_bounded_without_changing_chain_verification(
     session = AsyncMock(spec=AsyncSession)
     session.execute.side_effect = (
         build_result(row=(build_case(), build_payment_attempt(), None)),
+        build_result(),
         build_result(),
         build_result(),
         build_result(),

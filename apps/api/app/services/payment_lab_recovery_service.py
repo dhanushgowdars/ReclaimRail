@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from uuid import UUID
 
@@ -9,8 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
-from app.db.models.recovery import RecoveryCase
-from app.domain.recovery import RecoveryCaseStatus, RecoveryChannel
+from app.db.models.recovery import RecoveryAction, RecoveryActionStatus, RecoveryCase
+from app.domain.recovery import (
+    DEFAULT_RECOVERY_PLANNER_POLICY,
+    RecoveryActionType,
+    RecoveryCaseStatus,
+    RecoveryChannel,
+    RecoveryPlannerPolicy,
+)
 from app.integrations.gemini import (
     GeminiRecoveryPlanProvider,
     RecoveryPlannerSource,
@@ -19,10 +25,18 @@ from app.services.recovery_agent_service import (
     RecoveryAgentExecution,
     execute_recovery_agent,
 )
+from app.services.recovery_approval_service import (
+    DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    DEFAULT_APPROVAL_WINDOW,
+)
 from app.services.recovery_case_service import (
     RecoveryCaseCreationDisposition,
     RecoveryCaseIneligibilityReason,
     create_or_get_recovery_case,
+)
+from app.services.recovery_incident_context import (
+    ActiveRecoveryIncidentContext,
+    load_active_recovery_incident_context,
 )
 
 SessionFactory = async_sessionmaker[AsyncSession]
@@ -31,6 +45,7 @@ PLANNABLE_CASE_STATUSES = {
     RecoveryCaseStatus.OPEN,
     RecoveryCaseStatus.WAITING,
 }
+DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT = timedelta(seconds=60)
 
 
 class PaymentLabRecoveryError(RuntimeError):
@@ -103,13 +118,79 @@ async def _find_recovery_case(
     return result.scalar_one_or_none()
 
 
+async def _load_active_incident_for_run(
+    session: AsyncSession,
+    *,
+    payment_lab_run: PaymentLabRun,
+) -> ActiveRecoveryIncidentContext | None:
+    """Resolve the incident that caused a newly opened Lab case to be controlled."""
+    return await load_active_recovery_incident_context(
+        session,
+        source_incident_id=None,
+        currency=payment_lab_run.currency,
+        payment_method=payment_lab_run.payment_method,
+    )
+
+
+async def _load_active_incident_for_recovery_case(
+    session: AsyncSession,
+    *,
+    recovery_case: RecoveryCase,
+) -> ActiveRecoveryIncidentContext | None:
+    """Resolve whether the incident that controls this case remains active."""
+    return await load_active_recovery_incident_context(
+        session,
+        source_incident_id=recovery_case.source_incident_id,
+        currency=recovery_case.currency,
+        payment_method=recovery_case.payment_method,
+    )
+
+
+async def _reschedule_active_incident_wait(
+    session: AsyncSession,
+    *,
+    recovery_case: RecoveryCase,
+    rechecked_at: datetime,
+    recheck_delay: timedelta,
+) -> bool:
+    """Move the existing wait forward without creating another agent plan."""
+    wait_result = await session.execute(
+        select(RecoveryAction)
+        .where(
+            RecoveryAction.recovery_case_id == recovery_case.id,
+            RecoveryAction.action_type == RecoveryActionType.WAIT.value,
+            RecoveryAction.status == RecoveryActionStatus.SCHEDULED.value,
+        )
+        .order_by(RecoveryAction.execute_after.desc(), RecoveryAction.id.desc())
+        .limit(1)
+        .with_for_update(),
+    )
+    wait_action = wait_result.scalar_one_or_none()
+    if wait_action is None:
+        return False
+
+    next_recheck_at = rechecked_at + recheck_delay
+    wait_action.execute_after = next_recheck_at
+    recovery_case.next_action_at = next_recheck_at
+    recovery_case.updated_at = rechecked_at
+    recovery_case.version += 1
+    return True
+
+
 async def _claim_payment_lab_recovery(
     session: AsyncSession,
     *,
     payment_lab_run_id: UUID,
     started_at: datetime,
     customer_contact_allowed: bool,
+    claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
+    incident_recheck_delay: timedelta = DEFAULT_RECOVERY_PLANNER_POLICY.incident_recheck_delay,
 ) -> _PaymentLabRecoveryClaim:
+    if claim_timeout <= timedelta(0):
+        raise ValueError("Payment Lab recovery claim timeout must be positive")
+    if incident_recheck_delay <= timedelta(0):
+        raise ValueError("Incident recheck delay must be positive")
+
     run_result = await session.execute(
         select(PaymentLabRun).where(PaymentLabRun.id == payment_lab_run_id).with_for_update(),
     )
@@ -145,25 +226,98 @@ async def _claim_payment_lab_recovery(
                 "Recovery-running Payment Lab run has no recovery case",
             )
 
-        return _PaymentLabRecoveryClaim(
-            payment_lab_run_id=payment_lab_run.id,
-            payment_attempt_id=payment_attempt_id,
-            recovery_case_id=recovery_case.id,
-            disposition=PaymentLabRecoveryStartDisposition.ALREADY_RUNNING,
-            recovery_case_created=False,
-            should_execute_agent=False,
+        try:
+            recovery_case_status = RecoveryCaseStatus(recovery_case.status)
+        except ValueError as error:
+            raise PaymentLabRecoveryConflictError(
+                "Payment Lab recovery case contains an invalid status",
+            ) from error
+
+        if (
+            recovery_case_status is RecoveryCaseStatus.WAITING
+            and recovery_case.next_action_at is not None
+            and recovery_case.next_action_at > started_at
+        ):
+            return _PaymentLabRecoveryClaim(
+                payment_lab_run_id=payment_lab_run.id,
+                payment_attempt_id=payment_attempt_id,
+                recovery_case_id=recovery_case.id,
+                disposition=PaymentLabRecoveryStartDisposition.ALREADY_PLANNED,
+                recovery_case_created=False,
+                should_execute_agent=False,
+            )
+
+        # A due waiting case is a deliberate recheck, not a stale-worker
+        # recovery.  Claim it immediately so an expired incident window can
+        # safely permit a new bounded decision.
+        wait_recheck_due = (
+            recovery_case_status is RecoveryCaseStatus.WAITING
+            and recovery_case.next_action_at is not None
+            and recovery_case.next_action_at <= started_at
         )
+        if wait_recheck_due:
+            active_incident = await _load_active_incident_for_recovery_case(
+                session,
+                recovery_case=recovery_case,
+            )
+            if active_incident is not None and await _reschedule_active_incident_wait(
+                session,
+                recovery_case=recovery_case,
+                rechecked_at=started_at,
+                recheck_delay=incident_recheck_delay,
+            ):
+                payment_lab_run.updated_at = started_at
+                payment_lab_run.version += 1
+                return _PaymentLabRecoveryClaim(
+                    payment_lab_run_id=payment_lab_run.id,
+                    payment_attempt_id=payment_attempt_id,
+                    recovery_case_id=recovery_case.id,
+                    disposition=PaymentLabRecoveryStartDisposition.ALREADY_PLANNED,
+                    recovery_case_created=False,
+                    should_execute_agent=False,
+                )
+        claim_is_stale = payment_lab_run.updated_at <= started_at - claim_timeout
+        if not wait_recheck_due and not claim_is_stale:
+            return _PaymentLabRecoveryClaim(
+                payment_lab_run_id=payment_lab_run.id,
+                payment_attempt_id=payment_attempt_id,
+                recovery_case_id=recovery_case.id,
+                disposition=PaymentLabRecoveryStartDisposition.ALREADY_RUNNING,
+                recovery_case_created=False,
+                should_execute_agent=False,
+            )
+        if recovery_case_status not in PLANNABLE_CASE_STATUSES:
+            return _PaymentLabRecoveryClaim(
+                payment_lab_run_id=payment_lab_run.id,
+                payment_attempt_id=payment_attempt_id,
+                recovery_case_id=recovery_case.id,
+                disposition=PaymentLabRecoveryStartDisposition.ALREADY_PLANNED,
+                recovery_case_created=False,
+                should_execute_agent=False,
+            )
+
+        # A process may die after claiming a run and before persisting an agent
+        # result. Re-enter the normal, row-locked creation path after the lease
+        # expires instead of leaving the run permanently stuck.
+        payment_lab_run.status = PaymentLabRunStatus.PAYMENT_ATTEMPTED.value
+        run_status = PaymentLabRunStatus.PAYMENT_ATTEMPTED
 
     if run_status is not PaymentLabRunStatus.PAYMENT_ATTEMPTED:
         raise PaymentLabRecoveryRunNotReadyError(
             f"Payment Lab run cannot start recovery from {run_status.value}",
         )
 
+    active_incident = await _load_active_incident_for_run(
+        session,
+        payment_lab_run=payment_lab_run,
+    )
+
     creation = await create_or_get_recovery_case(
         session,
         payment_attempt_id=payment_attempt_id,
         opened_at=started_at,
         customer_contact_allowed=customer_contact_allowed,
+        source_incident_id=(active_incident.incident_id if active_incident is not None else None),
     )
 
     if creation.disposition is RecoveryCaseCreationDisposition.INELIGIBLE:
@@ -252,6 +406,10 @@ async def start_payment_lab_recovery(
     available_channels: Sequence[RecoveryChannel],
     alternate_payment_methods: Sequence[str],
     provider: GeminiRecoveryPlanProvider | None,
+    claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
+    approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
+    planner_policy: RecoveryPlannerPolicy = DEFAULT_RECOVERY_PLANNER_POLICY,
 ) -> PaymentLabRecoveryStartResult:
     """Claim a verified failure and start the existing bounded recovery agent."""
 
@@ -263,6 +421,8 @@ async def start_payment_lab_recovery(
             payment_lab_run_id=payment_lab_run_id,
             started_at=started_at,
             customer_contact_allowed=customer_contact_allowed,
+            claim_timeout=claim_timeout,
+            incident_recheck_delay=planner_policy.incident_recheck_delay,
         )
 
     if not claim.should_execute_agent:
@@ -286,6 +446,9 @@ async def start_payment_lab_recovery(
             alternate_payment_methods=alternate_payment_methods,
             planned_at=started_at,
             provider=provider,
+            approval_threshold_minor=approval_threshold_minor,
+            approval_window=approval_window,
+            planner_policy=planner_policy,
         )
     except asyncio.CancelledError:
         await asyncio.shield(

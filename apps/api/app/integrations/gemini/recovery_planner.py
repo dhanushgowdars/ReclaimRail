@@ -1,3 +1,4 @@
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,6 +18,7 @@ from app.domain.recovery import (
     RecoveryChannel,
     RecoveryPlan,
     RecoveryPlanDecision,
+    RecoveryPlannerPolicy,
     RecoveryPlanningContext,
     build_deterministic_recovery_plan,
     build_recovery_evidence_codes,
@@ -47,6 +49,31 @@ GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA: dict[str, object] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
+        "analysis": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "root_cause_category": {"type": "string"},
+                "recoverability_assessment": {"type": "string"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "allowed_action_recommendation": {"type": "string"},
+                "evidence_references": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "items": {"type": "string"},
+                },
+                "operator_explanation": {"type": "string"},
+            },
+            "required": [
+                "root_cause_category",
+                "recoverability_assessment",
+                "confidence",
+                "allowed_action_recommendation",
+                "evidence_references",
+                "operator_explanation",
+            ],
+        },
         "decision": {
             "type": "string",
             "enum": ["recover", "wait", "escalate", "stop"],
@@ -121,6 +148,7 @@ GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA: dict[str, object] = {
         },
     },
     "required": [
+        "analysis",
         "decision",
         "reasoning_summary",
         "proposals",
@@ -178,10 +206,22 @@ class GeminiRecoveryActionPayload(BaseModel):
         return self
 
 
+class GeminiRecoveryAnalysisPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    root_cause_category: str = Field(min_length=1, max_length=80)
+    recoverability_assessment: str = Field(min_length=1, max_length=240)
+    confidence: float = Field(ge=0, le=1)
+    allowed_action_recommendation: str = Field(min_length=1, max_length=80)
+    evidence_references: tuple[str, ...] = Field(min_length=1, max_length=4)
+    operator_explanation: str = Field(min_length=1, max_length=400)
+
+
 class GeminiRecoveryPlanPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decision: RecoveryPlanDecision
+    analysis: GeminiRecoveryAnalysisPayload
     reasoning_summary: str = Field(min_length=1, max_length=800)
     proposals: tuple[GeminiRecoveryActionPayload, ...] = Field(
         min_length=1,
@@ -244,6 +284,7 @@ class BoundedRecoveryPlannerResult:
     fallback_reason: GeminiPlannerFallbackReason | None
     input_token_count: int | None = None
     output_token_count: int | None = None
+    analysis: GeminiRecoveryAnalysisPayload | None = None
 
     def __post_init__(self) -> None:
         if self.source is RecoveryPlannerSource.GEMINI:
@@ -257,12 +298,51 @@ def _timestamp(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+def build_recovery_evidence_tools(context: RecoveryPlanningContext) -> dict[str, object]:
+    """The four fixed, read-only evidence surfaces available to Gemini."""
+    case = context.case
+    failure = context.failure
+    return {
+        "payment_state_snapshot": {
+            "ref": "payment_state_snapshot",
+            "state": case.payment_state.value,
+            "amount_minor": case.amount_minor,
+            "currency": case.currency,
+            "payment_method": case.payment_method,
+            "late_authorization_detected": case.late_authorization_detected_at is not None,
+        },
+        "attempt_and_recovery_history": {
+            "ref": "attempt_and_recovery_history",
+            "recovery_attempt_count": case.recovery_attempt_count,
+            "failure_count": failure.failure_count,
+            "active_payment_link": case.active_payment_link_id is not None,
+        },
+        "payment_rail_incident_context": {
+            "ref": "payment_rail_incident_context",
+            "active_incident_severity": case.active_incident_severity.value
+            if case.active_incident_severity
+            else None,
+        },
+        "merchant_recovery_policy": {
+            "ref": "merchant_recovery_policy",
+            "customer_contact_allowed": case.customer_contact_allowed,
+            "approved_channels": [channel.value for channel in context.available_channels],
+            "maximum_recovery_attempts": DEFAULT_RECOVERY_PLANNER_POLICY.maximum_recovery_attempts,
+            "automatic_amount_limit_minor": (
+                DEFAULT_RECOVERY_PLANNER_POLICY.automatic_amount_limit_minor
+            ),
+        },
+    }
+
+
 def build_recovery_planning_prompt(
     context: RecoveryPlanningContext,
+    *,
+    policy: RecoveryPlannerPolicy = DEFAULT_RECOVERY_PLANNER_POLICY,
 ) -> str:
     case = context.case
     failure = context.failure
-    deterministic_baseline = build_deterministic_recovery_plan(context)
+    deterministic_baseline = build_deterministic_recovery_plan(context, policy=policy)
     evidence = {
         "case": {
             "case_id": str(case.case_id),
@@ -312,6 +392,7 @@ def build_recovery_planning_prompt(
             ),
         },
         "planned_at": context.planned_at.isoformat(),
+        "read_only_evidence_tools": build_recovery_evidence_tools(context),
     }
     return "Plan the next bounded recovery step from this evidence:\n" + json.dumps(
         evidence,
@@ -328,6 +409,7 @@ class GoogleGenAIRecoveryPlanProvider:
         model_name: str,
         temperature: float = 0.1,
         max_output_tokens: int = 1024,
+        request_timeout_seconds: float = 8.0,
     ) -> None:
         normalized_api_key = api_key.strip()
         normalized_model_name = model_name.strip()
@@ -340,11 +422,14 @@ class GoogleGenAIRecoveryPlanProvider:
             raise ValueError("Gemini temperature must be between zero and one")
         if not 256 <= max_output_tokens <= 4096:
             raise ValueError("Gemini output-token limit must be between 256 and 4096")
+        if not 1.0 <= request_timeout_seconds <= 60.0:
+            raise ValueError("Gemini request timeout must be between 1 and 60 seconds")
 
         self._api_key = normalized_api_key
         self.model_name = normalized_model_name
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
+        self._request_timeout_seconds = request_timeout_seconds
 
     async def generate_plan(
         self,
@@ -354,21 +439,22 @@ class GoogleGenAIRecoveryPlanProvider:
         async_client = client.aio
 
         try:
-            response = await async_client.models.generate_content(
-                model=self.model_name,
-                contents=build_recovery_planning_prompt(context),
-                config=types.GenerateContentConfig(
-                    system_instruction=GEMINI_RECOVERY_SYSTEM_INSTRUCTION,
-                    temperature=self._temperature,
-                    candidate_count=1,
-                    max_output_tokens=self._max_output_tokens,
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level=types.ThinkingLevel.MINIMAL,
+            async with asyncio.timeout(self._request_timeout_seconds):
+                response = await async_client.models.generate_content(
+                    model=self.model_name,
+                    contents=build_recovery_planning_prompt(context),
+                    config=types.GenerateContentConfig(
+                        system_instruction=GEMINI_RECOVERY_SYSTEM_INSTRUCTION,
+                        temperature=self._temperature,
+                        candidate_count=1,
+                        max_output_tokens=self._max_output_tokens,
+                        thinking_config=types.ThinkingConfig(
+                            thinking_level=types.ThinkingLevel.MINIMAL,
+                        ),
+                        response_mime_type="application/json",
+                        response_json_schema=GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA,
                     ),
-                    response_mime_type="application/json",
-                    response_json_schema=GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA,
-                ),
-            )
+                )
 
             if not response.text:
                 raise GeminiPlannerProviderError(
@@ -408,6 +494,7 @@ def create_gemini_recovery_plan_provider(
         model_name=settings.gemini_model_name,
         temperature=settings.gemini_temperature,
         max_output_tokens=settings.gemini_max_output_tokens,
+        request_timeout_seconds=settings.gemini_request_timeout_seconds,
     )
 
 
@@ -442,9 +529,10 @@ def _deterministic_fallback(
     context: RecoveryPlanningContext,
     *,
     reason: GeminiPlannerFallbackReason,
+    policy: RecoveryPlannerPolicy,
 ) -> BoundedRecoveryPlannerResult:
     return BoundedRecoveryPlannerResult(
-        plan=build_deterministic_recovery_plan(context),
+        plan=build_deterministic_recovery_plan(context, policy=policy),
         source=RecoveryPlannerSource.DETERMINISTIC,
         model_name=None,
         fallback_used=True,
@@ -456,11 +544,15 @@ def _violates_policy_contract(
     plan: RecoveryPlan,
     *,
     context: RecoveryPlanningContext,
+    policy: RecoveryPlannerPolicy,
 ) -> bool:
-    baseline = build_deterministic_recovery_plan(context)
+    baseline = build_deterministic_recovery_plan(context, policy=policy)
 
     if plan.decision is not baseline.decision:
         return True
+
+    if plan.decision is RecoveryPlanDecision.WAIT:
+        return plan.proposals != baseline.proposals
 
     if (not context.case.customer_contact_allowed or not context.available_channels) and any(
         proposal.action_type in CUSTOMER_CONTACT_ACTIONS for proposal in plan.proposals
@@ -492,11 +584,13 @@ async def plan_with_gemini_fallback(
     context: RecoveryPlanningContext,
     *,
     provider: GeminiRecoveryPlanProvider | None,
+    policy: RecoveryPlannerPolicy = DEFAULT_RECOVERY_PLANNER_POLICY,
 ) -> BoundedRecoveryPlannerResult:
     if provider is None:
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.NOT_CONFIGURED,
+            policy=policy,
         )
 
     try:
@@ -505,6 +599,7 @@ async def plan_with_gemini_fallback(
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.PROVIDER_ERROR,
+            policy=policy,
         )
 
     try:
@@ -521,12 +616,22 @@ async def plan_with_gemini_fallback(
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.INVALID_RESPONSE,
+            policy=policy,
         )
 
-    if _violates_policy_contract(plan, context=context):
+    if _violates_policy_contract(plan, context=context, policy=policy):
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.POLICY_CONFLICT,
+            policy=policy,
+        )
+
+    valid_evidence_references = set(build_recovery_evidence_tools(context))
+    if not set(payload.analysis.evidence_references).issubset(valid_evidence_references):
+        return _deterministic_fallback(
+            context,
+            reason=GeminiPlannerFallbackReason.INVALID_RESPONSE,
+            policy=policy,
         )
 
     return BoundedRecoveryPlannerResult(
@@ -537,4 +642,5 @@ async def plan_with_gemini_fallback(
         fallback_reason=None,
         input_token_count=response.input_token_count,
         output_token_count=response.output_token_count,
+        analysis=payload.analysis,
     )

@@ -424,6 +424,21 @@ select.lab-input { padding: 0 10px; }
   font-size: 13px;
 }
 .lab-access > span { display: block; margin-top: 6px; color: #7b889b; font-size: 10px; }
+.lab-notification-consent {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: -5px 0 18px;
+  padding: 12px 14px;
+  border: 1px solid #b9d6ff;
+  border-radius: 9px;
+  background: #f5f9ff;
+  color: var(--navy);
+  cursor: pointer;
+}
+.lab-notification-consent input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--blue); }
+.lab-notification-consent strong { display: block; font-size: 12px; }
+.lab-notification-consent small { display: block; margin-top: 3px; color: #61728a; font-size: 11px; line-height: 1.4; }
 .lab-primary-action {
   width: 100%;
   min-height: 46px;

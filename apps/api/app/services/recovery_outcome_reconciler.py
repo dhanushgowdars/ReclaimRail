@@ -477,6 +477,8 @@ async def complete_recovery_outcome_reconciliation(
     prepared: PreparedRecoveryOutcomeReconciliation,
     payment_link: RazorpayPaymentLink,
     reconciled_at: datetime,
+    evidence_source: str = "provider_poll",
+    provider_event_id: str | None = None,
 ) -> RecoveryOutcomeReconciliationResult:
     """
     Verify fetched provider evidence, persist its proof, and audit it.
@@ -557,6 +559,8 @@ async def complete_recovery_outcome_reconciliation(
                     "outcome_fingerprint": (proof.evidence_event_ids[0]),
                     "projection_created": persistence.projection_created,
                     "projection_updated": persistence.projection_updated,
+                    "evidence_source": evidence_source,
+                    "provider_event_id": provider_event_id,
                 },
                 occurred_at=proof.occurred_at,
             ),
@@ -575,6 +579,48 @@ async def complete_recovery_outcome_reconciliation(
         projection_updated=persistence.projection_updated,
         observation_created=persistence.observation_created,
         case_marked_recovered=case_marked_recovered,
+    )
+
+
+async def reconcile_recovery_payment_link_webhook(
+    session: AsyncSession,
+    *,
+    payment_link: RazorpayPaymentLink,
+    provider_event_id: str,
+    reconciled_at: datetime,
+) -> RecoveryOutcomeReconciliationResult | None:
+    """Reconcile a signed Payment Link event when it belongs to ReclaimRail.
+
+    Events for unrelated merchant links are deliberately ignored.  The
+    provider-link ID is only a correlation key; the normal reconciliation
+    path still validates the reference, amount, currency and case linkage.
+    """
+
+    _require_timezone_aware(reconciled_at, field_name="Reconciliation time")
+    result = await session.execute(
+        select(RecoveryAction)
+        .where(
+            RecoveryAction.action_type == RecoveryActionType.CREATE_PAYMENT_LINK.value,
+            RecoveryAction.provider_action_id == payment_link.payment_link_id,
+        )
+        .with_for_update(),
+    )
+    recovery_action = result.scalar_one_or_none()
+    if recovery_action is None:
+        return None
+
+    prepared = await prepare_recovery_outcome_reconciliation(
+        session,
+        recovery_case_id=recovery_action.recovery_case_id,
+        recovery_action_id=recovery_action.id,
+    )
+    return await complete_recovery_outcome_reconciliation(
+        session,
+        prepared=prepared,
+        payment_link=payment_link,
+        reconciled_at=reconciled_at,
+        evidence_source="signed_webhook",
+        provider_event_id=provider_event_id,
     )
 
 

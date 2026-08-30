@@ -1,19 +1,19 @@
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.incident import RevenueIncident, RevenueIncidentStatus
 from app.db.models.payment import PaymentAttempt
 from app.db.models.recovery import (
     RecoveryAction,
     RecoveryActionStatus,
     RecoveryAgentRun,
     RecoveryAgentRunStatus,
+    RecoveryApproval,
     RecoveryAuditActor,
     RecoveryAuditEvent,
     RecoveryCase,
@@ -39,24 +39,27 @@ from app.integrations.gemini import (
     BoundedRecoveryPlannerResult,
     GeminiPlannerFallbackReason,
     RecoveryPlannerSource,
+    build_recovery_evidence_tools,
+)
+from app.services.recovery_approval_service import (
+    DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    DEFAULT_APPROVAL_WINDOW,
+    build_recovery_approval_requirement,
+    create_recovery_approval_request,
 )
 from app.services.recovery_audit_store import (
     RecoveryAuditAppendRequest,
     append_recovery_audit_event,
+)
+from app.services.recovery_incident_context import (
+    ActiveRecoveryIncidentContext,
+    load_active_recovery_incident_context,
 )
 
 PLANNABLE_CASE_STATUSES = frozenset(
     {
         RecoveryCaseStatus.OPEN,
         RecoveryCaseStatus.WAITING,
-    },
-)
-
-ACTIVE_INCIDENT_STATUSES = frozenset(
-    {
-        RevenueIncidentStatus.OPEN.value,
-        RevenueIncidentStatus.INVESTIGATING.value,
-        RevenueIncidentStatus.MITIGATING.value,
     },
 )
 
@@ -82,6 +85,7 @@ class PersistedRecoveryPlan:
     plan: RecoveryPlan
     agent_run: RecoveryAgentRun
     actions: tuple[RecoveryAction, ...]
+    approvals: tuple[RecoveryApproval, ...]
     audit_event: RecoveryAuditEvent
 
 
@@ -217,6 +221,21 @@ def _planning_evidence(
             "input_token_count": planner_result.input_token_count,
             "output_token_count": planner_result.output_token_count,
         },
+        "bounded_ai_analysis": (
+            {
+                "root_cause_category": planner_result.analysis.root_cause_category,
+                "recoverability_assessment": planner_result.analysis.recoverability_assessment,
+                "confidence": planner_result.analysis.confidence,
+                "allowed_action_recommendation": (
+                    planner_result.analysis.allowed_action_recommendation
+                ),
+                "evidence_references": list(planner_result.analysis.evidence_references),
+                "operator_explanation": planner_result.analysis.operator_explanation,
+            }
+            if planner_result.analysis is not None
+            else None
+        ),
+        "bounded_ai_evidence_tools": build_recovery_evidence_tools(context),
     }
 
 
@@ -272,6 +291,10 @@ def _apply_case_projection(
         recovery_case.status = RecoveryCaseStatus.ESCALATED.value
         recovery_case.next_action_at = None
 
+    elif any(action.status == RecoveryActionStatus.APPROVAL_REQUIRED.value for action in actions):
+        recovery_case.status = RecoveryCaseStatus.AWAITING_APPROVAL.value
+        recovery_case.next_action_at = None
+
     elif plan.decision is RecoveryPlanDecision.WAIT:
         recovery_case.status = RecoveryCaseStatus.WAITING.value
         recovery_case.next_action_at = min(
@@ -289,25 +312,17 @@ def _apply_case_projection(
     recovery_case.version += 1
 
 
-async def _load_active_incident_severity(
+async def _load_active_incident_context(
     session: AsyncSession,
     *,
-    source_incident_id: UUID | None,
-) -> IncidentSeverity | None:
-    if source_incident_id is None:
-        return None
-
-    incident_result = await session.execute(
-        select(RevenueIncident).where(
-            RevenueIncident.id == source_incident_id,
-        ),
+    recovery_case: RecoveryCase,
+) -> ActiveRecoveryIncidentContext | None:
+    return await load_active_recovery_incident_context(
+        session,
+        source_incident_id=recovery_case.source_incident_id,
+        currency=recovery_case.currency,
+        payment_method=recovery_case.payment_method,
     )
-    incident = incident_result.scalar_one_or_none()
-
-    if incident is None or incident.status not in ACTIVE_INCIDENT_STATUSES:
-        return None
-
-    return IncidentSeverity(incident.severity)
 
 
 async def load_recovery_planning_context(
@@ -355,15 +370,15 @@ async def load_recovery_planning_context(
             f"Payment attempt {recovery_case.payment_attempt_id} does not exist",
         )
 
-    incident_severity = await _load_active_incident_severity(
+    incident_context = await _load_active_incident_context(
         session,
-        source_incident_id=recovery_case.source_incident_id,
+        recovery_case=recovery_case,
     )
 
     return _build_planning_context(
         recovery_case,
         payment_attempt,
-        incident_severity=incident_severity,
+        incident_severity=(incident_context.severity if incident_context is not None else None),
         available_channels=available_channels,
         alternate_payment_methods=alternate_payment_methods,
         planned_at=planned_at,
@@ -392,8 +407,14 @@ async def plan_and_persist_recovery_case(
     alternate_payment_methods: Sequence[str],
     planned_at: datetime,
     planner_result: BoundedRecoveryPlannerResult | None = None,
+    approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
+    approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
 ) -> PersistedRecoveryPlan:
     _require_timezone_aware(planned_at)
+    if approval_threshold_minor < 1:
+        raise ValueError("Approval threshold must be positive")
+    if approval_window <= timedelta(0):
+        raise ValueError("Approval window must be positive")
 
     case_result = await session.execute(
         select(RecoveryCase)
@@ -432,15 +453,15 @@ async def plan_and_persist_recovery_case(
             f"Payment attempt {recovery_case.payment_attempt_id} does not exist",
         )
 
-    incident_severity = await _load_active_incident_severity(
+    incident_context = await _load_active_incident_context(
         session,
-        source_incident_id=recovery_case.source_incident_id,
+        recovery_case=recovery_case,
     )
 
     context = _build_planning_context(
         recovery_case,
         payment_attempt,
-        incident_severity=incident_severity,
+        incident_severity=(incident_context.severity if incident_context is not None else None),
         available_channels=available_channels,
         alternate_payment_methods=alternate_payment_methods,
         planned_at=planned_at,
@@ -487,9 +508,19 @@ async def plan_and_persist_recovery_case(
         ).value,
         model_name=planner_result.model_name,
         prompt_version=plan.planner_version,
-        input_snapshot=_input_snapshot(
-            context,
-        ),
+        input_snapshot={
+            **_input_snapshot(context),
+            "active_incident": (
+                {
+                    "incident_id": str(incident_context.incident_id),
+                    "scope": incident_context.scope,
+                    "dimension_value": incident_context.dimension_value,
+                    "severity": incident_context.severity.value,
+                }
+                if incident_context is not None
+                else None
+            ),
+        },
         evidence=_planning_evidence(
             context,
             plan,
@@ -511,8 +542,6 @@ async def plan_and_persist_recovery_case(
     await session.flush()
 
     actions: list[RecoveryAction] = []
-    action_audit_data: list[dict[str, object]] = []
-
     for sequence_number, proposal in enumerate(
         plan.proposals,
         start=1,
@@ -563,18 +592,31 @@ async def plan_and_persist_recovery_case(
             action,
         )
 
-        action_audit_data.append(
-            {
-                "action_id": action.id,
-                "sequence_number": sequence_number,
-                "action_type": action.action_type,
-                "status": action.status,
-                "policy_outcome": (action.policy_outcome),
-                "policy_guardrails": (action.policy_guardrails),
-            },
-        )
-
     await session.flush()
+
+    approval_requirements = {
+        action.id: requirement
+        for action in actions
+        if (
+            requirement := build_recovery_approval_requirement(
+                action,
+                threshold_minor=approval_threshold_minor,
+                recovery_attempt_count=recovery_case.recovery_attempt_count,
+                active_incident_severity=(
+                    incident_context.severity if incident_context is not None else None
+                ),
+                ai_confidence=(
+                    planner_result.analysis.confidence
+                    if planner_result.analysis is not None
+                    else None
+                ),
+            )
+        )
+        is not None
+    }
+    approval_actions = tuple(action for action in actions if action.id in approval_requirements)
+    for action in approval_actions:
+        action.status = RecoveryActionStatus.APPROVAL_REQUIRED.value
 
     _apply_case_projection(
         recovery_case,
@@ -605,11 +647,43 @@ async def plan_and_persist_recovery_case(
                 "output_token_count": (planner_result.output_token_count),
                 "plan_decision": plan.decision,
                 "reasoning_summary": (plan.reasoning_summary),
-                "actions": action_audit_data,
+                "bounded_ai_analysis": (
+                    {
+                        "root_cause_category": planner_result.analysis.root_cause_category,
+                        "confidence": planner_result.analysis.confidence,
+                        "evidence_references": list(planner_result.analysis.evidence_references),
+                    }
+                    if planner_result.analysis is not None
+                    else None
+                ),
+                "actions": [
+                    {
+                        "action_id": action.id,
+                        "sequence_number": action.sequence_number,
+                        "action_type": action.action_type,
+                        "status": action.status,
+                        "policy_outcome": action.policy_outcome,
+                        "policy_guardrails": action.policy_guardrails,
+                    }
+                    for action in actions
+                ],
             },
             occurred_at=planned_at,
         ),
     )
+
+    approvals: list[RecoveryApproval] = []
+    for action in approval_actions:
+        approvals.append(
+            await create_recovery_approval_request(
+                session,
+                recovery_case=recovery_case,
+                action=action,
+                requirement=approval_requirements[action.id],
+                requested_at=planned_at,
+                approval_window=approval_window,
+            ),
+        )
 
     return PersistedRecoveryPlan(
         plan=plan,
@@ -617,5 +691,6 @@ async def plan_and_persist_recovery_case(
         actions=tuple(
             actions,
         ),
+        approvals=tuple(approvals),
         audit_event=audit_event,
     )

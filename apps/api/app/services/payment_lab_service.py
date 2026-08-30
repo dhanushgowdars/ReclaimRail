@@ -37,6 +37,7 @@ class PaymentLabRunCreationResult:
     amount_minor: int
     currency: str
     payment_method: str
+    test_email_contact_consent: bool
     provider_order_id: str
     checkout_expires_at: datetime
     created: bool
@@ -82,12 +83,14 @@ def _matches_existing_request(
     amount_minor: int,
     currency: str,
     payment_method: str,
+    test_email_contact_consent: bool,
 ) -> bool:
     return (
         run.mode == mode.value
         and run.amount_minor == amount_minor
         and run.currency == currency
         and run.payment_method == payment_method
+        and run.test_email_contact_consent == test_email_contact_consent
     )
 
 
@@ -107,6 +110,7 @@ def _result_from_ready_run(
         amount_minor=run.amount_minor,
         currency=run.currency,
         payment_method=run.payment_method,
+        test_email_contact_consent=run.test_email_contact_consent,
         provider_order_id=run.provider_order_id,
         checkout_expires_at=run.checkout_expires_at,
         created=created,
@@ -184,6 +188,7 @@ async def create_payment_lab_run(
     amount_minor: int,
     currency: str,
     payment_method: str,
+    test_email_contact_consent: bool = False,
     reference_time: datetime,
     minimum_amount_minor: int,
     maximum_amount_minor: int,
@@ -221,6 +226,7 @@ async def create_payment_lab_run(
             amount_minor=amount_minor,
             currency=normalized_currency,
             payment_method=normalized_method,
+            test_email_contact_consent=test_email_contact_consent,
         ):
             raise PaymentLabRunConflictError(
                 "Client request ID was already used with different inputs",
@@ -254,6 +260,7 @@ async def create_payment_lab_run(
         amount_minor=amount_minor,
         currency=normalized_currency,
         payment_method=normalized_method,
+        test_email_contact_consent=test_email_contact_consent,
         receipt=receipt,
         checkout_expires_at=checkout_expires_at,
         created_at=reference_time,

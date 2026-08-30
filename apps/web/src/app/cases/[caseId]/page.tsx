@@ -1,3 +1,4 @@
+import { ArrowLeft, ArrowUpRight, FileCheck2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
 import { RecoveryNavigation } from "@/components/recovery-navigation";
@@ -5,28 +6,9 @@ import {
   type RecoveryCaseDetail,
   loadRecoveryCaseDetail,
 } from "@/lib/recovery-api";
+import { formatMoney, formatTimestamp, titleCase } from "@/lib/presentation";
 
 export const dynamic = "force-dynamic";
-
-function formatMoney(amountMinor: number, currency: string): string {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(amountMinor / 100);
-}
-
-function formatTimestamp(timestamp: string | null): string {
-  if (timestamp === null) return "Not available";
-  return new Intl.DateTimeFormat("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(timestamp));
-}
-
-function titleCase(value: string): string {
-  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
 
 function shortValue(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`;
@@ -90,7 +72,7 @@ function ProviderActions({ detail }: { detail: RecoveryCaseDetail }) {
   return <DetailCard eyebrow="Provider execution" title="Bounded Razorpay actions">
     <div className="action-list">{detail.actions.length === 0 ? <p>No recovery actions were persisted.</p> : detail.actions.map((action) => <article className="provider-action" key={action.recovery_action_id}>
       <div className="provider-action__heading"><div><strong>{action.sequence_number}. {titleCase(action.action_type)}</strong><span>{action.execution_attempt_count} execution attempt{action.execution_attempt_count === 1 ? "" : "s"}</span></div><Badge value={action.status} /></div>
-      <dl><div><dt>Provider reference</dt><dd className="mono-value">{action.provider_action_id ?? "Not created"}</dd></div><div><dt>Provider status</dt><dd>{action.provider_action_status === null ? "Not available" : titleCase(action.provider_action_status)}</dd></div><div><dt>Expires</dt><dd>{action.provider_action_expires_at === null ? "Provider managed" : formatTimestamp(action.provider_action_expires_at)}</dd></div><div><dt>Recovery link</dt><dd>{action.provider_action_url === null ? "Not created" : <a className="provider-action__link" href={action.provider_action_url} target="_blank" rel="noreferrer noopener">Open Razorpay link</a>}</dd></div></dl>
+      <dl><div><dt>Provider reference</dt><dd className="mono-value">{action.provider_action_id ?? "Not created"}</dd></div><div><dt>Provider status</dt><dd>{action.provider_action_status === null ? "Not available" : titleCase(action.provider_action_status)}</dd></div><div><dt>Expires</dt><dd>{action.provider_action_expires_at === null ? "Provider managed" : formatTimestamp(action.provider_action_expires_at)}</dd></div><div><dt>Recovery link</dt><dd>{action.provider_action_url === null ? "Not created" : <a className="provider-action__link" href={action.provider_action_url} target="_blank" rel="noreferrer noopener">Open Razorpay link <ArrowUpRight size={16} /></a>}</dd></div></dl>
     </article>)}</div>
   </DetailCard>;
 }
@@ -108,7 +90,7 @@ function OutcomeProof({ detail }: { detail: RecoveryCaseDetail }) {
 }
 
 function AuditTimeline({ detail }: { detail: RecoveryCaseDetail }) {
-  return <section className="audit-timeline"><div className="audit-timeline__heading"><div><p className="kicker">Tamper-evident audit chain</p><h2>Decision and outcome evidence</h2></div><Badge value={detail.audit_chain.valid ? "succeeded" : "failed"} /></div>
+  return <section className="audit-timeline"><div className="audit-timeline__heading"><div className="audit-timeline__title"><span><ShieldCheck size={22} /></span><div><p className="kicker">Tamper-evident audit chain</p><h2>Decision and outcome evidence</h2></div></div><Badge value={detail.audit_chain.valid ? "succeeded" : "failed"} /></div>
     <p className="audit-timeline__intro">{detail.audit_chain.valid ? `${detail.audit_chain.checked_event_count} linked events verified with ${detail.audit_chain.events[0]?.hash_algorithm ?? "the configured"} hash chain.` : detail.audit_chain.reason}</p>
     <ol>{detail.audit_chain.events.map((event) => <li key={event.sequence_number}><span className="timeline-marker" /><div className="timeline-event"><div><strong>{titleCase(event.event_type)}</strong><span>{titleCase(event.actor_type)} · {formatTimestamp(event.occurred_at)}</span></div><code>{shortValue(event.event_hash)}</code></div></li>)}</ol>
   </section>;
@@ -116,9 +98,10 @@ function AuditTimeline({ detail }: { detail: RecoveryCaseDetail }) {
 
 function CaseDetail({ detail }: { detail: RecoveryCaseDetail }) {
   return <div className="app-shell"><RecoveryNavigation active="case" /><main className="workspace case-workspace">
-    <header className="case-header"><div><Link className="back-link" href="/">← Command center</Link><p className="kicker">Recovery case</p><h1>CASE-{shortValue(detail.recovery_case.recovery_case_id)}</h1><p>Opened {formatTimestamp(detail.recovery_case.opened_at)} · {formatMoney(detail.recovery_case.amount_minor, detail.recovery_case.currency)}</p></div><div className="case-header__status"><Badge value={detail.recovery_case.status} /><span>{detail.recovery_case.active_payment_link_id === null ? "No active payment link" : `Link ${shortValue(detail.recovery_case.active_payment_link_id)}`}</span></div></header>
+    <header className="case-header"><div><Link className="back-link" href="/"><ArrowLeft size={16} /> Command center</Link><p className="kicker">Recovery case evidence</p><h1>CASE-{shortValue(detail.recovery_case.recovery_case_id)}</h1><p>Opened {formatTimestamp(detail.recovery_case.opened_at)} IST</p></div><div className="case-header__hero"><span>Amount under control</span><strong>{formatMoney(detail.recovery_case.amount_minor, detail.recovery_case.currency)}</strong><div><Badge value={detail.recovery_case.status} /><span>{detail.recovery_case.active_payment_link_id === null ? "No active payment link" : `Link ${shortValue(detail.recovery_case.active_payment_link_id)}`}</span></div></div></header>
     <section className="case-summary"><div><span>Payment lifecycle</span><strong>{titleCase(detail.payment_lifecycle.current_state)}</strong></div><div><span>Recovery attempts</span><strong>{detail.recovery_case.recovery_attempt_count}</strong></div><div><span>Actions planned</span><strong>{detail.actions.length}</strong></div><div><span>Audit events</span><strong>{detail.audit_chain.total_event_count}</strong></div></section>
-    <section className="case-grid"><FailureContext detail={detail} /><DecisionTrace detail={detail} /><PolicyExecution detail={detail} /><ProviderActions detail={detail} /><OutcomeProof detail={detail} /></section>
+    <div className="case-flow-heading"><FileCheck2 size={22} /><div><p className="kicker">End-to-end decision trace</p><h2>From provider failure to measured outcome</h2></div></div>
+    <section className="case-flow"><div className="case-flow__item"><span className="case-flow__number">1</span><FailureContext detail={detail} /></div><div className="case-flow__item"><span className="case-flow__number">2</span><DecisionTrace detail={detail} /></div><div className="case-flow__item"><span className="case-flow__number">3</span><PolicyExecution detail={detail} /></div><div className="case-flow__item"><span className="case-flow__number">4</span><ProviderActions detail={detail} /></div><div className="case-flow__item"><span className="case-flow__number">5</span><OutcomeProof detail={detail} /></div></section>
     <AuditTimeline detail={detail} />
   </main></div>;
 }

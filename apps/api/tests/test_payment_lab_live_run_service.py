@@ -68,6 +68,7 @@ def build_case(*, status: str = "ready") -> MagicMock:
     recovery_case = MagicMock(spec=RecoveryCase)
     recovery_case.id = CASE_ID
     recovery_case.status = status
+    recovery_case.opened_at = NOW + timedelta(seconds=5, milliseconds=200)
     return recovery_case
 
 
@@ -97,11 +98,14 @@ def build_action() -> MagicMock:
     action.policy_outcome = "allow"
     action.policy_guardrails = []
     action.policy_explanation = "All deterministic checks passed"
+    action.policy_evaluated_at = NOW + timedelta(seconds=7, milliseconds=200)
     action.provider_action_id = "plink_live_status"
     action.provider_action_status = "created"
     action.provider_action_url = "https://rzp.io/i/live-status"
     action.provider_action_expires_at = NOW + timedelta(hours=24)
+    action.started_at = NOW + timedelta(seconds=7, milliseconds=500)
     action.completed_at = NOW + timedelta(seconds=8)
+    action.created_at = NOW + timedelta(seconds=7)
     return action
 
 
@@ -153,6 +157,18 @@ async def test_checkout_run_waits_for_signed_failure() -> None:
         PaymentLabLiveStepStatus.ACTIVE,
         PaymentLabLiveStepStatus.PENDING,
         PaymentLabLiveStepStatus.PENDING,
+        PaymentLabLiveStepStatus.PENDING,
+        PaymentLabLiveStepStatus.PENDING,
+        PaymentLabLiveStepStatus.PENDING,
+    ]
+    assert [step.key for step in result.steps] == [
+        "payment_attempt",
+        "verified_failure",
+        "recovery_case",
+        "agent_recommendation",
+        "policy_decision",
+        "provider_action",
+        "measured_outcome",
     ]
     session.execute.assert_not_awaited()
 
@@ -233,7 +249,7 @@ async def test_policy_escalation_is_a_terminal_safe_disposition() -> None:
     assert result.agent is not None
     assert result.agent.recovery_case_status == "escalated"
     assert result.actions[0].policy_outcome == "escalate"
-    assert result.steps[-1].label == "Safe disposition"
+    assert result.steps[-2].label == "Safe disposition"
     assert result.steps[-1].status is PaymentLabLiveStepStatus.COMPLETED
     assert result.steps[-1].detail == ("Policy required human review; no financial action executed")
 

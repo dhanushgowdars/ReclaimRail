@@ -72,11 +72,18 @@ export async function GET(request: Request): Promise<Response> {
     return access.response;
   }
 
-  const paymentLabRunId = new URL(request.url).searchParams
-    .get("payment_lab_run_id")
-    ?.trim();
+  const searchParams = new URL(request.url).searchParams;
+  const verifiedReplay = searchParams.get("verified_replay");
+  const paymentLabRunId = searchParams.get("payment_lab_run_id")?.trim();
 
-  if (!paymentLabRunId || !PAYMENT_LAB_RUN_ID_PATTERN.test(paymentLabRunId)) {
+  if (verifiedReplay && verifiedReplay !== "latest") {
+    return Response.json(
+      { detail: "Unknown Payment Lab replay request" },
+      { status: 400 },
+    );
+  }
+
+  if (!verifiedReplay && (!paymentLabRunId || !PAYMENT_LAB_RUN_ID_PATTERN.test(paymentLabRunId))) {
     return Response.json(
       { detail: "A valid Payment Lab run ID is required" },
       { status: 400 },
@@ -84,8 +91,11 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   try {
+    const upstreamPath = verifiedReplay
+      ? "/payment-lab/replays/latest"
+      : `/payment-lab/runs/${encodeURIComponent(paymentLabRunId ?? "")}`;
     const upstream = await fetch(
-      `${apiBaseUrl()}/payment-lab/runs/${encodeURIComponent(paymentLabRunId)}`,
+      `${apiBaseUrl()}${upstreamPath}`,
       {
         cache: "no-store",
         signal: AbortSignal.timeout(10_000),

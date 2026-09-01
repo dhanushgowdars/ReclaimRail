@@ -294,6 +294,7 @@ async def test_uses_direct_email_only_for_consent_recorded_demo_run(
         payment_link_url="https://rzp.io/i/test",
         amount_minor=349_900,
         currency="INR",
+        idempotency_key=f"recovery-message/{ACTION_ID}",
     )
     customer_provider.fetch_payment_customer.assert_not_awaited()
     notification_provider.send_notification.assert_not_awaited()

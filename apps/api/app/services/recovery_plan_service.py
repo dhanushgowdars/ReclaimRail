@@ -407,10 +407,22 @@ async def plan_and_persist_recovery_case(
     alternate_payment_methods: Sequence[str],
     planned_at: datetime,
     planner_result: BoundedRecoveryPlannerResult | None = None,
+    agent_started_at: datetime | None = None,
+    agent_completed_at: datetime | None = None,
     approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
     approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
 ) -> PersistedRecoveryPlan:
     _require_timezone_aware(planned_at)
+    if agent_started_at is not None:
+        _require_timezone_aware(agent_started_at)
+    if agent_completed_at is not None:
+        _require_timezone_aware(agent_completed_at)
+    if (
+        agent_started_at is not None
+        and agent_completed_at is not None
+        and agent_completed_at < agent_started_at
+    ):
+        raise ValueError("Recovery agent completion cannot precede its start")
     if approval_threshold_minor < 1:
         raise ValueError("Approval threshold must be positive")
     if approval_window <= timedelta(0):
@@ -532,8 +544,11 @@ async def plan_and_persist_recovery_case(
         ),
         input_token_count=(planner_result.input_token_count),
         output_token_count=(planner_result.output_token_count),
-        started_at=planned_at,
-        completed_at=planned_at,
+        # Direct deterministic callers may not have an externally measured
+        # execution window yet. Preserve their existing planned timestamp while
+        # normal agent execution supplies actual provider-call bounds.
+        started_at=agent_started_at or planned_at,
+        completed_at=agent_completed_at or planned_at,
     )
 
     session.add(

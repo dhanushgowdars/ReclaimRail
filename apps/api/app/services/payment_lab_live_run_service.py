@@ -16,7 +16,7 @@ from app.db.models.recovery import (
 )
 from app.db.models.recovery_outcome import RecoveryOutcome
 from app.domain.payments import STOP_RECOVERY_STATES, PaymentState
-from app.domain.recovery import RecoveryCaseStatus
+from app.domain.recovery import RecoveryActionType, RecoveryCaseStatus
 from app.services.recovery_ai_trace import RecoveryAiTrace, build_recovery_ai_trace
 
 
@@ -82,6 +82,7 @@ class PaymentLabLiveStep:
     status: PaymentLabLiveStepStatus
     occurred_at: datetime | None
     detail: str
+    duration_milliseconds: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +107,7 @@ class PaymentLabAgentEvidence:
     fallback_reason: str | None
     reasoning_summary: str | None
     proposed_action_count: int
+    started_at: datetime | None
     completed_at: datetime | None
     ai_trace: RecoveryAiTrace | None
 
@@ -115,6 +117,7 @@ class PaymentLabActionEvidence:
     recovery_action_id: UUID
     sequence_number: int
     action_type: str
+    channel: str | None
     status: str
     policy_outcome: str
     policy_guardrails: tuple[str, ...]
@@ -245,6 +248,7 @@ def _build_agent_evidence(
         fallback_reason=fallback_reason,
         reasoning_summary=(agent_run.reasoning_summary if agent_run is not None else None),
         proposed_action_count=(agent_run.proposed_action_count if agent_run is not None else 0),
+        started_at=agent_run.started_at if agent_run is not None else None,
         completed_at=agent_run.completed_at if agent_run is not None else None,
         ai_trace=(build_recovery_ai_trace(agent_run.evidence) if agent_run is not None else None),
     )
@@ -258,6 +262,7 @@ def _build_action_evidence(
             recovery_action_id=action.id,
             sequence_number=action.sequence_number,
             action_type=action.action_type,
+            channel=action.channel,
             status=action.status,
             policy_outcome=action.policy_outcome,
             policy_guardrails=tuple(action.policy_guardrails),
@@ -523,6 +528,17 @@ def _derive_live_state(
     )
 
 
+def _recorded_duration_milliseconds(
+    started_at: datetime | None,
+    completed_at: datetime | None,
+) -> int | None:
+    """Return a persisted execution duration without inferring missing timing."""
+    if started_at is None or completed_at is None:
+        return None
+    duration = int((completed_at - started_at).total_seconds() * 1000)
+    return max(duration, 0)
+
+
 def _build_steps(
     run: PaymentLabRun,
     *,
@@ -585,6 +601,10 @@ def _build_steps(
         agent_status = PaymentLabLiveStepStatus.ACTIVE
 
     latest_action = actions[-1] if actions else None
+    latest_action_is_message = (
+        latest_action is not None
+        and latest_action.action_type == RecoveryActionType.SEND_RECOVERY_MESSAGE.value
+    )
     policy_status = PaymentLabLiveStepStatus.PENDING
     if latest_action is not None:
         policy_status = PaymentLabLiveStepStatus.COMPLETED
@@ -695,6 +715,14 @@ def _build_steps(
                 if agent_status is PaymentLabLiveStepStatus.COMPLETED
                 else "Gemini is preparing a bounded proposal"
             ),
+            duration_milliseconds=(
+                _recorded_duration_milliseconds(
+                    agent_run.started_at,
+                    agent_run.completed_at,
+                )
+                if agent_run is not None
+                else None
+            ),
         ),
         PaymentLabLiveStep(
             key="policy_decision",
@@ -717,7 +745,9 @@ def _build_steps(
         PaymentLabLiveStep(
             key="provider_action",
             label=(
-                "Safe disposition"
+                "Customer message"
+                if latest_action_is_message
+                else "Safe disposition"
                 if approval_stopped_execution
                 or (
                     latest_action is not None
@@ -732,7 +762,25 @@ def _build_steps(
                 else None
             ),
             detail=(
-                "Stopping active recovery after original-payment completion"
+                "Resend accepted the controlled recovery email request"
+                if latest_action_is_message
+                and latest_action is not None
+                and latest_action.provider_action_status == "direct_email_accepted"
+                else "Razorpay accepted the recovery SMS request"
+                if latest_action_is_message
+                and latest_action is not None
+                and latest_action.provider_action_status == "notified_sms"
+                else "Razorpay accepted the recovery email request"
+                if latest_action_is_message
+                and latest_action is not None
+                and latest_action.provider_action_status == "notified_email"
+                else "Customer message failed without a delivery claim"
+                if latest_action_is_message
+                and latest_action is not None
+                and latest_action.status == "failed"
+                else "Waiting for the approved customer message provider"
+                if latest_action_is_message
+                else "Stopping active recovery after original-payment completion"
                 if derived_state.business_state is PaymentLabLiveBusinessState.STOPPING_RECOVERY
                 else "Approval closed without provider execution"
                 if approval_stopped_execution
@@ -742,6 +790,14 @@ def _build_steps(
                 if latest_action is not None
                 and latest_action.policy_outcome in {"block", "escalate", "stop"}
                 else "Waiting for idempotent provider execution"
+            ),
+            duration_milliseconds=(
+                _recorded_duration_milliseconds(
+                    latest_action.started_at,
+                    latest_action.completed_at,
+                )
+                if latest_action is not None
+                else None
             ),
         ),
         PaymentLabLiveStep(

@@ -14,6 +14,15 @@ export type PaymentLabLiveRun = {
   mode: string;
   provenance: string;
   persisted_status: string;
+  business_state: string;
+  state_label: string;
+  active_step_key: string | null;
+  waiting_reason: string | null;
+  automation_complete: boolean;
+  financial_outcome_terminal: boolean;
+  responsible_worker: string | null;
+  responsible_worker_status: string | null;
+  stalled_reason: string | null;
   current_stage:
     | "checkout"
     | "failure"
@@ -37,6 +46,7 @@ export type PaymentLabLiveRun = {
     label: string;
     status: PaymentLabLiveStepStatus;
     occurred_at: string | null;
+    duration_milliseconds: number | null;
     detail: string;
   }>;
   payment: {
@@ -58,12 +68,27 @@ export type PaymentLabLiveRun = {
     fallback_reason: string | null;
     reasoning_summary: string | null;
     proposed_action_count: number;
+    started_at: string | null;
     completed_at: string | null;
+    ai_trace: {
+      root_cause_category: string | null;
+      recoverability_assessment: string | null;
+      confidence: number | null;
+      recommended_action: string | null;
+      evidence_references: string[];
+      evidence_codes: string[];
+      evidence_tool_names: string[];
+      input_token_count: number | null;
+      output_token_count: number | null;
+      fallback_used: boolean | null;
+      fallback_reason: string | null;
+    } | null;
   } | null;
   actions: Array<{
     recovery_action_id: string;
     sequence_number: number;
     action_type: string;
+    channel: string | null;
     status: string;
     policy_outcome: string;
     policy_guardrails: string[];
@@ -74,6 +99,21 @@ export type PaymentLabLiveRun = {
     provider_action_expires_at: string | null;
     completed_at: string | null;
   }>;
+  approval: {
+    approval_id: string;
+    recovery_action_id: string;
+    status: string;
+    request_reason: string;
+    amount_minor: number;
+    currency: string;
+    threshold_minor: number | null;
+    requested_at: string;
+    expires_at: string;
+    decided_at: string | null;
+    decided_by: string | null;
+    decision_reason: string | null;
+    version: number;
+  } | null;
   outcome: {
     recovery_outcome_id: string;
     status: string;

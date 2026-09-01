@@ -68,6 +68,7 @@ def build_payment(*, state: str = "failed") -> MagicMock:
     payment.current_state = state
     payment.error_code = "BAD_REQUEST_ERROR" if state == "failed" else None
     payment.error_reason = "payment_failed" if state == "failed" else None
+    payment.error_description = "Bank declined payment" if state == "failed" else None
     payment.state_event_created_at = NOW + timedelta(seconds=5)
     return payment
 
@@ -201,23 +202,13 @@ async def test_checkout_run_waits_for_signed_failure() -> None:
     assert [step.status for step in result.steps] == [
         PaymentLabLiveStepStatus.COMPLETED,
         PaymentLabLiveStepStatus.ACTIVE,
-        PaymentLabLiveStepStatus.PENDING,
-        PaymentLabLiveStepStatus.PENDING,
-        PaymentLabLiveStepStatus.PENDING,
-        PaymentLabLiveStepStatus.PENDING,
-        PaymentLabLiveStepStatus.PENDING,
-        PaymentLabLiveStepStatus.PENDING,
     ]
     assert [step.key for step in result.steps] == [
         "payment_attempt",
         "verified_failure",
-        "recovery_case",
-        "agent_recommendation",
-        "policy_decision",
-        "human_approval",
-        "provider_action",
-        "measured_outcome",
     ]
+    assert "No recovery has started" in result.steps[0].detail
+    assert "Closing Checkout alone" in result.steps[1].detail
     session.execute.assert_not_awaited()
 
 
@@ -237,6 +228,7 @@ async def test_verified_failure_exposes_real_stabilization_state() -> None:
     assert result.active_step_key == "recovery_case"
     assert result.waiting_reason == "Five-second late-authorization safety window"
     assert result.steps[1].status is PaymentLabLiveStepStatus.COMPLETED
+    assert result.steps[1].detail == "Razorpay reported: Bank declined payment"
     assert result.steps[2].status is PaymentLabLiveStepStatus.ACTIVE
     assert result.steps[2].detail == (
         "Five-second signed-evidence stabilization window before recovery begins"

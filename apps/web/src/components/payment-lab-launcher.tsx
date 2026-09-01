@@ -72,7 +72,7 @@ declare global {
 }
 
 const AUTO_AMOUNT_MINOR = 349_900;
-const REVIEW_AMOUNT_MINOR = 2_500_000;
+const DEFAULT_HIGH_VALUE_RUPEES = "10001";
 
 function stateCopy(state: RunState): { title: string; detail: string } {
   const copy: Record<RunState, { title: string; detail: string }> = {
@@ -102,11 +102,13 @@ export function PaymentLabLauncher() {
   const [safeError, setSafeError] = useState<string | null>(null);
   const [webhookDelayWarning, setWebhookDelayWarning] = useState<string | null>(null);
   const [copiedActionId, setCopiedActionId] = useState<string | null>(null);
+  const [approvingApprovalId, setApprovingApprovalId] = useState<string | null>(null);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const { liveRun, polling, pollError } = usePaymentLabLiveRun({
     paymentLabRunId: run?.payment_lab_run_id ?? null,
     reviewerCode: pollReviewerCode,
   });
-  const selectedAmountMinor = demoTrack === "auto" ? AUTO_AMOUNT_MINOR : demoTrack === "review" ? REVIEW_AMOUNT_MINOR : Math.round(Number(amountRupees) * 100);
+  const selectedAmountMinor = demoTrack === "auto" ? AUTO_AMOUNT_MINOR : Math.round(Number(amountRupees) * 100);
   const busy = runState === "creating_order" || runState === "opening_checkout";
   const copy = stateCopy(runState);
 
@@ -127,6 +129,8 @@ export function PaymentLabLauncher() {
     setSafeError(null);
     setWebhookDelayWarning(null);
     setCopiedActionId(null);
+    setApprovingApprovalId(null);
+    setApprovalError(null);
   }
 
   async function copyRecoveryLink(): Promise<void> {
@@ -140,11 +144,60 @@ export function PaymentLabLauncher() {
     }
   }
 
+  async function decideApproval(
+    decision: "approve" | "reject",
+    optionalReason: string,
+  ): Promise<void> {
+    const approval = liveRun?.approval;
+    if (!approval || approval.status !== "pending" || !pollReviewerCode) return;
+
+    setApprovingApprovalId(approval.approval_id);
+    setApprovalError(null);
+    const reason = optionalReason.trim() || (
+      decision === "approve"
+        ? "Approved during protected demo review"
+        : "Declined during protected demo review"
+    );
+
+    try {
+      const response = await fetch(
+        `/api/recovery/approvals/${encodeURIComponent(approval.approval_id)}/decision`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-ReclaimRail-Reviewer-Code": pollReviewerCode,
+          },
+          body: JSON.stringify({
+            decision,
+            reviewer_id: "payment-lab-demo-operator",
+            reason,
+            expected_version: approval.version,
+          }),
+        },
+      );
+      const responseBody = (await response.json()) as { detail?: string };
+      if (!response.ok) {
+        throw new Error(responseBody.detail ?? "The protected review decision was not recorded");
+      }
+    } catch (error) {
+      setApprovalError(
+        error instanceof Error
+          ? error.message
+          : "The protected review decision was not recorded",
+      );
+    } finally {
+      setApprovingApprovalId(null);
+    }
+  }
+
   async function startRun(): Promise<void> {
     failureObservedRef.current = false;
     setSafeError(null);
     setWebhookDelayWarning(null);
     setCopiedActionId(null);
+    setApprovalError(null);
+    setApprovingApprovalId(null);
     setRun(null);
     setPollReviewerCode("");
     setIsVerifiedReplay(false);
@@ -231,15 +284,15 @@ export function PaymentLabLauncher() {
         <div className="lab-start-cue lab-start-cue--hero"><span><Play size={20} fill="currentColor" /></span><div><p>Provider-backed live demo</p><strong>Choose the recovery story you want to prove.</strong><p>ReclaimRail advances only when signed provider evidence is stored by the server.</p></div></div>
         <div className="lab-mode-switch lab-mode-switch--three" aria-label="Choose a demo path">
           <button className={demoTrack === "auto" ? "is-active" : ""} type="button" onClick={() => setDemoTrack("auto")}>Auto-recovery · ₹3,499<span>Netbanking · policy can execute</span></button>
-          <button className={demoTrack === "review" ? "is-active" : ""} type="button" onClick={() => setDemoTrack("review")}>Approval required · ₹25,000<span>High value · protected merchant gate</span></button>
+          <button className={demoTrack === "review" ? "is-active" : ""} type="button" onClick={() => { setDemoTrack("review"); setAmountRupees((value) => Number(value) > 10_000 ? value : DEFAULT_HIGH_VALUE_RUPEES); }}>High-value review<span>Choose any amount above the review threshold</span></button>
           <button className={demoTrack === "custom" ? "is-active" : ""} type="button" onClick={() => setDemoTrack("custom")}>Custom amount<span>Choose amount and payment rail</span></button>
         </div>
-        <div className="lab-selection"><div><span className="lab-field-label">Recovery amount</span>{demoTrack === "custom" ? <label className="lab-input lab-input--amount"><span>₹</span><input inputMode="decimal" min="1" type="number" value={amountRupees} onChange={(event) => setAmountRupees(event.target.value)} /></label> : <strong>{formatMoney(selectedAmountMinor)}</strong>}</div><div><label className="lab-field-label" htmlFor="payment-method">Payment rail</label>{demoTrack === "auto" ? <strong>Choose in Razorpay Checkout</strong> : <select id="payment-method" className="lab-input" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}><option value="netbanking">Netbanking</option><option value="upi">UPI</option><option value="card">Card</option><option value="wallet">Wallet</option></select>}</div></div>
+        <div className="lab-selection"><div><span className="lab-field-label">Recovery amount</span>{demoTrack === "auto" ? <strong>{formatMoney(selectedAmountMinor)}</strong> : <label className="lab-input lab-input--amount"><span>₹</span><input inputMode="decimal" min="1" type="number" value={amountRupees} onChange={(event) => setAmountRupees(event.target.value)} /></label>}{demoTrack === "review" ? <small>Any amount above the configured threshold will enter protected review.</small> : null}</div><div><label className="lab-field-label" htmlFor="payment-method">Payment rail</label>{demoTrack === "auto" ? <strong>Choose in Razorpay Checkout</strong> : <select id="payment-method" className="lab-input" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}><option value="netbanking">Netbanking</option><option value="upi">UPI</option><option value="card">Card</option><option value="wallet">Wallet</option></select>}</div></div>
         <label className="lab-notification-consent"><input checked={enableTestEmailNotification} type="checkbox" onChange={(event) => setEnableTestEmailNotification(event.target.checked)} /><span><strong>Send one controlled test-email notification if policy allows</strong><small>Uses only the configured consented, allowlisted demo inbox.</small></span></label>
         <div className="lab-access"><label htmlFor="reviewer-code">Reviewer access code</label><input id="reviewer-code" autoComplete="off" placeholder="Provided with the demo" type="password" value={reviewerCode} onChange={(event) => setReviewerCode(event.target.value)} /><span>The code is sent only to ReclaimRail&apos;s server proxy.</span></div>
         <button className="lab-primary-action" disabled={busy} type="button" onClick={() => void startRun()}>{busy ? <><LoaderCircle className="spin" size={18} /> Preparing secure checkout…</> : <><Play size={18} fill="currentColor" /> Start this provider-live demo <ArrowRight size={18} /></>}</button>
         <p className="lab-action-note">Razorpay Test Mode · no real money moves · no payment credentials are stored by ReclaimRail</p>
-      </div> : <LiveRecoveryCommand run={run} liveRun={liveRun} polling={polling} title={copy.title} detail={copy.detail} safeError={safeError} pollError={pollError} webhookDelayWarning={webhookDelayWarning} isVerifiedReplay={isVerifiedReplay} copiedActionId={copiedActionId} onCopyRecoveryLink={() => void copyRecoveryLink()} onOpenVerifiedReplay={() => void openVerifiedReplay()} onStartAnotherRun={resetRun} />}
+      </div> : <LiveRecoveryCommand run={run} liveRun={liveRun} polling={polling} title={copy.title} detail={copy.detail} safeError={safeError} pollError={pollError} webhookDelayWarning={webhookDelayWarning} isVerifiedReplay={isVerifiedReplay} copiedActionId={copiedActionId} onCopyRecoveryLink={() => void copyRecoveryLink()} onOpenVerifiedReplay={() => void openVerifiedReplay()} onStartAnotherRun={resetRun} approvingApprovalId={approvingApprovalId} approvalError={approvalError} onApprovalDecision={(decision, reason) => void decideApproval(decision, reason)} />}
     </section>
   </>;
 }

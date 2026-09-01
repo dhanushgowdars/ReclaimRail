@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -66,11 +66,17 @@ async def execute_recovery_agent(
             planned_at=planned_at,
         )
 
+    # The provider call happens outside the write transaction. Capture its real
+    # wall-clock bounds so the product can distinguish model work from queue,
+    # policy, provider and customer waits. These values are evidence, not a UI
+    # animation clock.
+    planner_started_at = datetime.now(UTC)
     planner_result = await plan_with_gemini_fallback(
         context,
         provider=provider,
         policy=planner_policy,
     )
+    planner_completed_at = datetime.now(UTC)
 
     async with session_factory.begin() as write_session:
         persisted_plan = await plan_and_persist_recovery_case(
@@ -80,6 +86,8 @@ async def execute_recovery_agent(
             alternate_payment_methods=alternate_payment_methods,
             planned_at=planned_at,
             planner_result=planner_result,
+            agent_started_at=planner_started_at,
+            agent_completed_at=planner_completed_at,
             approval_threshold_minor=approval_threshold_minor,
             approval_window=approval_window,
         )

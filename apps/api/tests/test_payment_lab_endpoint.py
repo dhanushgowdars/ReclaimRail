@@ -185,6 +185,42 @@ def test_creates_custom_run_with_bounded_inputs(
     assert await_args.kwargs["payment_method"] == "upi"
 
 
+def test_creates_custom_run_with_consent_recorded_test_email(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def settings_with_demo_email() -> Settings:
+        return Settings(
+            razorpay_key_id=SecretStr("rzp_test_key"),
+            razorpay_key_secret=SecretStr("test-secret"),
+            payment_lab_access_token=SecretStr("lab-secret"),
+            payment_lab_demo_email_recipient=SecretStr("demo@example.test"),
+        )
+
+    app.dependency_overrides[get_settings] = settings_with_demo_email
+    create_run = configure_provider_and_service(
+        monkeypatch,
+        test_email_contact_consent=True,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/payment-lab/runs",
+            headers={"X-ReclaimRail-Lab-Token": "lab-secret"},
+            json={
+                "client_request_id": str(CLIENT_REQUEST_ID),
+                "mode": "custom",
+                "amount_minor": 250_000,
+                "payment_method": "upi",
+                "enable_test_email_recovery_notification": True,
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()["checkout"]["prefill_email"] == "demo@example.test"
+    assert create_run.await_args.kwargs["amount_minor"] == 250_000
+    assert create_run.await_args.kwargs["test_email_contact_consent"] is True
+
+
 def test_rejects_missing_access_token_before_provider_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

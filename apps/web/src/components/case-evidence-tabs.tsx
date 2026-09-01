@@ -4,10 +4,34 @@ import { Banknote, BrainCircuit, CreditCard, Link2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 const tabs = [
-  { id: "lifecycle", label: "Lifecycle", icon: CreditCard },
-  { id: "decision", label: "Agent & policy", icon: BrainCircuit },
-  { id: "provider", label: "Provider action", icon: Link2 },
-  { id: "outcome", label: "Outcome & audit", icon: Banknote },
+  {
+    id: "lifecycle",
+    label: "Lifecycle",
+    icon: CreditCard,
+    helper: "Verify the payment state and the signed failure evidence.",
+    next: "Review the agent recommendation once the failure is eligible.",
+  },
+  {
+    id: "decision",
+    label: "Agent & policy",
+    icon: BrainCircuit,
+    helper: "Inspect Gemini's recommendation and the deterministic safety decision.",
+    next: "Only an allowed action can move to Razorpay execution.",
+  },
+  {
+    id: "provider",
+    label: "Provider action",
+    icon: Link2,
+    helper: "See the exact bounded action recorded by Razorpay.",
+    next: "Wait for provider evidence before treating a payment as recovered.",
+  },
+  {
+    id: "outcome",
+    label: "Outcome & audit",
+    icon: Banknote,
+    helper: "Confirm the financial result and inspect the evidence chain.",
+    next: "Recovered revenue changes only after provider reconciliation.",
+  },
 ] as const;
 
 type TabId = (typeof tabs)[number]["id"];
@@ -60,6 +84,14 @@ export function CaseEvidenceTabs({
         id={`case-panel-${activeTab}`}
         role="tabpanel"
       >
+        <div className="case-tabs__guide" aria-live="polite">
+          <div>
+            <span>Current review step</span>
+            <strong>{tabs.find((tab) => tab.id === activeTab)?.label}</strong>
+          </div>
+          <p>{tabs.find((tab) => tab.id === activeTab)?.helper}</p>
+          <p><b>What happens next:</b> {tabs.find((tab) => tab.id === activeTab)?.next}</p>
+        </div>
         {content[activeTab]}
       </div>
     </section>

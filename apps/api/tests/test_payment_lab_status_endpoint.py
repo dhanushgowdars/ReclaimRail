@@ -20,6 +20,7 @@ from app.services.payment_lab_live_run_service import (
     PaymentLabLiveStage,
     PaymentLabLiveStep,
     PaymentLabLiveStepStatus,
+    PaymentLabVerifiedReplayNotFoundError,
 )
 from app.services.worker_supervision_service import (
     WorkerFleetHealth,
@@ -205,3 +206,44 @@ def test_returns_not_found_for_unknown_run(
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Payment Lab run not found"
+
+
+def test_reads_latest_completed_test_mode_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replay = replace(build_live_run(), terminal=True, persisted_status="completed")
+    load_replay = AsyncMock(return_value=replay)
+    monkeypatch.setattr(
+        payment_lab_status,
+        "load_latest_verified_payment_lab_replay",
+        load_replay,
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/payment-lab/replays/latest",
+            headers={"X-ReclaimRail-Lab-Token": "lab-secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["payment_lab_run_id"] == str(RUN_ID)
+    load_replay.assert_awaited_once()
+
+
+def test_reports_when_no_completed_replay_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        payment_lab_status,
+        "load_latest_verified_payment_lab_replay",
+        AsyncMock(side_effect=PaymentLabVerifiedReplayNotFoundError()),
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/payment-lab/replays/latest",
+            headers={"X-ReclaimRail-Lab-Token": "lab-secret"},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No completed Razorpay Test Mode replay is available yet"

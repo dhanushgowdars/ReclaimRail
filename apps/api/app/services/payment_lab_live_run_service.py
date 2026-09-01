@@ -7,7 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.payment import PaymentAttempt
-from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
+from app.db.models.payment_lab import (
+    PaymentLabRun,
+    PaymentLabRunProvenance,
+    PaymentLabRunStatus,
+)
 from app.db.models.recovery import (
     RecoveryAction,
     RecoveryAgentRun,
@@ -21,6 +25,10 @@ from app.services.recovery_ai_trace import RecoveryAiTrace, build_recovery_ai_tr
 
 
 class PaymentLabLiveRunNotFoundError(LookupError):
+    pass
+
+
+class PaymentLabVerifiedReplayNotFoundError(LookupError):
     pass
 
 
@@ -947,4 +955,29 @@ async def load_payment_lab_live_run(
         actions=_build_action_evidence(actions),
         approval=_build_approval_evidence(approval),
         outcome=_build_outcome_evidence(outcome),
+    )
+
+
+async def load_latest_verified_payment_lab_replay(
+    session: AsyncSession,
+) -> PaymentLabLiveRun:
+    """Return one real, terminal Test Mode run for an explicitly labelled replay."""
+    result = await session.execute(
+        select(PaymentLabRun.id)
+        .where(
+            PaymentLabRun.provenance == PaymentLabRunProvenance.RAZORPAY_TEST.value,
+            PaymentLabRun.status == PaymentLabRunStatus.COMPLETED.value,
+        )
+        .order_by(PaymentLabRun.updated_at.desc())
+        .limit(20),
+    )
+    for run_id in result.scalars():
+        live_run = await load_payment_lab_live_run(
+            session,
+            payment_lab_run_id=run_id,
+        )
+        if live_run.terminal:
+            return live_run
+    raise PaymentLabVerifiedReplayNotFoundError(
+        "No completed Razorpay Test Mode run is available for replay",
     )

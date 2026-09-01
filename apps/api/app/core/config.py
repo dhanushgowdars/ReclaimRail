@@ -157,7 +157,7 @@ class Settings(BaseSettings):
         le=20,
     )
     recovery_approval_threshold_minor: int = Field(
-        default=300_000,
+        default=1_000_000,
         ge=100,
         le=100_000_000,
     )

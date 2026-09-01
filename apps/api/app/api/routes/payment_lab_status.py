@@ -14,6 +14,8 @@ from app.core.config import Settings, get_settings
 from app.core.database import get_database_session
 from app.services.payment_lab_live_run_service import (
     PaymentLabLiveRunNotFoundError,
+    PaymentLabVerifiedReplayNotFoundError,
+    load_latest_verified_payment_lab_replay,
     load_payment_lab_live_run,
 )
 from app.services.worker_supervision_service import (
@@ -159,6 +161,27 @@ class PaymentLabLiveRunResponse(ResponseModel):
     actions: list[PaymentLabActionEvidenceResponse]
     approval: PaymentLabApprovalEvidenceResponse | None
     outcome: PaymentLabOutcomeEvidenceResponse | None
+
+
+@router.get(
+    "/replays/latest",
+    response_model=PaymentLabLiveRunResponse,
+    summary="Read the latest completed Razorpay Test Mode replay",
+)
+async def get_latest_verified_payment_lab_replay(
+    session: DatabaseSessionDependency,
+    settings: SettingsDependency,
+    access_token: PaymentLabTokenHeader = None,
+) -> PaymentLabLiveRunResponse:
+    require_payment_lab_access(settings, access_token)
+    try:
+        live_run = await load_latest_verified_payment_lab_replay(session)
+    except PaymentLabVerifiedReplayNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No completed Razorpay Test Mode replay is available yet",
+        ) from error
+    return PaymentLabLiveRunResponse.model_validate(live_run)
 
 
 @router.get(

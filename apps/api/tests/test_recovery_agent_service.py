@@ -192,10 +192,7 @@ async def test_calls_planner_only_after_read_session_closes(
     assert isinstance(agent_completed_at, datetime)
     assert agent_started_at.tzinfo is not None
     assert agent_completed_at.tzinfo is not None
-    assert (
-        agent_started_at
-        <= agent_completed_at
-    )
+    assert agent_started_at <= agent_completed_at
 
     assert events == [
         "read_enter",

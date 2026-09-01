@@ -53,6 +53,10 @@ function IncidentPanel({ incidents, currency }: { incidents: RecoveryIncident[];
     <div className="incident-item__topline"><span className={`severity severity--${incident.severity}`}>{titleCase(incident.severity)} severity</span><Badge value={incident.status} /></div>
     <h3>{titleCase(incident.dimension_value)} payment degradation</h3>
     <p>Failure rate <strong>{Math.round(incident.failure_rate * 100)}%</strong> against a {Math.round(incident.baseline_failure_rate * 100)}% baseline.</p>
+    <div className="incident-rate-meter" aria-label={`Current failure rate ${Math.round(incident.failure_rate * 100)} percent against baseline ${Math.round(incident.baseline_failure_rate * 100)} percent`}>
+      <div><span>Baseline</span><i style={{ width: `${Math.min(100, incident.baseline_failure_rate * 1000)}%` }} /></div>
+      <div><span>Current</span><i style={{ width: `${Math.min(100, incident.failure_rate * 1000)}%` }} /></div>
+    </div>
     <div className="incident-item__details"><span>{formatMoney(incident.revenue_at_risk_minor, currency)} exposed</span><span>{incident.occurrence_count} observations</span></div>
   </article>)}</div>;
 }

@@ -17,7 +17,7 @@ const navigation = [
 
 export function RecoveryNavigation({ active = "overview" }: { active?: "overview" | "case" | "lab" }) {
   return (
-    <aside className="sidebar">
+    <header className="sidebar">
       <Link className="product-lockup" href="/" aria-label="ReclaimRail overview">
         <span className="product-mark">R</span>
         <span className="product-lockup__copy">
@@ -26,14 +26,11 @@ export function RecoveryNavigation({ active = "overview" }: { active?: "overview
         </span>
       </Link>
       <nav aria-label="Command center navigation" className="navigation">
-        <span className="navigation__group">Operate</span>
         {navigation.map((item) => {
           const Icon = item.icon;
-          const isActive = active === item.id;
-          const showReviewGroup = item.id === "queue";
+          const isActive = active === item.id || (active === "case" && item.id === "queue");
           return (
             <div key={item.id}>
-              {showReviewGroup ? <span className="navigation__group">Review</span> : null}
               <Link
                 className={`navigation__item${isActive ? " navigation__item--active" : ""}`}
                 href={item.href}
@@ -47,9 +44,9 @@ export function RecoveryNavigation({ active = "overview" }: { active?: "overview
         })}
       </nav>
       <div className="sidebar__footer">
-        <span className="sidebar__footer-label">Environment</span>
         <strong><i aria-hidden="true" /> Razorpay Test Mode</strong>
+        <span>Provider evidence only</span>
       </div>
-    </aside>
+    </header>
   );
 }

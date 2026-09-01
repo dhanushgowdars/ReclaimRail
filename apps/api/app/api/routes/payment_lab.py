@@ -51,8 +51,6 @@ class CreatePaymentLabRunRequest(BaseModel):
             if self.amount_minor is not None or self.payment_method is not None:
                 raise ValueError("Guided runs use the locked amount and payment method")
         elif self.mode is PaymentLabRunMode.CUSTOM:
-            if self.enable_test_email_recovery_notification:
-                raise ValueError("Test email notification is available only for guided runs")
             if self.amount_minor is None or self.payment_method is None:
                 raise ValueError("Custom runs require amount and payment method")
         else:

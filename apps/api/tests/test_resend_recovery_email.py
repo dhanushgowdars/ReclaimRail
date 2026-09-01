@@ -18,6 +18,7 @@ async def test_sends_direct_recovery_email_with_bearer_auth() -> None:
         assert request.method == "POST"
         assert str(request.url) == "https://api.resend.test/emails"
         assert request.headers["Authorization"] == "Bearer re_test_key"
+        assert request.headers["Idempotency-Key"] == "recovery-message/test-001"
         payload = json.loads(request.content)
         assert payload["to"] == ["demo@example.com"]
         assert "https://rzp.io/i/test" in payload["text"]
@@ -34,6 +35,7 @@ async def test_sends_direct_recovery_email_with_bearer_auth() -> None:
         payment_link_url="https://rzp.io/i/test",
         amount_minor=349_900,
         currency="inr",
+        idempotency_key=" recovery-message/test-001 ",
     )
 
     assert result.id == "email_001"
@@ -56,6 +58,7 @@ async def test_classifies_resend_rate_limit_as_retryable() -> None:
             payment_link_url="https://rzp.io/i/test",
             amount_minor=349_900,
             currency="INR",
+            idempotency_key="recovery-message/test-rate-limit",
         )
 
     assert error.value.retryable is True

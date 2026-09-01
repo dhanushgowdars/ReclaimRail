@@ -627,6 +627,9 @@ async def execute_recovery_message_action(
                 payment_link_url=prepared.payment_link_url,
                 amount_minor=prepared.amount_minor,
                 currency=prepared.currency,
+                # Keep retries for one action tied to the same provider request.
+                # This is deliberately independent of recipient/contact data.
+                idempotency_key=f"recovery-message/{prepared.action_id}",
             )
             async with session_factory.begin() as completion_session:
                 return await complete_recovery_message_action(

@@ -117,6 +117,7 @@ def build_action() -> MagicMock:
     action.id = ACTION_ID
     action.sequence_number = 1
     action.action_type = "create_payment_link"
+    action.channel = None
     action.status = "succeeded"
     action.policy_outcome = "allow"
     action.policy_guardrails = []
@@ -290,6 +291,10 @@ async def test_completed_run_exposes_provider_agent_policy_and_outcome_evidence(
     assert result.outcome is not None
     assert result.outcome.gross_recovered_minor == 349_900
     assert result.outcome.evidence_event_count == 2
+    steps_by_key = {step.key: step for step in result.steps}
+    assert steps_by_key["agent_recommendation"].duration_milliseconds == 1_000
+    assert steps_by_key["provider_action"].duration_milliseconds == 500
+    assert steps_by_key["policy_decision"].duration_milliseconds is None
     assert all(step.status is PaymentLabLiveStepStatus.COMPLETED for step in result.steps)
 
 
@@ -325,6 +330,32 @@ async def test_created_payment_link_waits_for_provider_outcome() -> None:
     assert result.steps[-2].status is PaymentLabLiveStepStatus.COMPLETED
     assert result.steps[-1].status is PaymentLabLiveStepStatus.ACTIVE
     assert result.steps[-1].detail == "Waiting for provider reconciliation"
+
+
+@pytest.mark.asyncio
+async def test_recovery_message_evidence_exposes_its_consent_channel() -> None:
+    run = build_run(status=PaymentLabRunStatus.RECOVERY_RUNNING.value)
+    run.payment_attempt_id = ATTEMPT_ID
+    action = build_action()
+    action.action_type = "send_recovery_message"
+    action.channel = "email"
+
+    action_result = MagicMock()
+    action_result.scalars.return_value.all.return_value = [action]
+    session = AsyncMock(spec=AsyncSession)
+    session.get.side_effect = (run, build_payment())
+    session.execute.side_effect = (
+        scalar_result(build_case()),
+        scalar_result(build_agent()),
+        action_result,
+        scalar_result(None),
+        scalar_result(None),
+    )
+
+    result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
+
+    assert result.actions[0].action_type == "send_recovery_message"
+    assert result.actions[0].channel == "email"
 
 
 @pytest.mark.asyncio

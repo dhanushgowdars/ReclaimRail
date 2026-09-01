@@ -15,6 +15,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 
 import { LiveElapsed } from "@/components/live-time";
 import { type PaymentLabLiveRun } from "@/hooks/use-payment-lab-live-run";
@@ -118,6 +119,45 @@ export function LiveRecoveryCommand({
   const activeStep = liveRun?.steps.find(
     (step) => step.key === liveRun.active_step_key,
   );
+  const guideStages = [
+    {
+      key: "lifecycle",
+      label: "Lifecycle",
+      helper: "Verify the payment failure and the signed provider evidence.",
+      next: "Gemini can analyse the case only after the failure is verified.",
+      stepKeys: ["payment_attempt", "verified_failure", "recovery_case"],
+    },
+    {
+      key: "decision",
+      label: "Agent & policy",
+      helper: "See Gemini's recommendation and the safety rules that decide it.",
+      next: "Only an allowed or reviewer-approved action can reach Razorpay.",
+      stepKeys: ["agent_recommendation", "policy_decision"],
+    },
+    {
+      key: "provider",
+      label: "Provider action",
+      helper: "Inspect the one bounded Razorpay action and consented customer message.",
+      next: "Razorpay must confirm the result before recovery is measured.",
+      stepKeys: ["provider_action", "customer_notification"],
+    },
+    {
+      key: "outcome",
+      label: "Outcome & audit",
+      helper: "Confirm the provider result and the permanent decision record.",
+      next: "Provider reconciliation is the only source of recovered revenue.",
+      stepKeys: ["provider_outcome", "measured_outcome", "audit"],
+    },
+  ] as const;
+  const computedGuideIndex = Math.max(0, guideStages.findIndex((stage) =>
+    stage.stepKeys.includes(liveRun?.active_step_key as never),
+  ));
+  const [selectedGuideIndex, setSelectedGuideIndex] = useState<number | null>(null);
+  const displayedGuideIndex = selectedGuideIndex ?? computedGuideIndex;
+  const selectedGuide = guideStages[displayedGuideIndex];
+  const selectedEvents = liveRun?.steps.filter((step) =>
+    selectedGuide.stepKeys.includes(step.key as never),
+  ) ?? [];
 
   return (
     <section className="live-command" aria-live="polite" aria-label="Live recovery command">
@@ -149,15 +189,42 @@ export function LiveRecoveryCommand({
         <div className="live-command__notice is-warning">{webhookDelayWarning}</div>
       ) : null}
 
+      <section className="live-command__guide" aria-label="Guided recovery workflow">
+        <div className="live-command__guide-heading">
+          <div><span>Guided recovery workflow</span><h3>Follow the run in the right order</h3></div>
+          <p>The current stage updates only as server-side evidence arrives.</p>
+        </div>
+        <div className="live-command__guide-tabs" role="tablist" aria-label="Recovery stages">
+          {guideStages.map((stage, index) => {
+            const isSelected = displayedGuideIndex === index;
+            const containsActiveStep = stage.stepKeys.includes(liveRun?.active_step_key as never);
+            const completed = !containsActiveStep && index < computedGuideIndex;
+            return <button
+              aria-selected={isSelected}
+              className={`${isSelected ? "is-active" : ""}${completed ? " is-complete" : ""}`}
+              key={stage.key}
+              onClick={() => setSelectedGuideIndex(index)}
+              role="tab"
+              type="button"
+            ><span>{index + 1}</span><strong>{stage.label}</strong></button>;
+          })}
+        </div>
+        <div className="live-command__guide-copy">
+          <div><span>Now reviewing</span><strong>{selectedGuide.label}</strong></div>
+          <p>{selectedGuide.helper}</p>
+          <p><b>What happens next:</b> {selectedGuide.next}</p>
+        </div>
+      </section>
+
       <div className="live-command__layout">
         <section className="live-command__evidence" aria-labelledby="evidence-title">
           <div className="live-command__section-heading">
-            <div><span>Evidence rail</span><h3 id="evidence-title">What actually happened</h3></div>
-            <p>Events appear only after the server records them.</p>
+            <div><span>{selectedGuide.label} evidence</span><h3 id="evidence-title">What actually happened</h3></div>
+            <p>Show all evidence for this stage only.</p>
           </div>
           {liveRun ? (
             <ol className="live-command__timeline">
-              {liveRun.steps.map((step, index) => (
+              {selectedEvents.length ? selectedEvents.map((step, index) => (
                 <li className={`live-command__event is-${step.status}`} key={step.key}>
                   <span className="live-command__event-marker" aria-hidden="true">
                     {step.status === "completed" ? <Check size={16} strokeWidth={3} /> : step.status === "active" ? <LoaderCircle className="spin" size={16} /> : <span>{index + 1}</span>}
@@ -168,7 +235,7 @@ export function LiveRecoveryCommand({
                     {step.occurred_at ? <time dateTime={step.occurred_at}>{formatTimestamp(step.occurred_at)} IST{step.duration_milliseconds !== null ? ` · executed in ${formatDuration(step.duration_milliseconds)}` : ""}</time> : null}
                   </div>
                 </li>
-              ))}
+              )) : <li className="live-command__empty-evidence">This stage has not received persisted evidence yet.</li>}
             </ol>
           ) : (
             <div className="live-command__empty-evidence">

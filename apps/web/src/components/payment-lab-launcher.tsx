@@ -15,7 +15,9 @@ import {
   LoaderCircle,
   Play,
   RotateCcw,
+  Sparkles,
   ShieldCheck,
+  ShieldAlert,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -23,6 +25,7 @@ import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
 
 import { LiveElapsed } from "@/components/live-time";
+import { LiveRecoveryCommand } from "@/components/live-recovery-command";
 import {
   type PaymentLabLiveRun,
   usePaymentLabLiveRun,
@@ -407,6 +410,7 @@ export function PaymentLabLauncher() {
             mode,
             amount_minor: selectedAmountMinor,
             payment_method: paymentMethod,
+            enable_test_email_recovery_notification: enableTestEmailNotification,
           };
 
     try {
@@ -507,7 +511,6 @@ export function PaymentLabLauncher() {
               type="button"
               onClick={() => {
                 setMode("custom");
-                setEnableTestEmailNotification(false);
               }}
             >
               Custom run
@@ -526,7 +529,6 @@ export function PaymentLabLauncher() {
                   <input
                     inputMode="decimal"
                     min="1"
-                    max="50000"
                     type="number"
                     value={amountRupees}
                     onChange={(event) => setAmountRupees(event.target.value)}
@@ -558,19 +560,17 @@ export function PaymentLabLauncher() {
             </div>
           </div>
 
-          {mode === "guided" ? (
-            <label className="lab-notification-consent">
-              <input
-                checked={enableTestEmailNotification}
-                type="checkbox"
-                onChange={(event) => setEnableTestEmailNotification(event.target.checked)}
-              />
-              <span>
-                <strong>Enable one controlled test-email recovery notification</strong>
-                <small>Uses only the local allowlisted demo inbox after policy approval.</small>
-              </span>
-            </label>
-          ) : null}
+          <label className="lab-notification-consent">
+            <input
+              checked={enableTestEmailNotification}
+              type="checkbox"
+              onChange={(event) => setEnableTestEmailNotification(event.target.checked)}
+            />
+            <span>
+              <strong>Enable one controlled test-email recovery notification</strong>
+              <small>Uses only the configured allowlisted demo inbox after policy approval.</small>
+            </span>
+          </label>
 
           <div className="lab-access">
             <label htmlFor="reviewer-code">Reviewer access code</label>
@@ -599,8 +599,32 @@ export function PaymentLabLauncher() {
           </p>
         </div> : null}
 
+        {run ? (
+          <LiveRecoveryCommand
+            run={run}
+            liveRun={liveRun}
+            polling={polling}
+            title={copy.title}
+            detail={copy.detail}
+            safeError={safeError}
+            pollError={pollError}
+            webhookDelayWarning={webhookDelayWarning}
+            runState={runState}
+            copiedActionId={copiedActionId}
+            onCopyRecoveryLink={() => void copyRecoveryLink()}
+            onStartAnotherRun={() => {
+              setRun(null);
+              setRunState("idle");
+              setPollReviewerCode("");
+              setSafeError(null);
+              setWebhookDelayWarning(null);
+              setCopiedActionId(null);
+            }}
+          />
+        ) : null}
+
         {run ? <aside
-          className={`lab-run-state lab-run-state--${runState}${polling ? " lab-run-state--polling" : ""}`}
+          className={`lab-run-state lab-run-state--legacy lab-run-state--${runState}${polling ? " lab-run-state--polling" : ""}`}
           aria-live="polite"
         >
           <div className="lab-run-state__heading">
@@ -767,6 +791,75 @@ export function PaymentLabLauncher() {
                 ReclaimRail counts recovery only after server-side Razorpay
                 reconciliation—not when this link is opened.
               </p>
+            </section>
+          ) : null}
+
+          {liveRun?.agent ? (
+            <section className="lab-decision-room" aria-label="AI and policy decision">
+              <div className="lab-decision-room__heading">
+                <div>
+                  <span><Sparkles size={15} /> AI decision record</span>
+                  <h3>
+                    {liveRun.agent.ai_trace?.recommended_action
+                      ? humanize(liveRun.agent.ai_trace.recommended_action)
+                      : "Recovery assessment recorded"}
+                  </h3>
+                </div>
+                <span className={`lab-decision-room__source ${liveRun.agent.fallback_used ? "is-fallback" : ""}`}>
+                  {liveRun.agent.fallback_used ? "Deterministic fallback" : "Gemini proposal"}
+                </span>
+              </div>
+
+              <p className="lab-decision-room__summary">
+                {liveRun.agent.reasoning_summary ??
+                  "The recovery agent has persisted its result; inspect the policy record before execution."}
+              </p>
+
+              <div className="lab-decision-room__grid">
+                <div>
+                  <span>What AI found</span>
+                  <strong>
+                    {liveRun.agent.ai_trace?.root_cause_category
+                      ? humanize(liveRun.agent.ai_trace.root_cause_category)
+                      : "Awaiting classified evidence"}
+                  </strong>
+                  <p>{liveRun.agent.ai_trace?.recoverability_assessment ?? "No recoverability assessment has been recorded."}</p>
+                </div>
+                <div>
+                  <span>Safety decision</span>
+                  <strong>{latestAction ? humanize(latestAction.policy_outcome) : "Awaiting policy"}</strong>
+                  <p>{latestAction?.policy_explanation ?? "No action has been authorized yet."}</p>
+                </div>
+              </div>
+
+              {liveRun.agent.ai_trace?.confidence !== null && liveRun.agent.ai_trace?.confidence !== undefined ? (
+                <div className="lab-decision-room__confidence">
+                  <span>AI confidence</span>
+                  <div aria-label={`AI confidence ${Math.round(liveRun.agent.ai_trace.confidence * 100)} percent`}>
+                    <i style={{ width: `${Math.round(liveRun.agent.ai_trace.confidence * 100)}%` }} />
+                  </div>
+                  <strong>{Math.round(liveRun.agent.ai_trace.confidence * 100)}%</strong>
+                  <small>Confidence describes this assessment, not a guarantee that the customer will pay.</small>
+                </div>
+              ) : null}
+
+              {latestAction?.policy_guardrails.length ? (
+                <ul className="lab-decision-room__guardrails">
+                  {latestAction.policy_guardrails.map((guardrail) => (
+                    <li key={guardrail}><ShieldCheck size={15} /> {humanize(guardrail)}</li>
+                  ))}
+                </ul>
+              ) : null}
+
+              {liveRun.approval ? (
+                <div className="lab-decision-room__approval">
+                  <ShieldAlert size={17} />
+                  <span>
+                    <strong>Human review {humanize(liveRun.approval.status)}</strong>
+                    {liveRun.approval.decision_reason ?? liveRun.approval.request_reason}
+                  </span>
+                </div>
+              ) : null}
             </section>
           ) : null}
 

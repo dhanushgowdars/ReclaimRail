@@ -127,6 +127,7 @@ async def test_calls_planner_only_after_read_session_closes(
     planner_result = create_planner_result()
     persisted_plan = MagicMock(spec=PersistedRecoveryPlan)
     provider = MagicMock(name="provider")
+    persisted_kwargs: dict[str, object] = {}
 
     async def load_context(
         *args: object,
@@ -153,6 +154,7 @@ async def test_calls_planner_only_after_read_session_closes(
         events.append("persist")
 
         assert kwargs["planner_result"] is planner_result
+        persisted_kwargs.update(kwargs)
 
         return persisted_plan
 
@@ -183,6 +185,17 @@ async def test_calls_planner_only_after_read_session_closes(
 
     assert result.planner_result is planner_result
     assert result.persisted_plan is persisted_plan
+
+    agent_started_at = persisted_kwargs["agent_started_at"]
+    agent_completed_at = persisted_kwargs["agent_completed_at"]
+    assert isinstance(agent_started_at, datetime)
+    assert isinstance(agent_completed_at, datetime)
+    assert agent_started_at.tzinfo is not None
+    assert agent_completed_at.tzinfo is not None
+    assert (
+        agent_started_at
+        <= agent_completed_at
+    )
 
     assert events == [
         "read_enter",

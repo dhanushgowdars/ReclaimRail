@@ -40,6 +40,7 @@ class PaymentLabLiveStepResponse(ResponseModel):
     label: str
     status: str
     occurred_at: datetime | None
+    duration_milliseconds: int | None = Field(default=None, ge=0)
     detail: str
 
 
@@ -77,6 +78,7 @@ class PaymentLabAgentEvidenceResponse(ResponseModel):
     fallback_reason: str | None
     reasoning_summary: str | None
     proposed_action_count: int = Field(ge=0)
+    started_at: datetime | None
     completed_at: datetime | None
     ai_trace: RecoveryAiTraceResponse | None
 
@@ -85,6 +87,7 @@ class PaymentLabActionEvidenceResponse(ResponseModel):
     recovery_action_id: UUID
     sequence_number: int = Field(ge=1)
     action_type: str
+    channel: str | None
     status: str
     policy_outcome: str
     policy_guardrails: list[str]

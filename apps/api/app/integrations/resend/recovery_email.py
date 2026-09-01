@@ -57,13 +57,19 @@ class ResendRecoveryEmailProvider:
         payment_link_url: str,
         amount_minor: int,
         currency: str,
+        idempotency_key: str,
     ) -> ResendRecoveryEmailResult:
         normalized_recipient = recipient.strip()
         normalized_url = payment_link_url.strip()
+        normalized_idempotency_key = idempotency_key.strip()
         if not normalized_recipient:
             raise ValueError("Resend recovery email recipient cannot be empty")
         if not normalized_url.startswith("https://"):
             raise ValueError("Payment Link URL must use HTTPS")
+        if not normalized_idempotency_key:
+            raise ValueError("Resend recovery email idempotency key cannot be empty")
+        if len(normalized_idempotency_key) > 256:
+            raise ValueError("Resend recovery email idempotency key cannot exceed 256 characters")
 
         amount = amount_minor / 100
         payload = {
@@ -88,6 +94,7 @@ class ResendRecoveryEmailProvider:
                     headers={
                         "Accept": "application/json",
                         "Authorization": f"Bearer {self._api_key}",
+                        "Idempotency-Key": normalized_idempotency_key,
                     },
                     json=payload,
                 )

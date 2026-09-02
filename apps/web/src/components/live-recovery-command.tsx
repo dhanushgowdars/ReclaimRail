@@ -60,6 +60,8 @@ export function LiveRecoveryCommand({ run, liveRun, polling, title, detail, safe
   const confidence = confidencePercent(liveRun?.agent?.ai_trace?.confidence);
   const amount = liveRun?.amount_minor ?? run.checkout.amount_minor;
   const activeStep = liveRun?.steps.find((step) => step.key === liveRun.active_step_key);
+  const activeStepIndex = liveRun?.steps.findIndex((step) => step.key === liveRun.active_step_key) ?? -1;
+  const recordedStepCount = liveRun?.steps.filter((step) => step.status === "completed").length ?? 0;
   const runStatus = isVerifiedReplay ? "Replay" : polling ? "Live" : liveRun?.terminal ? "Verified" : "Waiting";
   const linkIsActionable = Boolean(paymentLinkAction && (!outcome || outcome.status === "payment_link_pending") && !["paid", "expired", "cancelled"].includes(paymentLinkAction.provider_action_status ?? ""));
   const recommendedAction = liveRun?.agent?.ai_trace?.recommended_action ?? latestAction?.action_type ?? null;
@@ -109,7 +111,7 @@ export function LiveRecoveryCommand({ run, liveRun, polling, title, detail, safe
     {showLiveActivity ? <section className="live-command__active-work" aria-label="Live server work">
       <span className="live-command__active-icon"><LoaderCircle className="spin" size={21} /></span>
       <div><p>Live work in progress</p><h3>{activeStep?.label ?? liveRun?.state_label ?? "Waiting for evidence"}</h3><span>{activityDetail}</span></div>
-      <dl><div><dt>Status</dt><dd>{activityStatus}</dd></div><div><dt>Responsible worker</dt><dd>{liveRun?.responsible_worker ? humanize(liveRun.responsible_worker) : "Provider evidence pipeline"}</dd></div><div><dt>Worker health</dt><dd>{liveRun?.responsible_worker_status ? humanize(liveRun.responsible_worker_status) : polling ? "Connected" : "Awaiting update"}</dd></div>{activeStep?.occurred_at ? <div><dt>Active for</dt><dd><LiveElapsed startedAt={activeStep.occurred_at} endedAt={null} /></dd></div> : null}</dl>
+      <dl><div><dt>Status</dt><dd>{activityStatus}</dd></div><div><dt>Evidence progress</dt><dd>{liveRun ? `${recordedStepCount} recorded · phase ${activeStepIndex >= 0 ? activeStepIndex + 1 : "waiting"} active` : "Awaiting first event"}</dd></div><div><dt>Responsible worker</dt><dd>{liveRun?.responsible_worker ? humanize(liveRun.responsible_worker) : "Provider evidence pipeline"}</dd></div><div><dt>Worker health</dt><dd>{liveRun?.responsible_worker_status ? humanize(liveRun.responsible_worker_status) : polling ? "Connected" : "Awaiting update"}</dd></div>{activeStep?.occurred_at ? <div><dt>Active for</dt><dd><LiveElapsed startedAt={activeStep.occurred_at} endedAt={null} /></dd></div> : null}</dl>
     </section> : null}
 
     <div className="live-command__layout live-command__layout--continuous">

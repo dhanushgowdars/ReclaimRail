@@ -1,7 +1,9 @@
 import {
   BookCheck,
   Boxes,
+  BrainCircuit,
   LayoutDashboard,
+  ListChecks,
   Play,
   ShieldCheck,
 } from "lucide-react";
@@ -10,12 +12,14 @@ import Link from "next/link";
 const navigation = [
   { id: "lab", href: "/payment-lab", label: "Live demo", icon: Play, live: true },
   { id: "overview", href: "/", label: "Command center", icon: LayoutDashboard },
-  { id: "queue", href: "/#recovery-queue", label: "Recovery cases", icon: Boxes },
-  { id: "outcomes", href: "/#outcomes", label: "Outcome ledger", icon: BookCheck },
-  { id: "controls", href: "/#safety-controls", label: "Safety controls", icon: ShieldCheck },
+  { id: "queue", href: "/cases", label: "Recovery cases", icon: Boxes },
+  { id: "reviews", href: "/reviews", label: "Human reviews", icon: ListChecks },
+  { id: "outcomes", href: "/outcomes", label: "Outcome ledger", icon: BookCheck },
+  { id: "controls", href: "/safety-controls", label: "Safety controls", icon: ShieldCheck },
+  { id: "intelligence", href: "/intelligence", label: "Rail intelligence", icon: BrainCircuit },
 ] as const;
 
-export function RecoveryNavigation({ active = "overview" }: { active?: "overview" | "case" | "lab" }) {
+export function RecoveryNavigation({ active = "overview" }: { active?: (typeof navigation)[number]["id"] | "case" }) {
   return (
     <header className="sidebar">
       <Link className="product-lockup" href="/" aria-label="ReclaimRail overview">

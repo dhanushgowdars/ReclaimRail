@@ -179,6 +179,8 @@ def build_detail() -> RecoveryCaseDetail:
                     event_hash="a" * 64,
                     hash_algorithm="sha256",
                     occurred_at=NOW,
+                    provider_status="paid",
+                    outcome_status="recovered",
                 ),
             ),
         ),
@@ -209,6 +211,8 @@ def test_reads_pii_safe_recovery_case_detail(
     assert body["outcome"]["gross_recovered_minor"] == 349_900
     assert body["audit_chain"]["valid"] is True
     assert body["audit_chain"]["events"][0]["event_hash"] == "a" * 64
+    assert body["audit_chain"]["events"][0]["provider_status"] == "paid"
+    assert body["audit_chain"]["events"][0]["outcome_status"] == "recovered"
     assert "event_data" not in response.text
     assert "email" not in response.text
     assert "customer_email" not in response.text

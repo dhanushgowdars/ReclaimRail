@@ -73,13 +73,36 @@ declare global {
 
 const AUTO_AMOUNT_MINOR = 349_900;
 const DEFAULT_HIGH_VALUE_RUPEES = "10001";
+const ACTIVE_RUN_STORAGE_KEY = "reclaimrail.paymentLab.activeRun.v1";
+
+type PersistedActiveRun = {
+  run: PaymentLabResponse;
+  reviewerCode: string;
+  runState: RunState;
+  isVerifiedReplay: boolean;
+};
+
+function setRunUrl(paymentLabRunId: string | null): void {
+  const url = new URL(window.location.href);
+  if (paymentLabRunId === null) {
+    url.searchParams.delete("payment_lab_run_id");
+  } else {
+    url.searchParams.set("payment_lab_run_id", paymentLabRunId);
+  }
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function persistActiveRun(value: PersistedActiveRun): void {
+  window.sessionStorage.setItem(ACTIVE_RUN_STORAGE_KEY, JSON.stringify(value));
+  setRunUrl(value.run.payment_lab_run_id);
+}
 
 function stateCopy(state: RunState): { title: string; detail: string } {
   const copy: Record<RunState, { title: string; detail: string }> = {
     idle: { title: "Ready for a provider-live run", detail: "Checkout has not been opened yet." },
     creating_order: { title: "Creating a bounded Test Mode order", detail: "The exact amount is being created through ReclaimRail's server proxy." },
     opening_checkout: { title: "Razorpay Checkout is opening", detail: "Choose a Test Mode path; ReclaimRail will wait for signed provider evidence." },
-    awaiting_webhook: { title: "Checkout failure observed", detail: "Waiting for Razorpay's signed webhook before the recovery flow can begin." },
+    awaiting_webhook: { title: "Waiting for provider payment result", detail: "ReclaimRail will begin recovery only after Razorpay's signed evidence reaches the server." },
     browser_success: { title: "Browser callback received", detail: "A browser callback is never treated as a verified financial outcome." },
     dismissed: { title: "Checkout closed", detail: "No recovery case is created until provider evidence reaches the server." },
     error: { title: "The run could not start", detail: "No payment or recovery result was invented." },
@@ -113,6 +136,35 @@ export function PaymentLabLauncher() {
   const copy = stateCopy(runState);
 
   useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      const stored = window.sessionStorage.getItem(ACTIVE_RUN_STORAGE_KEY);
+      if (stored === null) return;
+      try {
+        const restored = JSON.parse(stored) as Partial<PersistedActiveRun>;
+        if (
+          restored.run?.payment_lab_run_id &&
+          restored.run.checkout &&
+          typeof restored.reviewerCode === "string" &&
+          restored.reviewerCode.length > 0
+        ) {
+          setRun(restored.run);
+          setReviewerCode(restored.reviewerCode);
+          setPollReviewerCode(restored.reviewerCode);
+          setRunState(restored.runState ?? "awaiting_webhook");
+          setIsVerifiedReplay(Boolean(restored.isVerifiedReplay));
+          setRunUrl(restored.run.payment_lab_run_id);
+        }
+      } catch {
+        window.sessionStorage.removeItem(ACTIVE_RUN_STORAGE_KEY);
+        setRunUrl(null);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     if (isVerifiedReplay || runState !== "awaiting_webhook" || liveRun?.payment) return;
     const timer = window.setTimeout(() => {
       setWebhookDelayWarning("Razorpay evidence is taking longer than usual. Your active run is still waiting for a signed webhook.");
@@ -131,6 +183,8 @@ export function PaymentLabLauncher() {
     setCopiedActionId(null);
     setApprovingApprovalId(null);
     setApprovalError(null);
+    window.sessionStorage.removeItem(ACTIVE_RUN_STORAGE_KEY);
+    setRunUrl(null);
   }
 
   async function copyRecoveryLink(): Promise<void> {
@@ -229,8 +283,15 @@ export function PaymentLabLauncher() {
         throw new Error("detail" in responseBody && responseBody.detail ? responseBody.detail : "Payment Lab run creation failed");
       }
       setRun(responseBody);
-      setPollReviewerCode(reviewerCode.trim());
+      const normalizedReviewerCode = reviewerCode.trim();
+      setPollReviewerCode(normalizedReviewerCode);
       setRunState("opening_checkout");
+      persistActiveRun({
+        run: responseBody,
+        reviewerCode: normalizedReviewerCode,
+        runState: "awaiting_webhook",
+        isVerifiedReplay: false,
+      });
       const checkout = new RazorpayCheckout({
         key: responseBody.checkout.key_id, amount: responseBody.checkout.amount_minor, currency: responseBody.checkout.currency,
         name: responseBody.checkout.name, description: responseBody.checkout.description, order_id: responseBody.checkout.order_id,
@@ -272,6 +333,17 @@ export function PaymentLabLauncher() {
       setWebhookDelayWarning(null);
       setSafeError(null);
       setRunState("idle");
+      persistActiveRun({
+        run: {
+          payment_lab_run_id: responseBody.payment_lab_run_id, client_request_id: responseBody.client_request_id,
+          mode: responseBody.mode === "guided" ? "guided" : "custom", provenance: "razorpay_test", status: "checkout_ready", test_mode: true,
+          checkout_expires_at: responseBody.checkout_expires_at,
+          checkout: { key_id: "", order_id: responseBody.provider_order_id ?? "Recorded Test Mode run", amount_minor: responseBody.amount_minor, currency: responseBody.currency, name: "Recorded Test Mode replay", description: "Verified provider-backed replay", timeout_seconds: 0, theme_color: "#2563eb", payment_method_hint: responseBody.payment_method as PaymentMethod, prefill_email: null },
+        },
+        reviewerCode: reviewerCode.trim(),
+        runState: "idle",
+        isVerifiedReplay: true,
+      });
     } catch (error) {
       setSafeError(error instanceof Error ? error.message : "The verified replay could not be opened");
     }

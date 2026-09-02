@@ -201,6 +201,23 @@ Goal: make the project easy to assess and reproduce.
 
 Exit gate: R19 and R20 pass. The submission tells the truth even when a dependency fails.
 
+## Active delivery order (locked 2026-09-02)
+
+This sequence is the implementation checklist for the current branch series. A later phase must
+not erase or bypass evidence completed in an earlier phase.
+
+| Delivery phase | Scope | Exit gate |
+| --- | --- | --- |
+| 12D — truthful live-run hardening | Restore an active run after refresh; verify process identity before stopping Windows PIDs; preserve numbered evidence stages; show immutable agent/policy/provider/outcome facts; remove false timing and ambiguous audit labels; verify both automatic and protected-review amounts. | Fresh ₹3,499 recovery and high-value approval walkthrough both pass without invented state. |
+| 13 — application routes and navigation | Replace placeholder navigation with separate Command Center, Recovery Cases, Human Reviews, Outcome Ledger, Safety Controls and Rail Intelligence routes while preserving Live Demo and case evidence deep links. | Every navigation item has a real route, loading/error/empty state and stable refresh/deep-link behavior. |
+| 14 — recovery operations | Build case list/filter/search/detail workflows, human-review queue and decision flow, expiry/version/revalidation handling, and incident/rail context backed by persisted evidence. | Normal, approval, denial, expiry and stale-decision paths pass end to end. |
+| 15 — outcomes and safety | Build the provider-backed outcome ledger, duplicate-collection prevention, late-authorization stop evidence, policy/control history and safe operational health views. | Recovered revenue is counted only after reconciliation; stop and duplicate paths are demonstrable. |
+| 16 — reliability and end-to-end proof | Cover duplicate/out-of-order webhooks, restarts, replay, polling recovery, accessibility/responsive layouts, failure/fallback behavior and full API/frontend regression. | CI and fresh-machine walkthrough are green, including degraded dependency behavior. |
+| 17 — submission and demo | Finish architecture/track mapping, evaluation report, limitations/security notes, reproducible setup and the five-minute recover/reason/protect/measure demo. | A reviewer can reproduce and judge the complete Track 3 claim without private explanation. |
+
+The current implementation target is Phase 12D. Phase 13 begins only after both Phase 12D live
+walkthroughs pass.
+
 ## Required verification matrix
 
 | Change area | Minimum verification |

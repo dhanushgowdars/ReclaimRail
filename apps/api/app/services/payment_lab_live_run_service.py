@@ -544,7 +544,9 @@ def _recorded_duration_milliseconds(
     if started_at is None or completed_at is None:
         return None
     duration = int((completed_at - started_at).total_seconds() * 1000)
-    return max(duration, 0)
+    # Equal timestamps mean the persistence precision cannot support a useful
+    # duration claim. Present that as unknown instead of advertising "0 ms".
+    return duration if duration > 0 else None
 
 
 def _build_steps(

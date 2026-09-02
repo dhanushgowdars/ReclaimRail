@@ -169,9 +169,13 @@ def build_audit_entry() -> RecoveryAuditChainEntry:
     return RecoveryAuditChainEntry(
         recovery_case_id=CASE_ID,
         sequence_number=1,
-        event_type="case.opened",
-        actor_type="system",
-        event_data={"internal_only": "not_exposed"},
+        event_type="outcome.payment_link.reconciled",
+        actor_type="razorpay",
+        event_data={
+            "internal_only": "not_exposed",
+            "provider_status": "paid",
+            "outcome_status": "recovered",
+        },
         previous_event_hash=None,
         event_hash="a" * 64,
         occurred_at=NOW,
@@ -230,6 +234,8 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
     assert detail.audit_chain.valid is True
     assert detail.audit_chain.total_event_count == 1
     assert detail.audit_chain.events[0].event_hash == "a" * 64
+    assert detail.audit_chain.events[0].provider_status == "paid"
+    assert detail.audit_chain.events[0].outcome_status == "recovered"
     assert not hasattr(detail.audit_chain.events[0], "event_data")
     assert session.execute.await_count == 5
 

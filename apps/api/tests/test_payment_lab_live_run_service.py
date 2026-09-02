@@ -291,6 +291,31 @@ async def test_completed_run_exposes_provider_agent_policy_and_outcome_evidence(
 
 
 @pytest.mark.asyncio
+async def test_equal_provider_timestamps_do_not_claim_zero_millisecond_duration() -> None:
+    run = build_run(status=PaymentLabRunStatus.RECOVERY_RUNNING.value)
+    run.payment_attempt_id = ATTEMPT_ID
+    action = build_action()
+    action.completed_at = action.started_at
+
+    action_result = MagicMock()
+    action_result.scalars.return_value.all.return_value = [action]
+    session = AsyncMock(spec=AsyncSession)
+    session.get.side_effect = (run, build_payment())
+    session.execute.side_effect = (
+        scalar_result(build_case()),
+        scalar_result(build_agent()),
+        action_result,
+        scalar_result(None),
+        scalar_result(build_outcome()),
+    )
+
+    result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
+
+    steps_by_key = {step.key: step for step in result.steps}
+    assert steps_by_key["provider_action"].duration_milliseconds is None
+
+
+@pytest.mark.asyncio
 async def test_created_payment_link_waits_for_provider_outcome() -> None:
     run = build_run(status=PaymentLabRunStatus.RECOVERY_RUNNING.value)
     run.payment_attempt_id = ATTEMPT_ID

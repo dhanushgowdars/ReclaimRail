@@ -192,6 +192,8 @@ export type RecoveryCaseDetail = {
       event_hash: string;
       hash_algorithm: string;
       occurred_at: string;
+      provider_status: string | null;
+      outcome_status: string | null;
     }>;
   };
 };

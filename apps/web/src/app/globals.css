@@ -1479,6 +1479,13 @@ td small { font-size: 12px; }
 @media (max-width: 840px) { .case-explorer__controls { grid-template-columns: 1fr; } }
 @media (max-width: 1080px) { .case-row { grid-template-columns: 42px minmax(170px, 1fr) minmax(150px, .8fr) minmax(120px, .65fr) 30px; }.case-row__state { display: none; }.case-row__evidence { font-size: 0; }.case-row__evidence svg { width: 18px; height: 18px; } }
 @media (max-width: 720px) { .case-row { grid-template-columns: 38px minmax(0, 1fr) auto; gap: 10px; }.case-row__time, .case-row__state { display: none; }.case-row__amount { grid-column: 2; justify-items: start; text-align: left; }.case-row__evidence { grid-column: 3; grid-row: 1 / span 2; }.case-row__identity { min-width: 0; } }
+
+/* Larger, clearer recovery-case reading hierarchy. */
+.case-explorer__controls { grid-template-columns: minmax(260px, 1.8fr) repeat(3, minmax(150px, .8fr)); }
+.case-explorer__controls label { min-height: 46px; padding: 0 13px; }
+.case-explorer__controls input, .case-explorer__controls select { font-size: 15px; }
+.case-explorer__count { color: #536f8d; font-size: 14px; font-weight: 800; }
+.case-row__identity strong { font-size: 17px; }.case-row__identity em { padding: 4px 8px; font-size: 11px; }.case-row__identity > span, .case-row__time > span, .case-row__amount > span { gap: 6px; font-size: 14px; }.case-row__time strong, .case-row__state > strong { font-size: 14px; font-weight: 800; }.case-status { padding: 5px 9px; font-size: 12px; }.case-row__amount strong { font-size: 19px; }.case-row__evidence { gap: 6px; font-size: 14px; }
 @media (max-width: 840px) { .review-card dl, .review-decision-controls { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .outcome-ledger__metrics { grid-template-columns: 1fr; } }
 @media (max-width: 840px) { .rail-card__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

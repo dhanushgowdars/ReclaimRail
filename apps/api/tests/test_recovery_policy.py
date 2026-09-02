@@ -217,13 +217,13 @@ def test_payment_link_must_match_original_payment(
     assert expected_guardrail in decision.guardrails
 
 
-def test_high_value_action_requires_human_escalation() -> None:
+def test_action_above_hard_amount_limit_requires_human_escalation() -> None:
     case = replace(
         create_case(),
-        amount_minor=1_500_000,
+        amount_minor=5_000_001,
     )
     proposal = create_payment_link_proposal(
-        amount_minor=1_500_000,
+        amount_minor=5_000_001,
     )
 
     decision = evaluate_recovery_proposal(

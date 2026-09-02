@@ -131,7 +131,7 @@ def test_late_authorization_causes_stop() -> None:
     "case",
     [
         replace(create_case(), recovery_attempt_count=3),
-        replace(create_case(), amount_minor=1_500_000),
+        replace(create_case(), amount_minor=5_000_001),
         replace(create_case(), status=RecoveryCaseStatus.ESCALATED),
     ],
 )
@@ -142,6 +142,16 @@ def test_automation_boundaries_cause_escalation(
 
     assert plan.decision is RecoveryPlanDecision.ESCALATE
     assert plan.proposals[0].action_type is RecoveryActionType.ESCALATE_HUMAN
+
+
+def test_amount_above_approval_threshold_but_below_hard_limit_remains_recoverable() -> None:
+    case = replace(create_case(), amount_minor=1_000_100)
+
+    plan = build_deterministic_recovery_plan(create_context(case=case))
+
+    assert plan.decision is RecoveryPlanDecision.RECOVER
+    assert plan.proposals[0].action_type is RecoveryActionType.CREATE_PAYMENT_LINK
+    assert plan.proposals[0].amount_minor == 1_000_100
 
 
 def test_existing_link_is_reused_without_duplicate_creation() -> None:

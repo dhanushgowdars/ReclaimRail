@@ -56,6 +56,11 @@ Recovery payment-link actions at or above
 `RECLAIMRAIL_RECOVERY_APPROVAL_THRESHOLD_MINOR` pause before provider execution. Set a
 separate operator credential in `apps/api/.env`:
 
+The default approval threshold is ₹10,000 (`1000000` minor units). This review
+threshold is intentionally lower than the ₹50,000 hard automation boundary: an
+operator may approve an otherwise policy-allowed action in that band, while an
+amount above the hard boundary remains escalated and cannot reach provider execution.
+
 ```dotenv
 RECLAIMRAIL_RECOVERY_APPROVAL_THRESHOLD_MINOR=1000000
 RECLAIMRAIL_RECOVERY_APPROVAL_TTL_SECONDS=900

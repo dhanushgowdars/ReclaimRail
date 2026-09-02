@@ -377,12 +377,8 @@ def build_recovery_planning_prompt(
         "approved_channels": [channel.value for channel in context.available_channels],
         "alternate_payment_methods": list(context.alternate_payment_methods),
         "policy_contract": {
-            "automatic_amount_limit_minor": (
-                DEFAULT_RECOVERY_PLANNER_POLICY.automatic_amount_limit_minor
-            ),
-            "maximum_recovery_attempts": (
-                DEFAULT_RECOVERY_PLANNER_POLICY.maximum_recovery_attempts
-            ),
+            "automatic_amount_limit_minor": policy.automatic_amount_limit_minor,
+            "maximum_recovery_attempts": policy.maximum_recovery_attempts,
             "required_decision": deterministic_baseline.decision.value,
             "baseline_action_types": [
                 proposal.action_type.value for proposal in deterministic_baseline.proposals

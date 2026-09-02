@@ -15,7 +15,7 @@ const tabs = [
     id: "decision",
     label: "Agent & policy",
     icon: BrainCircuit,
-    helper: "Inspect Gemini's recommendation and the deterministic safety decision.",
+    helper: "Inspect the recorded planner recommendation and the deterministic safety decision.",
     next: "Only an allowed action can move to Razorpay execution.",
   },
   {
@@ -49,7 +49,7 @@ function guideFor(
   }
   const completed: Record<TabId, string> = {
     lifecycle: "Original payment failure was verified before recovery began.",
-    decision: "Gemini proposed the action and deterministic policy recorded its verdict.",
+    decision: "The recorded planner proposed the action and deterministic policy recorded its verdict.",
     provider: providerStatus === "paid"
       ? "Razorpay reports the bounded recovery link as paid."
       : "The bounded Razorpay action has completed.",

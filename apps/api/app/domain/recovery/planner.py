@@ -85,7 +85,9 @@ class RecoveryPlanningContext:
 @dataclass(frozen=True, slots=True)
 class RecoveryPlannerPolicy:
     maximum_recovery_attempts: int = 3
-    automatic_amount_limit_minor: int = 1_000_000
+    # This is the hard automation boundary, not the human-review threshold.
+    # Amounts below this boundary may still be held by the approval service.
+    automatic_amount_limit_minor: int = 5_000_000
     incident_recheck_delay: timedelta = timedelta(minutes=15)
     maximum_plan_actions: int = 3
 

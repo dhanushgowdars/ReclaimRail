@@ -29,22 +29,51 @@ function Read-RuntimeState {
     return @($State.processes)
 }
 
-function Test-ProcessAlive {
+function Get-ProcessIdentity {
     param([int]$ProcessId)
-    return $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
+    try {
+        $Process = Get-Process -Id $ProcessId -ErrorAction Stop
+        return [pscustomobject]@{
+            name = $Process.ProcessName
+            started_at_utc = $Process.StartTime.ToUniversalTime().ToString("o")
+        }
+    }
+    catch {
+        return $null
+    }
+}
+
+function Test-TrackedProcessAlive {
+    param($Entry)
+    $Identity = Get-ProcessIdentity -ProcessId ([int]$Entry.pid)
+    if ($null -eq $Identity) {
+        return $false
+    }
+
+    # PID values are reusable on Windows. Never treat a process as ReclaimRail
+    # unless both its executable identity and start time match the process that
+    # this launcher recorded.
+    if ($null -eq $Entry.process_name -or $null -eq $Entry.process_started_at_utc) {
+        return $false
+    }
+
+    return (
+        $Identity.name -ieq [string]$Entry.process_name -and
+        $Identity.started_at_utc -eq [string]$Entry.process_started_at_utc
+    )
 }
 
 function Stop-KnownProcesses {
     $Entries = @(Read-RuntimeState)
     foreach ($Entry in ($Entries | Sort-Object started_order -Descending)) {
         $ProcessId = [int]$Entry.pid
-        if (-not (Test-ProcessAlive -ProcessId $ProcessId)) {
+        if (-not (Test-TrackedProcessAlive -Entry $Entry)) {
             continue
         }
 
         Write-Host "Stopping $($Entry.name) (PID $ProcessId)..." -ForegroundColor Yellow
         & taskkill.exe /PID $ProcessId /T /F | Out-Null
-        if ($LASTEXITCODE -ne 0 -and (Test-ProcessAlive -ProcessId $ProcessId)) {
+        if ($LASTEXITCODE -ne 0 -and (Test-TrackedProcessAlive -Entry $Entry)) {
             throw "Unable to stop $($Entry.name) (PID $ProcessId)."
         }
     }
@@ -62,7 +91,7 @@ function Show-ReclaimRailStatus {
     else {
         $Entries |
             Select-Object name, pid, @{Name="running"; Expression={
-                Test-ProcessAlive -ProcessId ([int]$_.pid)
+                Test-TrackedProcessAlive -Entry $_
             }}, log |
             Format-Table -AutoSize
     }
@@ -102,7 +131,7 @@ if ($Restart) {
     Stop-KnownProcesses
 }
 elseif (@(Read-RuntimeState | Where-Object {
-    Test-ProcessAlive -ProcessId ([int]$_.pid)
+    Test-TrackedProcessAlive -Entry $_
 }).Count -gt 0) {
     throw "ReclaimRail already has tracked running processes. Use -Action Status or -Restart."
 }
@@ -180,6 +209,8 @@ try {
         $StartedProcesses += [pscustomobject]@{
             name = [string]$Entry.name
             pid = [int]$Process.Id
+            process_name = $Process.ProcessName
+            process_started_at_utc = $Process.StartTime.ToUniversalTime().ToString("o")
             started_order = $StartedOrder
             log = $StdoutPath
             error_log = $StderrPath

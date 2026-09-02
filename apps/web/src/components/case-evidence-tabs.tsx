@@ -15,7 +15,7 @@ const tabs = [
     id: "decision",
     label: "Agent & policy",
     icon: BrainCircuit,
-    helper: "Inspect Gemini's recommendation and the deterministic safety decision.",
+    helper: "Inspect the recorded planner recommendation and the deterministic safety decision.",
     next: "Only an allowed action can move to Razorpay execution.",
   },
   {
@@ -36,19 +36,50 @@ const tabs = [
 
 type TabId = (typeof tabs)[number]["id"];
 
+function guideFor(
+  tabId: TabId,
+  caseStatus: string,
+  outcomeStatus: string | null,
+  providerStatus: string | null,
+): { helper: string; resultLabel: string; result: string } {
+  const tab = tabs.find((candidate) => candidate.id === tabId) ?? tabs[0];
+  const recovered = caseStatus === "recovered" || outcomeStatus === "recovered";
+  if (!recovered) {
+    return { helper: tab.helper, resultLabel: "What happens next", result: tab.next };
+  }
+  const completed: Record<TabId, string> = {
+    lifecycle: "Original payment failure was verified before recovery began.",
+    decision: "The recorded planner proposed the action and deterministic policy recorded its verdict.",
+    provider: providerStatus === "paid"
+      ? "Razorpay reports the bounded recovery link as paid."
+      : "The bounded Razorpay action has completed.",
+    outcome: "Provider reconciliation confirmed recovered revenue and closed the case.",
+  };
+  return { helper: tab.helper, resultLabel: "Recorded result", result: completed[tabId] };
+}
+
 export function CaseEvidenceTabs({
   lifecycle,
   decision,
   provider,
   outcome,
+  caseStatus,
+  outcomeStatus,
+  providerStatus,
 }: {
   lifecycle: ReactNode;
   decision: ReactNode;
   provider: ReactNode;
   outcome: ReactNode;
+  caseStatus: string;
+  outcomeStatus: string | null;
+  providerStatus: string | null;
 }) {
-  const [activeTab, setActiveTab] = useState<TabId>("lifecycle");
+  const [activeTab, setActiveTab] = useState<TabId>(
+    caseStatus === "recovered" || outcomeStatus === "recovered" ? "outcome" : "lifecycle",
+  );
   const content = { lifecycle, decision, provider, outcome };
+  const guide = guideFor(activeTab, caseStatus, outcomeStatus, providerStatus);
 
   return (
     <section className="case-tabs">
@@ -89,8 +120,8 @@ export function CaseEvidenceTabs({
             <span>Current review step</span>
             <strong>{tabs.find((tab) => tab.id === activeTab)?.label}</strong>
           </div>
-          <p>{tabs.find((tab) => tab.id === activeTab)?.helper}</p>
-          <p><b>What happens next:</b> {tabs.find((tab) => tab.id === activeTab)?.next}</p>
+          <p>{guide.helper}</p>
+          <p><b>{guide.resultLabel}:</b> {guide.result}</p>
         </div>
         {content[activeTab]}
       </div>

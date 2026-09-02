@@ -171,6 +171,8 @@ class RecoveryAuditEventSummary:
     event_hash: str
     hash_algorithm: str
     occurred_at: datetime
+    provider_status: str | None = None
+    outcome_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,6 +343,10 @@ def build_audit_chain_summary(
 ) -> RecoveryAuditChainSummary:
     timeline_entries = entries[:MAX_AUDIT_EVENTS]
 
+    def event_string(entry: RecoveryAuditChainEntry, key: str) -> str | None:
+        value = entry.event_data.get(key)
+        return value if isinstance(value, str) else None
+
     return RecoveryAuditChainSummary(
         valid=verification.valid,
         reason=verification.reason.value,
@@ -358,6 +364,8 @@ def build_audit_chain_summary(
                 event_hash=entry.event_hash,
                 hash_algorithm=entry.hash_algorithm,
                 occurred_at=entry.occurred_at,
+                provider_status=event_string(entry, "provider_status"),
+                outcome_status=event_string(entry, "outcome_status"),
             )
             for entry in timeline_entries
         ),

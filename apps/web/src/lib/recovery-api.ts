@@ -235,7 +235,7 @@ async function getRecoveryApiJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function loadRecoveryDashboard(): Promise<{
+export async function loadRecoveryDashboard(caseLimit = 8): Promise<{
   summary: RecoveryDashboardSummary;
   incidents: RecoveryIncident[];
   cases: RecoveryCaseQueuePage;
@@ -244,7 +244,7 @@ export async function loadRecoveryDashboard(): Promise<{
   const [summary, incidents, cases, outcomes] = await Promise.all([
     getRecoveryApiJson<RecoveryDashboardSummary>("/recovery/dashboard/summary"),
     getRecoveryApiJson<RecoveryIncident[]>("/recovery/dashboard/incidents?limit=5"),
-    getRecoveryApiJson<RecoveryCaseQueuePage>("/recovery/dashboard/cases?limit=8"),
+    getRecoveryApiJson<RecoveryCaseQueuePage>(`/recovery/dashboard/cases?limit=${caseLimit}`),
     getRecoveryApiJson<RecoveryOutcomePage>("/recovery/dashboard/outcomes?limit=6"),
   ]);
 

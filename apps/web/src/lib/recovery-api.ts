@@ -79,6 +79,21 @@ export type RecoveryOutcomePage = {
   offset: number;
 };
 
+export type RecoveryApproval = {
+  approval_id: string;
+  recovery_case_id: string;
+  recovery_action_id: string;
+  status: string;
+  request_reason: string;
+  amount_minor: number;
+  currency: string;
+  threshold_minor: number | null;
+  request_context: Record<string, unknown>;
+  requested_at: string;
+  expires_at: string;
+  version: number;
+};
+
 export type RecoveryCaseDetail = {
   recovery_case: {
     recovery_case_id: string;
@@ -234,6 +249,18 @@ export async function loadRecoveryDashboard(): Promise<{
   ]);
 
   return { summary, incidents, cases, outcomes };
+}
+
+export async function loadRecoveryApprovals(): Promise<RecoveryApproval[]> {
+  const operatorToken = process.env.RECLAIMRAIL_RECOVERY_OPERATOR_ACCESS_TOKEN?.trim();
+  if (!operatorToken) return [];
+  const response = await fetch(`${getApiBaseUrl()}/recovery/approvals?status=pending&limit=100`, {
+    cache: "no-store",
+    headers: { Accept: "application/json", "X-ReclaimRail-Operator-Token": operatorToken },
+  });
+  if (!response.ok) throw new Error(`Recovery approval request failed (${response.status})`);
+  const payload = (await response.json()) as { approvals: RecoveryApproval[] };
+  return payload.approvals;
 }
 
 export async function loadRecoveryCaseDetail(

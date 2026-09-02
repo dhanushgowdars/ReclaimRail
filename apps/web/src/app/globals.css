@@ -1486,6 +1486,8 @@ td small { font-size: 12px; }
 .case-explorer__controls input, .case-explorer__controls select { font-size: 15px; }
 .case-explorer__count { color: #536f8d; font-size: 14px; font-weight: 800; }
 .case-row__identity strong { font-size: 17px; }.case-row__identity em { padding: 4px 8px; font-size: 11px; }.case-row__identity > span, .case-row__time > span, .case-row__amount > span { gap: 6px; font-size: 14px; }.case-row__time strong, .case-row__state > strong { font-size: 14px; font-weight: 800; }.case-status { padding: 5px 9px; font-size: 12px; }.case-row__amount strong { font-size: 19px; }.case-row__evidence { gap: 6px; font-size: 14px; }
+.case-row { grid-template-columns: 46px minmax(210px, 1.2fr) minmax(205px, .9fr) minmax(220px, 1fr) minmax(190px, .75fr) minmax(140px, auto); }
+.case-row__amount { min-width: 0; justify-self: stretch; }.case-row__amount > span { white-space: nowrap; }.case-row__evidence { justify-self: end; min-width: 140px; white-space: nowrap; }
 @media (max-width: 840px) { .review-card dl, .review-decision-controls { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .outcome-ledger__metrics { grid-template-columns: 1fr; } }
 @media (max-width: 840px) { .rail-card__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

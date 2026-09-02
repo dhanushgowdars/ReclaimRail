@@ -28,7 +28,7 @@ export function CaseExplorer({ cases, currency }: { cases: RecoveryCaseQueueItem
   const [status, setStatus] = useState("all");
   const [rail, setRail] = useState("all");
   const [sortBy, setSortBy] = useState("newest");
-  const rails = [...new Set(cases.map((item) => item.payment_method).filter((value): value is string => value !== null))];
+  const rails = ["netbanking", "wallet", "card", "upi"];
   const shown = cases.filter((item) => {
     const haystack = `${item.recovery_case_id} ${item.status} ${item.payment_method ?? ""} ${item.latest_action_policy_outcome ?? ""}`.toLowerCase();
     return haystack.includes(query.toLowerCase()) && (status === "all" || item.status === status) && (rail === "all" || item.payment_method === rail);

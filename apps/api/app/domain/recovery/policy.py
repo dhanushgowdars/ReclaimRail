@@ -37,7 +37,9 @@ AUTOMATED_INTERVENTION_ACTIONS: Final = frozenset(
 class RecoveryPolicy:
     maximum_recovery_attempts: int = 3
     customer_quiet_period: timedelta = timedelta(hours=4)
-    automatic_amount_limit_minor: int = 1_000_000
+    # Hard execution boundary. The lower, independently configured approval
+    # threshold pauses an otherwise allowed action for operator review.
+    automatic_amount_limit_minor: int = 5_000_000
     circuit_breaker_severities: tuple[IncidentSeverity, ...] = (
         IncidentSeverity.HIGH,
         IncidentSeverity.CRITICAL,

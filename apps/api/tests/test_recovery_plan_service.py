@@ -42,13 +42,14 @@ def create_case(
     status: RecoveryCaseStatus = RecoveryCaseStatus.OPEN,
     source_incident_id: UUID | None = None,
     last_customer_contact_at: datetime | None = None,
+    amount_minor: int = 250_000,
 ) -> RecoveryCase:
     return RecoveryCase(
         id=CASE_ID,
         payment_attempt_id=PAYMENT_ID,
         source_incident_id=source_incident_id,
         status=status.value,
-        amount_minor=250_000,
+        amount_minor=amount_minor,
         currency="INR",
         payment_method="upi",
         recovery_attempt_count=0,
@@ -59,12 +60,12 @@ def create_case(
     )
 
 
-def create_payment(*, state: str = "failed") -> PaymentAttempt:
+def create_payment(*, state: str = "failed", amount_minor: int = 250_000) -> PaymentAttempt:
     return PaymentAttempt(
         id=PAYMENT_ID,
         provider="razorpay",
         provider_payment_id="pay_recovery_plan_test",
-        amount_minor=250_000,
+        amount_minor=amount_minor,
         currency="INR",
         method="upi",
         payment_created_at=NOW - timedelta(minutes=11),
@@ -177,10 +178,10 @@ async def test_persists_policy_evaluated_recovery_plan(
 async def test_high_value_payment_link_waits_for_human_approval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    recovery_case = create_case()
+    recovery_case = create_case(amount_minor=1_000_100)
     session = create_session(
         recovery_case=recovery_case,
-        payment=create_payment(),
+        payment=create_payment(amount_minor=1_000_100),
     )
     append_audit, _ = patch_audit(monkeypatch)
     monkeypatch.setattr(
@@ -195,7 +196,7 @@ async def test_high_value_payment_link_waits_for_human_approval(
         available_channels=(RecoveryChannel.EMAIL,),
         alternate_payment_methods=("card",),
         planned_at=NOW,
-        approval_threshold_minor=200_000,
+        approval_threshold_minor=1_000_000,
         approval_window=timedelta(minutes=15),
     )
 
@@ -208,8 +209,8 @@ async def test_high_value_payment_link_waits_for_human_approval(
     approval = result.approvals[0]
     assert approval.recovery_action_id == payment_link_action.id
     assert approval.status == RecoveryApprovalStatus.PENDING.value
-    assert approval.amount_minor == 250_000
-    assert approval.threshold_minor == 200_000
+    assert approval.amount_minor == 1_000_100
+    assert approval.threshold_minor == 1_000_000
     assert approval.expires_at == NOW + timedelta(minutes=15)
     assert append_audit.await_count == 2
     assert [call.kwargs["request"].event_type for call in append_audit.await_args_list] == [

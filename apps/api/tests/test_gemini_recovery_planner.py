@@ -379,7 +379,7 @@ def test_prompt_contains_only_bounded_payment_evidence() -> None:
     assert "pay_gemini_plan_test" in prompt
     assert '"amount_minor":450000' in prompt
     assert '"approved_channels":["email"]' in prompt
-    assert '"automatic_amount_limit_minor":1000000' in prompt
+    assert '"automatic_amount_limit_minor":5000000' in prompt
     assert '"required_decision":"recover"' in prompt
     assert '"baseline_action_types":["create_payment_link"' in prompt
     assert "customer_name" not in prompt

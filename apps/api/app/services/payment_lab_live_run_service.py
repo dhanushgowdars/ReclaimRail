@@ -760,7 +760,10 @@ def _build_steps(
                     agent_run.reasoning_summary
                     or "Gemini persisted a bounded recommendation from the signed payment evidence."
                 )
-                if agent_status is PaymentLabLiveStepStatus.COMPLETED
+                if (
+                    agent_run is not None
+                    and agent_status is PaymentLabLiveStepStatus.COMPLETED
+                )
                 else "Gemini is preparing a bounded proposal"
             ),
             duration_milliseconds=(

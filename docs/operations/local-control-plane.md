@@ -56,15 +56,29 @@ Recovery payment-link actions at or above
 `RECLAIMRAIL_RECOVERY_APPROVAL_THRESHOLD_MINOR` pause before provider execution. Set a
 separate operator credential in `apps/api/.env`:
 
+The default approval threshold is ₹10,000 (`1000000` minor units). This review
+threshold is intentionally lower than the ₹50,000 hard automation boundary: an
+operator may approve an otherwise policy-allowed action in that band, while an
+amount above the hard boundary remains escalated and cannot reach provider execution.
+
 ```dotenv
 RECLAIMRAIL_RECOVERY_APPROVAL_THRESHOLD_MINOR=1000000
 RECLAIMRAIL_RECOVERY_APPROVAL_TTL_SECONDS=900
 RECLAIMRAIL_RECOVERY_OPERATOR_ACCESS_TOKEN=<long-random-operator-secret>
 ```
 
-The operator queue is intentionally separate from the public demo surface. Every
-decision requires the dedicated header, reviewer identity, reason and current approval
-version:
+For the protected-review controls in the local demo, add the same operator secret to
+`apps/web/.env.local`; it is used only by Next.js server routes and is never sent to the
+browser:
+
+```dotenv
+RECLAIMRAIL_RECOVERY_OPERATOR_ACCESS_TOKEN=<same-long-random-operator-secret>
+```
+
+Every decision records the dedicated server credential, reviewer identity, reason and
+current approval version. The browser is allowed to request a review only after it has
+passed the separate Payment Lab reviewer-code check. The API can also be operated
+directly for troubleshooting:
 
 ```powershell
 $Headers = @{ "X-ReclaimRail-Operator-Token" = $env:RR_OPERATOR_TOKEN }

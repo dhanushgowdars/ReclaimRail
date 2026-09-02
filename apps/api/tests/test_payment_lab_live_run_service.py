@@ -68,6 +68,7 @@ def build_payment(*, state: str = "failed") -> MagicMock:
     payment.current_state = state
     payment.error_code = "BAD_REQUEST_ERROR" if state == "failed" else None
     payment.error_reason = "payment_failed" if state == "failed" else None
+    payment.error_description = "Bank declined payment" if state == "failed" else None
     payment.state_event_created_at = NOW + timedelta(seconds=5)
     return payment
 
@@ -201,23 +202,13 @@ async def test_checkout_run_waits_for_signed_failure() -> None:
     assert [step.status for step in result.steps] == [
         PaymentLabLiveStepStatus.COMPLETED,
         PaymentLabLiveStepStatus.ACTIVE,
-        PaymentLabLiveStepStatus.PENDING,
-        PaymentLabLiveStepStatus.PENDING,
-        PaymentLabLiveStepStatus.PENDING,
-        PaymentLabLiveStepStatus.PENDING,
-        PaymentLabLiveStepStatus.PENDING,
-        PaymentLabLiveStepStatus.PENDING,
     ]
     assert [step.key for step in result.steps] == [
         "payment_attempt",
         "verified_failure",
-        "recovery_case",
-        "agent_recommendation",
-        "policy_decision",
-        "human_approval",
-        "provider_action",
-        "measured_outcome",
     ]
+    assert "No recovery has started" in result.steps[0].detail
+    assert "Closing Checkout alone" in result.steps[1].detail
     session.execute.assert_not_awaited()
 
 
@@ -237,6 +228,7 @@ async def test_verified_failure_exposes_real_stabilization_state() -> None:
     assert result.active_step_key == "recovery_case"
     assert result.waiting_reason == "Five-second late-authorization safety window"
     assert result.steps[1].status is PaymentLabLiveStepStatus.COMPLETED
+    assert result.steps[1].detail == "Razorpay reported: Bank declined payment"
     assert result.steps[2].status is PaymentLabLiveStepStatus.ACTIVE
     assert result.steps[2].detail == (
         "Five-second signed-evidence stabilization window before recovery begins"
@@ -296,6 +288,31 @@ async def test_completed_run_exposes_provider_agent_policy_and_outcome_evidence(
     assert steps_by_key["provider_action"].duration_milliseconds == 500
     assert steps_by_key["policy_decision"].duration_milliseconds is None
     assert all(step.status is PaymentLabLiveStepStatus.COMPLETED for step in result.steps)
+
+
+@pytest.mark.asyncio
+async def test_equal_provider_timestamps_do_not_claim_zero_millisecond_duration() -> None:
+    run = build_run(status=PaymentLabRunStatus.RECOVERY_RUNNING.value)
+    run.payment_attempt_id = ATTEMPT_ID
+    action = build_action()
+    action.completed_at = action.started_at
+
+    action_result = MagicMock()
+    action_result.scalars.return_value.all.return_value = [action]
+    session = AsyncMock(spec=AsyncSession)
+    session.get.side_effect = (run, build_payment())
+    session.execute.side_effect = (
+        scalar_result(build_case()),
+        scalar_result(build_agent()),
+        action_result,
+        scalar_result(None),
+        scalar_result(build_outcome()),
+    )
+
+    result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
+
+    steps_by_key = {step.key: step for step in result.steps}
+    assert steps_by_key["provider_action"].duration_milliseconds is None
 
 
 @pytest.mark.asyncio

@@ -544,7 +544,9 @@ def _recorded_duration_milliseconds(
     if started_at is None or completed_at is None:
         return None
     duration = int((completed_at - started_at).total_seconds() * 1000)
-    return max(duration, 0)
+    # Equal timestamps mean the persistence precision cannot support a useful
+    # duration claim. Present that as unknown instead of advertising "0 ms".
+    return duration if duration > 0 else None
 
 
 def _build_steps(
@@ -559,6 +561,14 @@ def _build_steps(
     outcome: RecoveryOutcome | None,
 ) -> tuple[PaymentLabLiveStep, ...]:
     payment_state = _payment_state(payment_attempt)
+    provider_failure_detail = (
+        payment_attempt.error_description
+        or payment_attempt.error_reason
+        or payment_attempt.error_code
+        or "Payment failed"
+        if payment_attempt is not None
+        else None
+    )
     if derived_state.business_state is PaymentLabLiveBusinessState.ORIGINAL_PAYMENT_SUCCEEDED:
         return (
             PaymentLabLiveStep(
@@ -581,6 +591,30 @@ def _build_steps(
         if run.provider_order_id is not None
         else PaymentLabLiveStepStatus.ACTIVE
     )
+
+    # Opening Checkout is not recovery evidence. Until Razorpay sends a signed
+    # failed-payment event, do not show a recovery case or an AI workflow as if
+    # either has started.
+    if payment_state is not PaymentState.FAILED and recovery_case is None:
+        return (
+            PaymentLabLiveStep(
+                key="payment_attempt",
+                label="Payment attempt",
+                status=checkout_status,
+                occurred_at=run.provider_created_at or run.created_at,
+                detail=("Razorpay created the original payment order. No recovery has started."),
+            ),
+            PaymentLabLiveStep(
+                key="verified_failure",
+                label="Provider payment result",
+                status=PaymentLabLiveStepStatus.ACTIVE,
+                occurred_at=None,
+                detail=(
+                    "Waiting for Razorpay's signed result. Closing Checkout alone does not "
+                    "open a recovery case."
+                ),
+            ),
+        )
 
     failure_observed = payment_state is PaymentState.FAILED or recovery_case is not None
     failure_status = PaymentLabLiveStepStatus.PENDING
@@ -641,7 +675,7 @@ def _build_steps(
             provider_status = PaymentLabLiveStepStatus.ACTIVE
 
     approval_status = PaymentLabLiveStepStatus.PENDING
-    approval_detail = "No human approval required"
+    approval_detail = "No protected review was required for this action."
     approval_occurred_at: datetime | None = None
     if approval is not None:
         approval_occurred_at = approval.decided_at or approval.requested_at
@@ -681,11 +715,11 @@ def _build_steps(
             label="Payment attempt",
             status=checkout_status,
             occurred_at=run.provider_created_at or run.created_at,
-            detail="Razorpay Test Mode order created",
+            detail="Razorpay created the original payment order.",
         ),
         PaymentLabLiveStep(
             key="verified_failure",
-            label="Verified failure" if failure_observed else "Provider result",
+            label="Verified payment failure" if failure_observed else "Provider result",
             status=failure_status,
             occurred_at=(
                 payment_attempt.state_event_created_at
@@ -695,7 +729,9 @@ def _build_steps(
                 else None
             ),
             detail=(
-                "Signed provider evidence linked"
+                (f"Razorpay reported: {provider_failure_detail}")
+                if failure_observed and payment_attempt is not None
+                else "Signed failure evidence is linked to this recovery case"
                 if failure_observed
                 else "Waiting for signed provider evidence"
             ),
@@ -706,7 +742,8 @@ def _build_steps(
             status=case_status,
             occurred_at=(recovery_case.opened_at if recovery_case is not None else None),
             detail=(
-                "Failure promoted into a bounded recovery case"
+                "A controlled recovery case opened only after Razorpay confirmed the "
+                "failed payment."
                 if recovery_case is not None
                 else "Five-second signed-evidence stabilization window before recovery begins"
             ),
@@ -719,8 +756,11 @@ def _build_steps(
                 agent_run.completed_at or agent_run.started_at if agent_run is not None else None
             ),
             detail=(
-                "Gemini proposal persisted with decision evidence"
-                if agent_status is PaymentLabLiveStepStatus.COMPLETED
+                (
+                    agent_run.reasoning_summary
+                    or "Gemini persisted a bounded recommendation from the signed payment evidence."
+                )
+                if (agent_run is not None and agent_status is PaymentLabLiveStepStatus.COMPLETED)
                 else "Gemini is preparing a bounded proposal"
             ),
             duration_milliseconds=(
@@ -738,7 +778,10 @@ def _build_steps(
             status=policy_status,
             occurred_at=(latest_action.policy_evaluated_at if latest_action is not None else None),
             detail=(
-                f"Deterministic policy: {latest_action.policy_outcome}"
+                (
+                    latest_action.policy_explanation
+                    or f"Deterministic policy decided: {latest_action.policy_outcome}."
+                )
                 if latest_action is not None
                 else "Waiting for deterministic guardrails"
             ),
@@ -792,12 +835,15 @@ def _build_steps(
                 if derived_state.business_state is PaymentLabLiveBusinessState.STOPPING_RECOVERY
                 else "Approval closed without provider execution"
                 if approval_stopped_execution
-                else "Razorpay payment link created"
+                else (
+                    "Razorpay created recovery link "
+                    f"{latest_action.provider_action_id}. The customer can now choose to pay it."
+                )
                 if latest_action is not None and latest_action.provider_action_id is not None
                 else "Policy stopped money-facing execution"
                 if latest_action is not None
                 and latest_action.policy_outcome in {"block", "escalate", "stop"}
-                else "Waiting for idempotent provider execution"
+                else "Waiting for the permitted provider action to be executed exactly once."
             ),
             duration_milliseconds=(
                 _recorded_duration_milliseconds(

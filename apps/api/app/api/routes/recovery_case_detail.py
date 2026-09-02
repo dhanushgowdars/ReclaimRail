@@ -172,6 +172,8 @@ class RecoveryAuditEventSummaryResponse(ResponseModel):
     event_hash: str = Field(min_length=64, max_length=64)
     hash_algorithm: str
     occurred_at: datetime
+    provider_status: str | None = None
+    outcome_status: str | None = None
 
 
 class RecoveryAuditChainSummaryResponse(ResponseModel):

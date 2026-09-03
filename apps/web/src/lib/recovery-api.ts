@@ -1,4 +1,4 @@
-export type RecoveryDashboardSummary = {
+﻿export type RecoveryDashboardSummary = {
   currency: string;
   revenue_at_risk_minor: number;
   verified_recovered_minor: number;
@@ -235,7 +235,7 @@ async function getRecoveryApiJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function loadRecoveryDashboard(caseLimit = 8): Promise<{
+export async function loadRecoveryDashboard(caseLimit = 8, outcomeLimit = 6): Promise<{
   summary: RecoveryDashboardSummary;
   incidents: RecoveryIncident[];
   cases: RecoveryCaseQueuePage;
@@ -245,7 +245,7 @@ export async function loadRecoveryDashboard(caseLimit = 8): Promise<{
     getRecoveryApiJson<RecoveryDashboardSummary>("/recovery/dashboard/summary"),
     getRecoveryApiJson<RecoveryIncident[]>("/recovery/dashboard/incidents?limit=5"),
     getRecoveryApiJson<RecoveryCaseQueuePage>(`/recovery/dashboard/cases?limit=${caseLimit}`),
-    getRecoveryApiJson<RecoveryOutcomePage>("/recovery/dashboard/outcomes?limit=6"),
+    getRecoveryApiJson<RecoveryOutcomePage>(`/recovery/dashboard/outcomes?limit=${outcomeLimit}`),
   ]);
 
   return { summary, incidents, cases, outcomes };
@@ -270,3 +270,5 @@ export async function loadRecoveryCaseDetail(
     `/recovery/dashboard/cases/${encodeURIComponent(recoveryCaseId)}`,
   );
 }
+
+

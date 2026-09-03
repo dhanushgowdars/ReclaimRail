@@ -1,4 +1,5 @@
 from app.db.base import Base
+from app.db.models.evaluation import EvaluationRun, EvaluationScenario  # noqa: F401
 from app.db.models.incident import (
     IncidentDetectionObservation,
     IncidentObservationOutcome,

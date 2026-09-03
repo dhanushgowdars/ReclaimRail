@@ -3,7 +3,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes.evaluations import router as evaluations_router
 from app.api.routes.health import router as health_router
 from app.api.routes.payment_lab import router as payment_lab_router
 from app.api.routes.payment_lab_status import router as payment_lab_status_router
@@ -39,14 +41,27 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Local Next.js frontend may call the FastAPI recovery API during development.
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://127.0.0.1:3000",
+            "http://localhost:3000",
+        ],
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+
     application.include_router(health_router)
     application.include_router(payment_lab_router)
     application.include_router(payment_lab_status_router)
     application.include_router(recovery_dashboard_router)
     application.include_router(recovery_case_detail_router)
+    application.include_router(recovery_approvals_router)
     application.include_router(recovery_incidents_router)
     application.include_router(recovery_outcomes_router)
-    application.include_router(recovery_approvals_router)
+    application.include_router(evaluations_router)
     application.include_router(webhook_router)
 
     return application

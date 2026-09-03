@@ -12,6 +12,7 @@ from app.core.database import get_database_session
 from app.db.models.evaluation import EvaluationRun, EvaluationScenario
 from app.services.evaluation_service import (
     SYNTHETIC_PROVENANCE,
+    EvaluationMetrics,
     create_or_load_controlled_evaluation,
     load_evaluation_metrics,
 )
@@ -73,7 +74,10 @@ class EvaluationScenarioResponse(BaseModel):
     evaluated_at: datetime
 
 
-def response(run: EvaluationRun, metrics: object) -> EvaluationRunResponse:
+def response(
+    run: EvaluationRun,
+    metrics: EvaluationMetrics,
+) -> EvaluationRunResponse:
     return EvaluationRunResponse(
         evaluation_run_id=run.id,
         label=run.label,

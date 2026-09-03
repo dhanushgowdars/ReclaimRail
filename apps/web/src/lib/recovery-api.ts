@@ -1,4 +1,4 @@
-export type RecoveryDashboardSummary = {
+﻿export type RecoveryDashboardSummary = {
   currency: string;
   revenue_at_risk_minor: number;
   verified_recovered_minor: number;
@@ -77,6 +77,21 @@ export type RecoveryOutcomePage = {
   total_count: number;
   limit: number;
   offset: number;
+};
+
+export type RecoveryApproval = {
+  approval_id: string;
+  recovery_case_id: string;
+  recovery_action_id: string;
+  status: string;
+  request_reason: string;
+  amount_minor: number;
+  currency: string;
+  threshold_minor: number | null;
+  request_context: Record<string, unknown>;
+  requested_at: string;
+  expires_at: string;
+  version: number;
 };
 
 export type RecoveryCaseDetail = {
@@ -220,7 +235,7 @@ async function getRecoveryApiJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function loadRecoveryDashboard(): Promise<{
+export async function loadRecoveryDashboard(caseLimit = 8, outcomeLimit = 6): Promise<{
   summary: RecoveryDashboardSummary;
   incidents: RecoveryIncident[];
   cases: RecoveryCaseQueuePage;
@@ -229,11 +244,23 @@ export async function loadRecoveryDashboard(): Promise<{
   const [summary, incidents, cases, outcomes] = await Promise.all([
     getRecoveryApiJson<RecoveryDashboardSummary>("/recovery/dashboard/summary"),
     getRecoveryApiJson<RecoveryIncident[]>("/recovery/dashboard/incidents?limit=5"),
-    getRecoveryApiJson<RecoveryCaseQueuePage>("/recovery/dashboard/cases?limit=8"),
-    getRecoveryApiJson<RecoveryOutcomePage>("/recovery/dashboard/outcomes?limit=6"),
+    getRecoveryApiJson<RecoveryCaseQueuePage>(`/recovery/dashboard/cases?limit=${caseLimit}`),
+    getRecoveryApiJson<RecoveryOutcomePage>(`/recovery/dashboard/outcomes?limit=${outcomeLimit}`),
   ]);
 
   return { summary, incidents, cases, outcomes };
+}
+
+export async function loadRecoveryApprovals(): Promise<RecoveryApproval[]> {
+  const operatorToken = process.env.RECLAIMRAIL_RECOVERY_OPERATOR_ACCESS_TOKEN?.trim();
+  if (!operatorToken) return [];
+  const response = await fetch(`${getApiBaseUrl()}/recovery/approvals?status=pending&limit=100`, {
+    cache: "no-store",
+    headers: { Accept: "application/json", "X-ReclaimRail-Operator-Token": operatorToken },
+  });
+  if (!response.ok) throw new Error(`Recovery approval request failed (${response.status})`);
+  const payload = (await response.json()) as { approvals: RecoveryApproval[] };
+  return payload.approvals;
 }
 
 export async function loadRecoveryCaseDetail(
@@ -243,3 +270,5 @@ export async function loadRecoveryCaseDetail(
     `/recovery/dashboard/cases/${encodeURIComponent(recoveryCaseId)}`,
   );
 }
+
+

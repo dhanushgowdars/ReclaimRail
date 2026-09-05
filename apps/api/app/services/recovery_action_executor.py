@@ -812,6 +812,7 @@ async def execute_recovery_payment_link_action(
         # directly avoids spending a Razorpay request on a list/search endpoint
         # before the real action.  Retry attempts still recover any existing
         # link by that same reference before creating another one.
+        payment_link: RazorpayPaymentLink | None
         if prepared.attempt_number == 1:
             payment_link = await provider.create_payment_link(
                 prepared.request,

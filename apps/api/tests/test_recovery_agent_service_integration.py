@@ -97,9 +97,7 @@ class StubGeminiProvider:
                                 "The payment remains failed and policy permits "
                                 "one bounded recovery action."
                             ),
-                            "action_impact": (
-                                "Recommend one exact-amount recovery payment link."
-                            ),
+                            "action_impact": ("Recommend one exact-amount recovery payment link."),
                         },
                     ],
                     "alternatives_considered": [],

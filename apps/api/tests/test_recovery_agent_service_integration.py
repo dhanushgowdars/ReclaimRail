@@ -79,6 +79,31 @@ class StubGeminiProvider:
                     "operator_explanation": (
                         "The failed payment can receive one exact-amount recovery link."
                     ),
+                    "observations": [
+                        {
+                            "evidence_reference": "payment_state_snapshot",
+                        },
+                        {
+                            "evidence_reference": "merchant_recovery_policy",
+                        },
+                    ],
+                    "reasoning_items": [
+                        {
+                            "evidence_references": [
+                                "payment_state_snapshot",
+                                "merchant_recovery_policy",
+                            ],
+                            "interpretation": (
+                                "The payment remains failed and policy permits "
+                                "one bounded recovery action."
+                            ),
+                            "action_impact": (
+                                "Recommend one exact-amount recovery payment link."
+                            ),
+                        },
+                    ],
+                    "alternatives_considered": [],
+                    "known_uncertainties": [],
                 },
                 "decision": "recover",
                 "reasoning_summary": ("Create one bounded retry link for the original payment"),
@@ -276,7 +301,7 @@ async def test_agent_persists_gemini_plan_through_real_policy_transaction() -> N
 
         assert stored_run.planner_provider == "gemini"
         assert stored_run.model_name == "gemini-integration-test"
-        assert stored_run.prompt_version == "gemini-structured-v2"
+        assert stored_run.prompt_version == "gemini-structured-v3"
         assert stored_run.input_token_count == 240
         assert stored_run.output_token_count == 61
         assert stored_run.evidence["planner"]["fallback_used"] is False

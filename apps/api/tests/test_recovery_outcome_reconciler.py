@@ -16,6 +16,7 @@ from app.services.recovery_outcome_reconciler import (
     PreparedRecoveryOutcomeReconciliation,
     RecoveryOutcomeProviderEvidenceError,
     _build_outcome_proof,
+    _mark_case_closed_without_recovery,
     _provider_observed_at,
     _validate_provider_payment_link,
 )
@@ -178,6 +179,51 @@ def test_created_link_remains_pending() -> None:
     assert proof.status is RecoveryOutcomeStatus.PAYMENT_LINK_PENDING
     assert proof.attribution is RecoveryOutcomeAttribution.NONE
     assert proof.gross_recovered_minor == 0
+
+
+@pytest.mark.parametrize(
+    ("outcome_status", "close_reason"),
+    [
+        (
+            RecoveryOutcomeStatus.PAYMENT_LINK_EXPIRED,
+            "payment_link_expired_without_recovery",
+        ),
+        (
+            RecoveryOutcomeStatus.PAYMENT_LINK_CANCELLED,
+            "payment_link_cancelled_without_recovery",
+        ),
+        (
+            RecoveryOutcomeStatus.DUPLICATE_COLLECTION_PREVENTED,
+            "duplicate_collection_prevented",
+        ),
+    ],
+)
+def test_terminal_provider_outcome_closes_case_without_recovery(
+    outcome_status: RecoveryOutcomeStatus,
+    close_reason: str,
+) -> None:
+    recovery_case = SimpleNamespace(
+        status="waiting",
+        closed_at=None,
+        close_reason=None,
+        active_payment_link_id="plink_reconciliation_001",
+        next_action_at=RECONCILED_AT,
+        version=3,
+    )
+
+    changed = _mark_case_closed_without_recovery(
+        recovery_case=recovery_case,
+        outcome_status=outcome_status,
+        closed_at=RECONCILED_AT,
+    )
+
+    assert changed is True
+    assert recovery_case.status == "cancelled"
+    assert recovery_case.closed_at == RECONCILED_AT
+    assert recovery_case.close_reason == close_reason
+    assert recovery_case.active_payment_link_id is None
+    assert recovery_case.next_action_at is None
+    assert recovery_case.version == 4
 
 
 def test_paid_link_with_zero_amount_is_rejected_as_invalid_evidence() -> None:

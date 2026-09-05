@@ -33,7 +33,6 @@ class RecoveryApprovalReason(StrEnum):
     NEAR_MAXIMUM_ATTEMPTS = "near_maximum_attempts"
     PARTIAL_RECOVERY = "partial_recovery"
     PROVIDER_STATE_CONFLICT = "provider_state_conflict"
-    AI_LOW_CONFIDENCE = "ai_low_confidence"
     POLICY_REQUIRES_REVIEW = "policy_requires_review"
 
 
@@ -106,15 +105,15 @@ def build_recovery_approval_requirement(
     active_incident_severity: IncidentSeverity | None = None,
     partial_recovery: bool = False,
     provider_state_conflict: bool = False,
-    ai_confidence: float | None = None,
     policy_requires_review: bool = False,
 ) -> RecoveryApprovalRequirement | None:
     """Return the review gate for a policy-allowed provider action.
 
     Hard policy stops are intentionally excluded here: they remain blocked and
     an approval can never turn them into an executable action.  Confidence is
-    accepted now so the bounded-AI phase can use the same durable gate without
-    changing the approval contract again.
+    advisory model confidence is intentionally excluded from this authorization
+    boundary. Only deterministic, persisted business conditions may pause money
+    movement for a human decision.
     """
     if threshold_minor < 1:
         raise ValueError("Approval threshold must be positive")
@@ -131,25 +130,10 @@ def build_recovery_approval_requirement(
     ):
         return None
 
-    reasons: list[RecoveryApprovalReason] = []
-    if action.amount_minor >= threshold_minor:
-        reasons.append(RecoveryApprovalReason.AMOUNT_THRESHOLD)
-    if active_incident_severity is IncidentSeverity.MEDIUM:
-        reasons.append(RecoveryApprovalReason.ACTIVE_INCIDENT_UNCERTAINTY)
-    if recovery_attempt_count >= DEFAULT_RECOVERY_POLICY.maximum_recovery_attempts - 1:
-        reasons.append(RecoveryApprovalReason.NEAR_MAXIMUM_ATTEMPTS)
-    if partial_recovery:
-        reasons.append(RecoveryApprovalReason.PARTIAL_RECOVERY)
-    if provider_state_conflict:
-        reasons.append(RecoveryApprovalReason.PROVIDER_STATE_CONFLICT)
-    if ai_confidence is not None and not 0 <= ai_confidence <= 1:
-        raise ValueError("AI confidence must be between zero and one")
-    if ai_confidence is not None and ai_confidence < 0.70:
-        reasons.append(RecoveryApprovalReason.AI_LOW_CONFIDENCE)
-    if policy_requires_review:
-        reasons.append(RecoveryApprovalReason.POLICY_REQUIRES_REVIEW)
-    if not reasons:
+    if action.amount_minor < threshold_minor:
         return None
+
+    reasons = [RecoveryApprovalReason.AMOUNT_THRESHOLD]
 
     return RecoveryApprovalRequirement(
         reasons=tuple(reasons),
@@ -165,7 +149,6 @@ def build_recovery_approval_requirement(
             ),
             "partial_recovery": partial_recovery,
             "provider_state_conflict": provider_state_conflict,
-            "ai_confidence": ai_confidence,
             "policy_requires_review": policy_requires_review,
         },
     )
@@ -295,8 +278,10 @@ async def _expire_approval(
     action.status = RecoveryActionStatus.CANCELLED.value
     action.completed_at = expired_at
     if recovery_case.status == RecoveryCaseStatus.AWAITING_APPROVAL.value:
-        recovery_case.status = RecoveryCaseStatus.ESCALATED.value
+        recovery_case.status = RecoveryCaseStatus.CANCELLED.value
         recovery_case.next_action_at = None
+        recovery_case.closed_at = expired_at
+        recovery_case.close_reason = "approval_expired_without_execution"
         recovery_case.version += 1
 
     await append_recovery_audit_event(
@@ -403,8 +388,10 @@ async def decide_recovery_approval(
     else:
         action.status = RecoveryActionStatus.CANCELLED.value
         action.completed_at = decided_at
-        recovery_case.status = RecoveryCaseStatus.ESCALATED.value
+        recovery_case.status = RecoveryCaseStatus.CANCELLED.value
         recovery_case.next_action_at = None
+        recovery_case.closed_at = decided_at
+        recovery_case.close_reason = "approval_rejected_without_execution"
     recovery_case.version += 1
 
     await append_recovery_audit_event(

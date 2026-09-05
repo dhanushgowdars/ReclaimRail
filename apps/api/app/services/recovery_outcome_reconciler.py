@@ -10,6 +10,7 @@ from app.db.models.recovery import (
     RecoveryAction,
     RecoveryActionStatus,
     RecoveryAuditActor,
+    RecoveryAuditEvent,
     RecoveryCase,
 )
 from app.domain.recovery import (
@@ -471,6 +472,36 @@ def _mark_case_recovered(
     return True
 
 
+def _mark_case_closed_without_recovery(
+    *,
+    recovery_case: RecoveryCase,
+    outcome_status: RecoveryOutcomeStatus,
+    closed_at: datetime,
+) -> bool:
+    close_reasons = {
+        RecoveryOutcomeStatus.PAYMENT_LINK_EXPIRED: "payment_link_expired_without_recovery",
+        RecoveryOutcomeStatus.PAYMENT_LINK_CANCELLED: "payment_link_cancelled_without_recovery",
+        RecoveryOutcomeStatus.DUPLICATE_COLLECTION_PREVENTED: "duplicate_collection_prevented",
+    }
+    close_reason = close_reasons.get(outcome_status)
+    if close_reason is None:
+        return False
+    if (
+        recovery_case.status == RecoveryCaseStatus.CANCELLED.value
+        and recovery_case.closed_at == closed_at
+        and recovery_case.close_reason == close_reason
+        and recovery_case.active_payment_link_id is None
+    ):
+        return False
+    recovery_case.status = RecoveryCaseStatus.CANCELLED.value
+    recovery_case.closed_at = closed_at
+    recovery_case.close_reason = close_reason
+    recovery_case.active_payment_link_id = None
+    recovery_case.next_action_at = None
+    recovery_case.version += 1
+    return True
+
+
 async def complete_recovery_outcome_reconciliation(
     session: AsyncSession,
     *,
@@ -540,8 +571,19 @@ async def complete_recovery_outcome_reconciliation(
             recovery_case=recovery_case,
             recovered_at=proof.occurred_at,
         )
+    elif persistence.projection_updated:
+        _mark_case_closed_without_recovery(
+            recovery_case=recovery_case,
+            outcome_status=proof.status,
+            closed_at=proof.occurred_at,
+        )
 
-    if persistence.observation_created:
+    should_audit_provider_progress = not await _has_recorded_pending_provider_progress(
+        session,
+        recovery_action_id=recovery_action.id,
+        outcome_status=proof.status,
+    )
+    if persistence.observation_created and should_audit_provider_progress:
         await append_recovery_audit_event(
             session,
             recovery_case_id=recovery_case.id,
@@ -579,6 +621,31 @@ async def complete_recovery_outcome_reconciliation(
         projection_updated=persistence.projection_updated,
         observation_created=persistence.observation_created,
         case_marked_recovered=case_marked_recovered,
+    )
+
+
+async def _has_recorded_pending_provider_progress(
+    session: AsyncSession,
+    *,
+    recovery_action_id: UUID,
+    outcome_status: RecoveryOutcomeStatus,
+) -> bool:
+    """Keep the audit trail focused on provider-state transitions, not polls."""
+    if outcome_status is not RecoveryOutcomeStatus.PAYMENT_LINK_PENDING:
+        return False
+
+    result = await session.execute(
+        select(RecoveryAuditEvent.event_data)
+        .where(
+            RecoveryAuditEvent.recovery_action_id == recovery_action_id,
+            RecoveryAuditEvent.event_type == "outcome.payment_link.reconciled",
+        )
+        .order_by(RecoveryAuditEvent.sequence_number.desc())
+        .limit(1),
+    )
+    event_data = result.scalar_one_or_none()
+    return isinstance(event_data, dict) and event_data.get("outcome_status") == (
+        RecoveryOutcomeStatus.PAYMENT_LINK_PENDING.value
     )
 
 

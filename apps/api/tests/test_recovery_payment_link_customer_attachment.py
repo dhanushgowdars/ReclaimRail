@@ -8,10 +8,7 @@ from app.integrations.razorpay.payment_customers import (
     RazorpayPaymentCustomerProvider,
     RazorpayPaymentCustomerProviderError,
 )
-from app.integrations.razorpay.payment_links import (
-    RazorpayPaymentLinkProviderError,
-    RazorpayPaymentLinkRequest,
-)
+from app.integrations.razorpay.payment_links import RazorpayPaymentLinkRequest
 from app.services.recovery_action_executor import (
     PreparedPaymentLinkAction,
     attach_transient_customer_to_payment_link_request,
@@ -111,7 +108,7 @@ async def test_skips_customer_lookup_when_no_provider_is_configured() -> None:
 
 
 @pytest.mark.asyncio
-async def test_converts_customer_lookup_failure_to_safe_payment_link_error() -> None:
+async def test_customer_lookup_failure_does_not_block_unshared_payment_link() -> None:
     provider = MagicMock(
         spec=RazorpayPaymentCustomerProvider,
     )
@@ -123,16 +120,11 @@ async def test_converts_customer_lookup_failure_to_safe_payment_link_error() -> 
         ),
     )
 
-    with pytest.raises(
-        RazorpayPaymentLinkProviderError,
-    ) as caught:
-        await attach_transient_customer_to_payment_link_request(
-            create_prepared(
-                customer_contact_allowed=True,
-            ),
-            customer_provider=provider,
-        )
+    prepared = await attach_transient_customer_to_payment_link_request(
+        create_prepared(
+            customer_contact_allowed=True,
+        ),
+        customer_provider=provider,
+    )
 
-    assert caught.value.retryable is True
-    assert caught.value.status_code == 503
-    assert "customer lookup provider error" not in str(caught.value)
+    assert "customer" not in prepared.request.to_provider_payload()

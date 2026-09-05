@@ -53,20 +53,44 @@ class PaymentLabPaymentEvidenceResponse(ResponseModel):
     failure_code: str | None
     failure_reason: str | None
     observed_at: datetime
+    source: str | None = None
 
 
 class RecoveryAiTraceResponse(ResponseModel):
     root_cause_category: str | None
     recoverability_assessment: str | None
-    confidence: float | None = Field(default=None, ge=0, le=1)
     recommended_action: str | None
+    operator_explanation: str | None
     evidence_references: list[str]
+    evidence_citations: list[RecoveryAiEvidenceCitationResponse]
     evidence_codes: list[str]
     evidence_tool_names: list[str]
     input_token_count: int | None = Field(default=None, ge=0)
     output_token_count: int | None = Field(default=None, ge=0)
     fallback_used: bool | None
     fallback_reason: str | None
+    reasoning_items: list[RecoveryAiReasoningItemResponse]
+    alternatives_considered: list[RecoveryAiAlternativeResponse]
+    known_uncertainties: list[str]
+
+
+class RecoveryAiEvidenceCitationResponse(ResponseModel):
+    reference: str
+    label: str
+    observations: list[str]
+
+
+class RecoveryAiReasoningItemResponse(ResponseModel):
+    evidence_references: list[str]
+    interpretation: str
+    action_impact: str
+
+
+class RecoveryAiAlternativeResponse(ResponseModel):
+    action_type: str
+    disposition: str
+    reason: str
+    evidence_references: list[str]
 
 
 class PaymentLabAgentEvidenceResponse(ResponseModel):
@@ -89,10 +113,12 @@ class PaymentLabActionEvidenceResponse(ResponseModel):
     recovery_action_id: UUID
     sequence_number: int = Field(ge=1)
     action_type: str
+    proposal_reason: str
     channel: str | None
     status: str
     policy_outcome: str
     policy_guardrails: list[str]
+    policy_check_results: list[dict[str, str]]
     policy_explanation: str
     provider_action_id: str | None
     provider_action_status: str | None

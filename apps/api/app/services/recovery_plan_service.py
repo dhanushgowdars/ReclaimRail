@@ -24,6 +24,7 @@ from app.domain.payments import PaymentState
 from app.domain.recovery import (
     PaymentFailureEvidence,
     RecoveryActionProposal,
+    RecoveryActionType,
     RecoveryCaseSnapshot,
     RecoveryCaseStatus,
     RecoveryChannel,
@@ -33,6 +34,7 @@ from app.domain.recovery import (
     RecoveryPolicyDecision,
     RecoveryPolicyOutcome,
     build_deterministic_recovery_plan,
+    build_recovery_policy_checks,
     evaluate_recovery_proposal,
 )
 from app.integrations.gemini import (
@@ -231,6 +233,28 @@ def _planning_evidence(
                 ),
                 "evidence_references": list(planner_result.analysis.evidence_references),
                 "operator_explanation": planner_result.analysis.operator_explanation,
+                "observations": [
+                    {"evidence_reference": observation.evidence_reference}
+                    for observation in planner_result.analysis.observations
+                ],
+                "reasoning_items": [
+                    {
+                        "evidence_references": list(item.evidence_references),
+                        "interpretation": item.interpretation,
+                        "action_impact": item.action_impact,
+                    }
+                    for item in planner_result.analysis.reasoning_items
+                ],
+                "alternatives_considered": [
+                    {
+                        "action_type": alternative.action_type.value,
+                        "disposition": alternative.disposition,
+                        "reason": alternative.reason,
+                        "evidence_references": list(alternative.evidence_references),
+                    }
+                    for alternative in planner_result.analysis.alternatives_considered
+                ],
+                "known_uncertainties": list(planner_result.analysis.known_uncertainties),
             }
             if planner_result.analysis is not None
             else None
@@ -272,6 +296,68 @@ def _action_idempotency_key(
     return hashlib.sha256(
         material.encode("utf-8"),
     ).hexdigest()
+
+
+def _append_approval_policy_check(
+    action: RecoveryAction,
+    *,
+    approval_required: bool,
+    approval_reasons: Sequence[str],
+    threshold_minor: int,
+) -> None:
+    """Persist the separate human-review boundary beside policy checks."""
+
+    if action.action_type != RecoveryActionType.CREATE_PAYMENT_LINK.value:
+        action.policy_check_results.append(
+            {
+                "code": "human_approval_boundary",
+                "label": "Human approval boundary",
+                "actual_value": "Not applicable to this action",
+                "rule": "Payment-link actions are assessed against approval triggers",
+                "result": "not_applicable",
+            },
+        )
+        return
+
+    if action.policy_outcome == RecoveryPolicyOutcome.ESCALATE.value:
+        action.policy_check_results.append(
+            {
+                "code": "human_approval_boundary",
+                "label": "Human approval boundary",
+                "actual_value": "Policy escalation required",
+                "rule": "An escalated payment-link action cannot execute automatically",
+                "result": "requires_review",
+            },
+        )
+        return
+
+    if approval_required:
+        action.policy_check_results.append(
+            {
+                "code": "human_approval_boundary",
+                "label": "Human approval boundary",
+                "actual_value": "Required: " + ", ".join(approval_reasons),
+                "rule": (
+                    f"Review is required at {threshold_minor} minor units or when "
+                    "a recorded risk trigger applies"
+                ),
+                "result": "requires_review",
+            },
+        )
+        return
+
+    action.policy_check_results.append(
+        {
+            "code": "human_approval_boundary",
+            "label": "Human approval boundary",
+            "actual_value": "No recorded approval trigger",
+            "rule": (
+                f"Review is required at {threshold_minor} minor units or when "
+                "a recorded risk trigger applies"
+            ),
+            "result": "passed",
+        },
+    )
 
 
 def _apply_case_projection(
@@ -594,6 +680,14 @@ async def plan_and_persist_recovery_case(
             execute_after=proposal.execute_after,
             policy_outcome=(policy_decision.outcome.value),
             policy_guardrails=[guardrail.value for guardrail in policy_decision.guardrails],
+            policy_check_results=[
+                check.as_dict()
+                for check in build_recovery_policy_checks(
+                    context.case,
+                    proposal,
+                    evaluated_at=planned_at,
+                )
+            ],
             policy_explanation=(policy_decision.explanation),
             policy_version="deterministic-v1",
             policy_evaluated_at=(policy_decision.evaluated_at),
@@ -620,16 +714,23 @@ async def plan_and_persist_recovery_case(
                 active_incident_severity=(
                     incident_context.severity if incident_context is not None else None
                 ),
-                ai_confidence=(
-                    planner_result.analysis.confidence
-                    if planner_result.analysis is not None
-                    else None
-                ),
             )
         )
         is not None
     }
     approval_actions = tuple(action for action in actions if action.id in approval_requirements)
+    for action in actions:
+        approval_requirement = approval_requirements.get(action.id)
+        _append_approval_policy_check(
+            action,
+            approval_required=approval_requirement is not None,
+            approval_reasons=(
+                tuple(reason.value for reason in approval_requirement.reasons)
+                if approval_requirement is not None
+                else ()
+            ),
+            threshold_minor=approval_threshold_minor,
+        )
     for action in approval_actions:
         action.status = RecoveryActionStatus.APPROVAL_REQUIRED.value
 
@@ -679,6 +780,7 @@ async def plan_and_persist_recovery_case(
                         "status": action.status,
                         "policy_outcome": action.policy_outcome,
                         "policy_guardrails": action.policy_guardrails,
+                        "policy_check_results": action.policy_check_results,
                     }
                     for action in actions
                 ],

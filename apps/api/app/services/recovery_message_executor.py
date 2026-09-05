@@ -22,6 +22,7 @@ from app.domain.recovery import (
     RecoveryCaseStatus,
     RecoveryChannel,
     RecoveryPolicyOutcome,
+    build_recovery_policy_checks,
     evaluate_recovery_proposal,
 )
 from app.integrations.razorpay.payment_customers import (
@@ -266,18 +267,28 @@ async def prepare_recovery_message_action(
         payment_method=recovery_case.payment_method,
     )
 
-    decision = evaluate_recovery_proposal(
-        _build_case_snapshot(
-            recovery_case,
-            payment_attempt,
-            incident_severity=(incident_context.severity if incident_context is not None else None),
-        ),
-        _build_proposal(action),
-        evaluated_at=executed_at,
+    snapshot = _build_case_snapshot(
+        recovery_case,
+        payment_attempt,
+        incident_severity=(incident_context.severity if incident_context is not None else None),
     )
+    proposal = _build_proposal(action)
+    decision = evaluate_recovery_proposal(snapshot, proposal, evaluated_at=executed_at)
 
     action.policy_outcome = decision.outcome.value
     action.policy_guardrails = [guardrail.value for guardrail in decision.guardrails]
+    action.policy_check_results = [
+        check.as_dict()
+        for check in build_recovery_policy_checks(
+            snapshot,
+            proposal,
+            evaluated_at=executed_at,
+        )
+    ] + [
+        check
+        for check in (action.policy_check_results or [])
+        if check.get("code") == "human_approval_boundary"
+    ]
     action.policy_explanation = decision.explanation
     action.policy_evaluated_at = decision.evaluated_at
 
@@ -305,6 +316,7 @@ async def prepare_recovery_message_action(
                     "action_type": action.action_type,
                     "policy_outcome": decision.outcome.value,
                     "guardrails": [guardrail.value for guardrail in decision.guardrails],
+                    "policy_check_results": action.policy_check_results,
                     "policy_version": action.policy_version,
                     "active_incident": (
                         {

@@ -8,6 +8,10 @@ from app.core.config import get_settings
 from app.core.database import close_database, get_session_factory
 from app.domain.recovery import RecoveryPlannerPolicy
 from app.integrations.gemini import create_gemini_recovery_plan_provider
+from app.integrations.razorpay.orders import create_razorpay_order_provider
+from app.services.payment_lab_provider_verification import (
+    verify_payment_lab_provider_evidence_batch,
+)
 from app.services.payment_lab_recovery_batch import (
     PaymentLabRecoveryBatchResult,
     run_payment_lab_recovery_batch,
@@ -57,6 +61,7 @@ def log_batch_result(result: PaymentLabRecoveryBatchResult) -> None:
 async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
     settings = get_settings()
     provider = create_gemini_recovery_plan_provider(settings)
+    order_provider = create_razorpay_order_provider(settings)
     session_factory = get_session_factory()
     heartbeat = create_worker_heartbeat_reporter(
         settings,
@@ -86,6 +91,19 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
     try:
         while True:
             try:
+                if order_provider is not None:
+                    verification = await verify_payment_lab_provider_evidence_batch(
+                        session_factory,
+                        provider=order_provider,
+                        reference_time=utc_now(),
+                        batch_size=settings.payment_lab_recovery_batch_size,
+                    )
+                    if verification.projected > 0:
+                        LOGGER.info(
+                            "Payment Lab provider verification projected=%d checked=%d",
+                            verification.projected,
+                            verification.checked,
+                        )
                 result = await run_payment_lab_recovery_batch(
                     session_factory,
                     reference_time=utc_now(),

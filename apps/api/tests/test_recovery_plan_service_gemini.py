@@ -21,6 +21,11 @@ from app.integrations.gemini import (
     GeminiRecoveryAnalysisPayload,
     RecoveryPlannerSource,
 )
+from app.integrations.gemini.recovery_planner import (
+    GeminiRecoveryAlternativePayload,
+    GeminiRecoveryObservationPayload,
+    GeminiRecoveryReasoningItemPayload,
+)
 from app.services import recovery_plan_service
 from app.services.recovery_plan_service import (
     RecoveryPlannerResultMismatchError,
@@ -123,6 +128,27 @@ def planner_result(
                     operator_explanation=(
                         "Verified failure remains eligible under the merchant recovery policy."
                     ),
+                    observations=(
+                        GeminiRecoveryObservationPayload(
+                            evidence_reference="payment_state_snapshot",
+                        ),
+                    ),
+                    reasoning_items=(
+                        GeminiRecoveryReasoningItemPayload(
+                            evidence_references=("payment_state_snapshot",),
+                            interpretation="The recorded payment is failed and recoverable.",
+                            action_impact="A bounded recovery action may be proposed.",
+                        ),
+                    ),
+                    alternatives_considered=(
+                        GeminiRecoveryAlternativePayload(
+                            action_type=RecoveryActionType.SEND_RECOVERY_MESSAGE,
+                            disposition="not_selected",
+                            reason="The payment-link action is the recorded primary proposal.",
+                            evidence_references=("merchant_recovery_policy",),
+                        ),
+                    ),
+                    known_uncertainties=(),
                 )
                 if confidence is not None
                 else None
@@ -233,6 +259,19 @@ async def test_persists_gemini_metadata_and_usage(
         "operator_explanation": (
             "Verified failure remains eligible under the merchant recovery policy."
         ),
+        "observations": [{"evidence_reference": "payment_state_snapshot"}],
+        "reasoning_items": [{
+            "evidence_references": ["payment_state_snapshot"],
+            "interpretation": "The recorded payment is failed and recoverable.",
+            "action_impact": "A bounded recovery action may be proposed.",
+        }],
+        "alternatives_considered": [{
+            "action_type": "send_recovery_message",
+            "disposition": "not_selected",
+            "reason": "The payment-link action is the recorded primary proposal.",
+            "evidence_references": ["merchant_recovery_policy"],
+        }],
+        "known_uncertainties": [],
     }
     assert set(result.agent_run.evidence["bounded_ai_evidence_tools"]) == {
         "payment_state_snapshot",
@@ -255,7 +294,7 @@ async def test_persists_gemini_metadata_and_usage(
 
 
 @pytest.mark.asyncio
-async def test_low_confidence_gemini_plan_requires_operator_review(
+async def test_low_confidence_gemini_plan_does_not_control_authorization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = AsyncMock(spec=AsyncSession)
@@ -267,10 +306,7 @@ async def test_low_confidence_gemini_plan_requires_operator_review(
         query_result(0),
     ]
     patch_audit(monkeypatch)
-    approval = MagicMock()
-    approval.request_reason = "ai_low_confidence"
-    approval.request_context = {"ai_confidence": 0.45}
-    create_approval = AsyncMock(return_value=approval)
+    create_approval = AsyncMock()
     monkeypatch.setattr(
         recovery_plan_service,
         "create_recovery_approval_request",
@@ -286,13 +322,10 @@ async def test_low_confidence_gemini_plan_requires_operator_review(
         planner_result=planner_result(confidence=0.45),
     )
 
-    assert result.actions[0].status == RecoveryActionStatus.APPROVAL_REQUIRED.value
-    assert recovery_case.status == RecoveryCaseStatus.AWAITING_APPROVAL.value
-    assert len(result.approvals) == 1
-    assert result.approvals[0].request_reason == "ai_low_confidence"
-    assert result.approvals[0].request_context["ai_confidence"] == 0.45
-    requirement = create_approval.await_args.kwargs["requirement"]
-    assert requirement.context["ai_confidence"] == 0.45
+    assert result.actions[0].status == RecoveryActionStatus.ALLOWED.value
+    assert recovery_case.status == RecoveryCaseStatus.READY.value
+    assert result.approvals == ()
+    create_approval.assert_not_awaited()
 
 
 @pytest.mark.asyncio

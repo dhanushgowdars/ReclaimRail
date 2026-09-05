@@ -101,8 +101,8 @@ function stateCopy(state: RunState): { title: string; detail: string } {
   const copy: Record<RunState, { title: string; detail: string }> = {
     idle: { title: "Ready for a provider-live run", detail: "Checkout has not been opened yet." },
     creating_order: { title: "Creating a bounded Test Mode order", detail: "The exact amount is being created through ReclaimRail's server proxy." },
-    opening_checkout: { title: "Razorpay Checkout is opening", detail: "Choose a Test Mode path; ReclaimRail will wait for signed provider evidence." },
-    awaiting_webhook: { title: "Waiting for provider payment result", detail: "ReclaimRail will begin recovery only after Razorpay's signed evidence reaches the server." },
+    opening_checkout: { title: "Razorpay Checkout is opening", detail: "Choose a Test Mode path; ReclaimRail will wait for provider evidence." },
+    awaiting_webhook: { title: "Waiting for provider payment result", detail: "ReclaimRail will begin recovery only after server-verified Razorpay evidence is recorded." },
     browser_success: { title: "Browser callback received", detail: "A browser callback is never treated as a verified financial outcome." },
     dismissed: { title: "Checkout closed", detail: "No recovery case is created until provider evidence reaches the server." },
     error: { title: "The run could not start", detail: "No payment or recovery result was invented." },
@@ -167,7 +167,7 @@ export function PaymentLabLauncher() {
   useEffect(() => {
     if (isVerifiedReplay || runState !== "awaiting_webhook" || liveRun?.payment) return;
     const timer = window.setTimeout(() => {
-      setWebhookDelayWarning("Razorpay evidence is taking longer than usual. Your active run is still waiting for a signed webhook.");
+      setWebhookDelayWarning("Razorpay evidence is taking longer than usual. ReclaimRail is verifying the provider result from the server.");
     }, 30_000);
     return () => window.clearTimeout(timer);
   }, [isVerifiedReplay, liveRun?.payment, runState]);
@@ -292,23 +292,36 @@ export function PaymentLabLauncher() {
         runState: "awaiting_webhook",
         isVerifiedReplay: false,
       });
-      const checkout = new RazorpayCheckout({
-        key: responseBody.checkout.key_id, amount: responseBody.checkout.amount_minor, currency: responseBody.checkout.currency,
-        name: responseBody.checkout.name, description: responseBody.checkout.description, order_id: responseBody.checkout.order_id,
-        timeout: responseBody.checkout.timeout_seconds, theme: { color: responseBody.checkout.theme_color }, retry: { enabled: false },
-        ...(responseBody.checkout.prefill_email ? { prefill: { email: responseBody.checkout.prefill_email } } : {}),
-        modal: { confirm_close: true, ondismiss: () => setRunState(failureObservedRef.current ? "awaiting_webhook" : "dismissed") },
-        handler: () => setRunState("browser_success"),
-      });
-      checkout.on("payment.failed", () => {
-        failureObservedRef.current = true;
-        setRunState("awaiting_webhook");
-      });
-      checkout.open();
+      openCheckout(responseBody);
     } catch (error) {
       setRunState("error");
       setSafeError(error instanceof Error ? error.message : "Payment Lab run creation failed");
     }
+  }
+
+  function openCheckout(checkoutRun: PaymentLabResponse | null = run): void {
+    const RazorpayCheckout = window.Razorpay;
+    if (!checkoutRun || !checkoutLoaded || typeof RazorpayCheckout !== "function") {
+      setSafeError("Razorpay Checkout is not ready. Refresh once, then use Open Razorpay Checkout.");
+      return;
+    }
+
+    setSafeError(null);
+    setRunState("opening_checkout");
+    const checkout = new RazorpayCheckout({
+      key: checkoutRun.checkout.key_id, amount: checkoutRun.checkout.amount_minor, currency: checkoutRun.checkout.currency,
+      name: checkoutRun.checkout.name, description: checkoutRun.checkout.description, order_id: checkoutRun.checkout.order_id,
+      timeout: checkoutRun.checkout.timeout_seconds, theme: { color: checkoutRun.checkout.theme_color }, retry: { enabled: false },
+      ...(checkoutRun.checkout.prefill_email ? { prefill: { email: checkoutRun.checkout.prefill_email } } : {}),
+      modal: { confirm_close: true, ondismiss: () => setRunState(failureObservedRef.current ? "awaiting_webhook" : "dismissed") },
+      handler: () => setRunState("browser_success"),
+    });
+    checkout.on("payment.failed", () => {
+      failureObservedRef.current = true;
+      setRunState("awaiting_webhook");
+    });
+    checkout.open();
+    setRunState("awaiting_webhook");
   }
 
   async function openVerifiedReplay(): Promise<void> {
@@ -353,7 +366,7 @@ export function PaymentLabLauncher() {
     <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="afterInteractive" onLoad={() => setCheckoutLoaded(true)} onError={() => { setRunState("error"); setSafeError("Razorpay Checkout could not be loaded."); }} />
     <section className={`lab-launcher${run ? " lab-launcher--running" : " lab-launcher--entry"}`} aria-label="Razorpay Test Mode Payment Lab">
       {!run ? <div className="lab-config">
-        <div className="lab-start-cue lab-start-cue--hero"><span><Play size={20} fill="currentColor" /></span><div><p>Provider-backed live demo</p><strong>Choose the recovery story you want to prove.</strong><p>ReclaimRail advances only when signed provider evidence is stored by the server.</p></div></div>
+        <div className="lab-start-cue lab-start-cue--hero"><span><Play size={20} fill="currentColor" /></span><div><p>Provider-backed live demo</p><strong>Choose the recovery story you want to prove.</strong><p>ReclaimRail advances only when Razorpay evidence is verified and stored by the server.</p></div></div>
         <div className="lab-mode-switch lab-mode-switch--three" aria-label="Choose a demo path">
           <button className={demoTrack === "auto" ? "is-active" : ""} type="button" onClick={() => setDemoTrack("auto")}>Auto-recovery · ₹3,499<span>Netbanking · policy can execute</span></button>
           <button className={demoTrack === "review" ? "is-active" : ""} type="button" onClick={() => { setDemoTrack("review"); setAmountRupees((value) => Number(value) > 10_000 ? value : DEFAULT_HIGH_VALUE_RUPEES); }}>High-value review<span>Choose any amount above the review threshold</span></button>
@@ -364,7 +377,7 @@ export function PaymentLabLauncher() {
         <div className="lab-access"><label htmlFor="reviewer-code">Reviewer access code</label><input id="reviewer-code" autoComplete="off" placeholder="Provided with the demo" type="password" value={reviewerCode} onChange={(event) => setReviewerCode(event.target.value)} /><span>The code is sent only to ReclaimRail&apos;s server proxy.</span></div>
         <button className="lab-primary-action" disabled={busy} type="button" onClick={() => void startRun()}>{busy ? <><LoaderCircle className="spin" size={18} /> Preparing secure checkout…</> : <><Play size={18} fill="currentColor" /> Start this provider-live demo <ArrowRight size={18} /></>}</button>
         <p className="lab-action-note">Razorpay Test Mode · no real money moves · no payment credentials are stored by ReclaimRail</p>
-      </div> : <LiveRecoveryCommand run={run} liveRun={liveRun} polling={polling} title={copy.title} detail={copy.detail} safeError={safeError} pollError={pollError} webhookDelayWarning={webhookDelayWarning} isVerifiedReplay={isVerifiedReplay} copiedActionId={copiedActionId} onCopyRecoveryLink={() => void copyRecoveryLink()} onOpenVerifiedReplay={() => void openVerifiedReplay()} onStartAnotherRun={resetRun} approvingApprovalId={approvingApprovalId} approvalError={approvalError} onApprovalDecision={(decision, reason) => void decideApproval(decision, reason)} />}
+      </div> : <LiveRecoveryCommand run={run} liveRun={liveRun} polling={polling} title={copy.title} detail={copy.detail} safeError={safeError} pollError={pollError} webhookDelayWarning={webhookDelayWarning} isVerifiedReplay={isVerifiedReplay} copiedActionId={copiedActionId} onCopyRecoveryLink={() => void copyRecoveryLink()} onOpenVerifiedReplay={() => void openVerifiedReplay()} onOpenCheckout={() => openCheckout()} onStartAnotherRun={resetRun} approvingApprovalId={approvingApprovalId} approvalError={approvalError} onApprovalDecision={(decision, reason) => void decideApproval(decision, reason)} />}
     </section>
   </>;
 }

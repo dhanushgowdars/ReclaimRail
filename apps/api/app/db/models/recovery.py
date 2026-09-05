@@ -569,6 +569,12 @@ class RecoveryAction(Base):
         nullable=False,
         default=list,
     )
+    policy_check_results: Mapped[list[dict[str, str]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+    )
     policy_explanation: Mapped[str] = mapped_column(
         Text,
         nullable=False,

@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.routes import recovery_case_detail
 from app.core.database import get_database_session
 from app.main import app
-from app.services.recovery_ai_trace import RecoveryAiTrace
+from app.services.recovery_ai_trace import (
+    RecoveryAiAlternative,
+    RecoveryAiEvidenceCitation,
+    RecoveryAiReasoningItem,
+    RecoveryAiTrace,
+)
 from app.services.recovery_case_detail_service import (
     PaymentLifecycleSnapshot,
     PaymentTransitionSummary,
@@ -95,11 +100,33 @@ def build_detail() -> RecoveryCaseDetail:
                 ai_trace=RecoveryAiTrace(
                     root_cause_category="bank_authorization_failure",
                     recoverability_assessment="recoverable",
-                    confidence=0.91,
                     recommended_action="create_payment_link",
                     evidence_references=("payment_state_snapshot",),
+                    evidence_citations=(
+                        RecoveryAiEvidenceCitation(
+                            reference="payment_state_snapshot",
+                            label="Recorded payment state",
+                            observations=("State: failed",),
+                        ),
+                    ),
                     evidence_codes=("payment_failed",),
                     evidence_tool_names=("payment_state_snapshot",),
+                    reasoning_items=(
+                        RecoveryAiReasoningItem(
+                            evidence_references=("payment_state_snapshot",),
+                            interpretation="The provider recorded a failed payment.",
+                            action_impact="Recovery can be evaluated.",
+                        ),
+                    ),
+                    alternatives_considered=(
+                        RecoveryAiAlternative(
+                            action_type="wait",
+                            disposition="not_selected",
+                            reason="No incident requires a wait.",
+                            evidence_references=("payment_state_snapshot",),
+                        ),
+                    ),
+                    known_uncertainties=("Customer intent is not provider evidence.",),
                     input_token_count=212,
                     output_token_count=61,
                     fallback_used=False,
@@ -122,10 +149,20 @@ def build_detail() -> RecoveryCaseDetail:
                 execute_after=None,
                 policy_outcome="allow",
                 policy_guardrails=("customer_contact_allowed",),
+                policy_check_results=(
+                    {
+                        "code": "amount_matches_original",
+                        "label": "Recovery amount matches original payment",
+                        "actual_value": "Proposed 349900; original 349900",
+                        "rule": "Payment-link amount must exactly match the original payment",
+                        "result": "passed",
+                    },
+                ),
                 policy_explanation="All deterministic checks passed.",
                 policy_version="deterministic-v1",
                 policy_evaluated_at=NOW,
                 execution_attempt_count=1,
+                last_error=None,
                 provider_action_id="plink_demo",
                 provider_action_status="paid",
                 provider_action_url="https://rzp.io/i/case-detail",
@@ -208,6 +245,17 @@ def test_reads_pii_safe_recovery_case_detail(
     assert body["payment_lifecycle"]["payment_attempt_id"] == str(PAYMENT_ID)
     assert body["agent_runs"][0]["planner_provider"] == "gemini"
     assert body["actions"][0]["policy_guardrails"] == ["customer_contact_allowed"]
+    assert body["actions"][0]["policy_check_results"][0]["result"] == "passed"
+    assert body["agent_runs"][0]["ai_trace"]["evidence_citations"][0]["observations"] == [
+        "State: failed",
+    ]
+    assert body["agent_runs"][0]["ai_trace"]["reasoning_items"][0]["action_impact"] == (
+        "Recovery can be evaluated."
+    )
+    assert body["agent_runs"][0]["ai_trace"]["alternatives_considered"][0]["action_type"] == "wait"
+    assert body["agent_runs"][0]["ai_trace"]["known_uncertainties"] == [
+        "Customer intent is not provider evidence.",
+    ]
     assert body["outcome"]["gross_recovered_minor"] == 349_900
     assert body["audit_chain"]["valid"] is True
     assert body["audit_chain"]["events"][0]["event_hash"] == "a" * 64

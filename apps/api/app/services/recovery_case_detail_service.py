@@ -101,6 +101,7 @@ class RecoveryActionSummary:
     execute_after: datetime | None
     policy_outcome: str
     policy_guardrails: tuple[str, ...]
+    policy_check_results: tuple[dict[str, str], ...]
     policy_explanation: str
     policy_version: str
     policy_evaluated_at: datetime
@@ -109,6 +110,7 @@ class RecoveryActionSummary:
     provider_action_status: str | None
     provider_action_url: str | None
     provider_action_expires_at: datetime | None
+    last_error: str | None
     started_at: datetime | None
     completed_at: datetime | None
 
@@ -270,6 +272,7 @@ def build_action_summary(action: RecoveryAction) -> RecoveryActionSummary:
         execute_after=action.execute_after,
         policy_outcome=action.policy_outcome,
         policy_guardrails=tuple(action.policy_guardrails),
+        policy_check_results=tuple(action.policy_check_results),
         policy_explanation=action.policy_explanation,
         policy_version=action.policy_version,
         policy_evaluated_at=action.policy_evaluated_at,
@@ -278,6 +281,7 @@ def build_action_summary(action: RecoveryAction) -> RecoveryActionSummary:
         provider_action_status=action.provider_action_status,
         provider_action_url=action.provider_action_url,
         provider_action_expires_at=action.provider_action_expires_at,
+        last_error=action.last_error,
         started_at=action.started_at,
         completed_at=action.completed_at,
     )

@@ -462,6 +462,42 @@ async def test_rejected_approval_closes_without_provider_execution() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rejected_message_plan_is_never_presented_as_waiting_for_provider() -> None:
+    run = build_run(status=PaymentLabRunStatus.RECOVERY_RUNNING.value)
+    run.payment_attempt_id = ATTEMPT_ID
+    action = build_action()
+    action.action_type = "send_recovery_message"
+    action.status = "allowed"
+    action.provider_action_id = None
+    action.provider_action_status = None
+    action.provider_action_url = None
+    action.started_at = None
+    action.completed_at = None
+    approval = build_pending_approval()
+    approval.status = "rejected"
+    approval.decided_at = NOW + timedelta(seconds=9)
+    approval.decided_by = "merchant-operator"
+    approval.decision_reason = "Declined recovery contact"
+    approval.version = 1
+    action_result = MagicMock()
+    action_result.scalars.return_value.all.return_value = [action]
+    session = AsyncMock(spec=AsyncSession)
+    session.get.side_effect = (run, build_payment())
+    session.execute.side_effect = (
+        scalar_result(build_case(status="escalated")),
+        scalar_result(build_agent()),
+        action_result,
+        scalar_result(approval),
+        scalar_result(None),
+    )
+
+    result = await load_payment_lab_live_run(session, payment_lab_run_id=RUN_ID)
+    step_by_key = {step.key: step for step in result.steps}
+    assert step_by_key["provider_action"].label == "Safe disposition"
+    assert step_by_key["provider_action"].detail == "Approval closed without provider execution"
+
+
+@pytest.mark.asyncio
 async def test_policy_escalation_is_a_terminal_safe_disposition() -> None:
     run = build_run(status=PaymentLabRunStatus.RECOVERY_RUNNING.value)
     run.payment_attempt_id = ATTEMPT_ID

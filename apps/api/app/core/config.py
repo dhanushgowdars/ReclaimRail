@@ -156,13 +156,18 @@ class Settings(BaseSettings):
         ge=1,
         le=20,
     )
+    recovery_payment_link_expiry_hours: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+    )
     recovery_approval_threshold_minor: int = Field(
         default=1_000_000,
         ge=100,
         le=100_000_000,
     )
     recovery_approval_ttl_seconds: int = Field(
-        default=900,
+        default=86_400,
         ge=60,
         le=86_400,
     )

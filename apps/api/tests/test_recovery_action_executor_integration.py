@@ -232,7 +232,6 @@ async def test_payment_link_action_is_executed_and_replayed_idempotently() -> No
         assert replay_result.disposition is RecoveryActionExecutionDisposition.ALREADY_SUCCEEDED
 
         assert provider_requests == [
-            "GET",
             "POST",
         ]
 

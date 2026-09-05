@@ -91,17 +91,21 @@ async def run_recovery_action_worker(
     claim_timeout = timedelta(
         seconds=settings.recovery_action_claim_timeout_seconds,
     )
+    payment_link_lifetime = timedelta(
+        hours=settings.recovery_payment_link_expiry_hours,
+    )
 
     LOGGER.info(
         (
             "Recovery action worker started: "
             "batch_size=%d "
             "claim_timeout_seconds=%d "
-            "maximum_attempts=%d mode=%s"
+            "maximum_attempts=%d payment_link_expiry_hours=%d mode=%s"
         ),
         settings.recovery_action_batch_size,
         settings.recovery_action_claim_timeout_seconds,
         settings.recovery_action_max_attempts,
+        settings.recovery_payment_link_expiry_hours,
         "once" if run_once else "continuous",
     )
 
@@ -117,6 +121,7 @@ async def run_recovery_action_worker(
                     batch_size=settings.recovery_action_batch_size,
                     claim_timeout=claim_timeout,
                     maximum_attempts=settings.recovery_action_max_attempts,
+                    payment_link_lifetime=payment_link_lifetime,
                 )
             except asyncio.CancelledError:
                 raise

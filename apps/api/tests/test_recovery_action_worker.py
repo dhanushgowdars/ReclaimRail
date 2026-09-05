@@ -38,6 +38,7 @@ def create_settings() -> SimpleNamespace:
         recovery_action_poll_interval_seconds=2.0,
         recovery_action_claim_timeout_seconds=120,
         recovery_action_max_attempts=3,
+        recovery_payment_link_expiry_hours=24,
     )
 
 
@@ -170,6 +171,7 @@ async def test_run_once_executes_batch_and_closes_database(
             seconds=120,
         ),
         maximum_attempts=3,
+        payment_link_lifetime=timedelta(hours=24),
     )
     close_database.assert_awaited_once_with()
 

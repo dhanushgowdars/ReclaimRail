@@ -56,6 +56,7 @@ export type PaymentLabLiveRun = {
     failure_code: string | null;
     failure_reason: string | null;
     observed_at: string;
+    source: string | null;
   } | null;
   agent: {
     recovery_case_id: string;
@@ -73,9 +74,26 @@ export type PaymentLabLiveRun = {
     ai_trace: {
       root_cause_category: string | null;
       recoverability_assessment: string | null;
-      confidence: number | null;
       recommended_action: string | null;
+      operator_explanation: string | null;
       evidence_references: string[];
+      evidence_citations: Array<{
+        reference: string;
+        label: string;
+        observations: string[];
+      }>;
+      reasoning_items: Array<{
+        evidence_references: string[];
+        interpretation: string;
+        action_impact: string;
+      }>;
+      alternatives_considered: Array<{
+        action_type: string;
+        disposition: string;
+        reason: string;
+        evidence_references: string[];
+      }>;
+      known_uncertainties: string[];
       evidence_codes: string[];
       evidence_tool_names: string[];
       input_token_count: number | null;
@@ -88,10 +106,18 @@ export type PaymentLabLiveRun = {
     recovery_action_id: string;
     sequence_number: number;
     action_type: string;
+    proposal_reason: string;
     channel: string | null;
     status: string;
     policy_outcome: string;
     policy_guardrails: string[];
+    policy_check_results: Array<{
+      code: string;
+      label: string;
+      actual_value: string;
+      rule: string;
+      result: "passed" | "failed" | "not_applicable" | "requires_review";
+    }>;
     policy_explanation: string;
     provider_action_id: string | null;
     provider_action_status: string | null;

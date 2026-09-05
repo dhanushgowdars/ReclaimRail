@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
@@ -492,8 +493,37 @@ async def test_retryable_provider_failure_returns_case_to_ready(
     assert "temporary provider failure" not in (action.last_error or "")
     assert "status_code=503" in (action.last_error or "")
     assert recovery_case.status == (RecoveryCaseStatus.READY.value)
-    assert recovery_case.next_action_at == NOW
+    assert action.execute_after == NOW + timedelta(seconds=30)
+    assert recovery_case.next_action_at == NOW + timedelta(seconds=30)
     append_audit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_provider_failure_waits_without_exhausting_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    action = create_action(
+        status=RecoveryActionStatus.EXECUTING,
+        started_at=NOW,
+        attempt_count=3,
+    )
+    recovery_case = create_case(status=RecoveryCaseStatus.EXECUTING)
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.side_effect = [query_result(action), query_result(recovery_case)]
+    patch_audit(monkeypatch)
+
+    retryable = await fail_recovery_payment_link_action(
+        session,
+        prepared=create_prepared(),
+        error=RazorpayPaymentLinkProviderError(
+            "rate limited", retryable=True, status_code=429
+        ),
+        failed_at=NOW,
+    )
+
+    assert retryable is True
+    assert action.execute_after == NOW + timedelta(minutes=5)
+    assert recovery_case.next_action_at == NOW + timedelta(minutes=5)
 
 
 class SessionContext:
@@ -529,7 +559,7 @@ class StubSessionFactory:
 async def test_orchestrator_recovers_existing_provider_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    prepared = create_prepared()
+    prepared = replace(create_prepared(), attempt_number=2)
     payment_link = create_payment_link()
 
     preparation = RecoveryActionPreparation(
@@ -622,7 +652,7 @@ async def test_orchestrator_creates_link_when_reference_is_missing(
     provider = MagicMock(
         spec=RazorpayPaymentLinkProvider,
     )
-    provider.find_payment_link_by_reference = AsyncMock(return_value=None)
+    provider.find_payment_link_by_reference = AsyncMock()
     provider.create_payment_link = AsyncMock(
         return_value=payment_link,
     )
@@ -637,6 +667,7 @@ async def test_orchestrator_creates_link_when_reference_is_missing(
     provider.create_payment_link.assert_awaited_once_with(
         prepared.request,
     )
+    provider.find_payment_link_by_reference.assert_not_awaited()
     complete.assert_awaited_once()
     assert complete.await_args.kwargs["recovered_existing_link"] is False
 
@@ -668,7 +699,8 @@ async def test_orchestrator_records_provider_failure(
     provider = MagicMock(
         spec=RazorpayPaymentLinkProvider,
     )
-    provider.find_payment_link_by_reference = AsyncMock(
+    provider.find_payment_link_by_reference = AsyncMock()
+    provider.create_payment_link = AsyncMock(
         side_effect=(
             RazorpayPaymentLinkProviderError(
                 "temporary failure",

@@ -261,6 +261,11 @@ async def process_canonical_payment_webhook(
             lifecycle_event,
             projection,
             observed_at=processed_at,
+            evidence_source=(
+                str(webhook_event.payload.get("reclaimrail_evidence_source"))
+                if webhook_event.payload.get("reclaimrail_evidence_source")
+                else "signed_webhook"
+            ),
         )
 
     webhook_event.processing_status = WebhookProcessingStatus.PROCESSED.value

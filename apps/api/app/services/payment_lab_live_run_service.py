@@ -821,9 +821,7 @@ def _build_steps(
                 agent_run.completed_at or agent_run.started_at if agent_run is not None else None
             ),
             detail=(
-                (
-                    _agent_step_detail(agent_run)
-                )
+                (_agent_step_detail(agent_run))
                 if (agent_run is not None and agent_status is PaymentLabLiveStepStatus.COMPLETED)
                 else "Gemini is preparing a bounded proposal"
             ),
@@ -842,9 +840,7 @@ def _build_steps(
             status=policy_status,
             occurred_at=(latest_action.policy_evaluated_at if latest_action is not None else None),
             detail=(
-                (
-                    _policy_step_detail(latest_action)
-                )
+                (_policy_step_detail(latest_action))
                 if latest_action is not None
                 else "Waiting for deterministic guardrails"
             ),

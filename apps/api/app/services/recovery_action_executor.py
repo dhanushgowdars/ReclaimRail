@@ -682,12 +682,14 @@ async def fail_recovery_payment_link_action(
 
     action.status = RecoveryActionStatus.FAILED.value
     action.completed_at = failed_at
-    action.last_error = f"{type(error).__name__}: retryable={str(retryable).lower()}" + (
-        f" status_code={error.status_code}" if error.status_code is not None else ""
-    ) + (
-        f" provider_code={error.provider_error_code}"
-        if error.provider_error_code is not None
-        else ""
+    action.last_error = (
+        f"{type(error).__name__}: retryable={str(retryable).lower()}"
+        + (f" status_code={error.status_code}" if error.status_code is not None else "")
+        + (
+            f" provider_code={error.provider_error_code}"
+            if error.provider_error_code is not None
+            else ""
+        )
     )
 
     if retryable:
@@ -695,8 +697,7 @@ async def fail_recovery_payment_link_action(
         retry_delay = (
             DEFAULT_RATE_LIMIT_RETRY_DELAY
             if rate_limited
-            else DEFAULT_PROVIDER_RETRY_DELAY
-            * (2 ** (action.execution_attempt_count - 1))
+            else DEFAULT_PROVIDER_RETRY_DELAY * (2 ** (action.execution_attempt_count - 1))
         )
         action.execute_after = failed_at + retry_delay
         recovery_case.next_action_at = action.execute_after

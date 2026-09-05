@@ -515,9 +515,7 @@ async def test_rate_limited_provider_failure_waits_without_exhausting_attempts(
     retryable = await fail_recovery_payment_link_action(
         session,
         prepared=create_prepared(),
-        error=RazorpayPaymentLinkProviderError(
-            "rate limited", retryable=True, status_code=429
-        ),
+        error=RazorpayPaymentLinkProviderError("rate limited", retryable=True, status_code=429),
         failed_at=NOW,
     )
 

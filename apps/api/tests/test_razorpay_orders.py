@@ -106,9 +106,7 @@ async def test_creates_order_with_basic_auth_and_safe_payload() -> None:
 @pytest.mark.asyncio
 async def test_fetches_order_payment_evidence() -> None:
     async def handler(request: httpx2.Request) -> httpx2.Response:
-        assert str(request.url) == (
-            "https://api.razorpay.test/v1/orders/order_test_001/payments"
-        )
+        assert str(request.url) == ("https://api.razorpay.test/v1/orders/order_test_001/payments")
         assert request.method == "GET"
         return httpx2.Response(
             200,

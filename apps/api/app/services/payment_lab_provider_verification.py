@@ -99,9 +99,7 @@ async def _verify_one(
     reference_time: datetime,
 ) -> str:
     result = await session.execute(
-        select(PaymentLabRun)
-        .where(PaymentLabRun.id == payment_lab_run_id)
-        .with_for_update(),
+        select(PaymentLabRun).where(PaymentLabRun.id == payment_lab_run_id).with_for_update(),
     )
     run = result.scalar_one_or_none()
     if (

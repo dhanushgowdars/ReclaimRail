@@ -721,16 +721,13 @@ def _analysis_uses_only_supplied_evidence(
 ) -> bool:
     """Reject model-authored trace entries that cannot be tied to supplied facts."""
     top_level_references = set(analysis.evidence_references)
-    nested_references = {
-        observation.evidence_reference for observation in analysis.observations
-    }
+    nested_references = {observation.evidence_reference for observation in analysis.observations}
     for item in analysis.reasoning_items:
         nested_references.update(item.evidence_references)
     for alternative in analysis.alternatives_considered:
         nested_references.update(alternative.evidence_references)
-    return (
-        top_level_references.issubset(valid_references)
-        and nested_references.issubset(top_level_references)
+    return top_level_references.issubset(valid_references) and nested_references.issubset(
+        top_level_references
     )
 
 

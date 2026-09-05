@@ -260,17 +260,21 @@ async def test_persists_gemini_metadata_and_usage(
             "Verified failure remains eligible under the merchant recovery policy."
         ),
         "observations": [{"evidence_reference": "payment_state_snapshot"}],
-        "reasoning_items": [{
-            "evidence_references": ["payment_state_snapshot"],
-            "interpretation": "The recorded payment is failed and recoverable.",
-            "action_impact": "A bounded recovery action may be proposed.",
-        }],
-        "alternatives_considered": [{
-            "action_type": "send_recovery_message",
-            "disposition": "not_selected",
-            "reason": "The payment-link action is the recorded primary proposal.",
-            "evidence_references": ["merchant_recovery_policy"],
-        }],
+        "reasoning_items": [
+            {
+                "evidence_references": ["payment_state_snapshot"],
+                "interpretation": "The recorded payment is failed and recoverable.",
+                "action_impact": "A bounded recovery action may be proposed.",
+            }
+        ],
+        "alternatives_considered": [
+            {
+                "action_type": "send_recovery_message",
+                "disposition": "not_selected",
+                "reason": "The payment-link action is the recorded primary proposal.",
+                "evidence_references": ["merchant_recovery_policy"],
+            }
+        ],
         "known_uncertainties": [],
     }
     assert set(result.agent_run.evidence["bounded_ai_evidence_tools"]) == {

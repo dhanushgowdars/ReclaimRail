@@ -77,9 +77,7 @@ class StubGeminiProvider:
                                 "The payment remains failed and policy permits "
                                 "one bounded recovery action."
                             ),
-                            "action_impact": (
-                                "Recommend one exact-amount recovery payment link."
-                            ),
+                            "action_impact": ("Recommend one exact-amount recovery payment link."),
                         },
                     ],
                     "alternatives_considered": [],
@@ -246,7 +244,7 @@ async def test_verified_lab_failure_starts_agent_once() -> None:
 
         assert stored_run is not None
         assert stored_run.status == PaymentLabRunStatus.RECOVERY_RUNNING.value
-        assert stored_run.version >= 3
+        assert stored_run.version == 3
         assert stored_case is not None
         assert stored_case.status == RecoveryCaseStatus.READY.value
         assert stored_case.customer_contact_allowed is True

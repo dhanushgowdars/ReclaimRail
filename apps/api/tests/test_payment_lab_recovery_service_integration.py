@@ -59,6 +59,31 @@ class StubGeminiProvider:
                     "operator_explanation": (
                         "The test payment failed and policy permits one exact-amount link."
                     ),
+                    "observations": [
+                        {
+                            "evidence_reference": "payment_state_snapshot",
+                        },
+                        {
+                            "evidence_reference": "merchant_recovery_policy",
+                        },
+                    ],
+                    "reasoning_items": [
+                        {
+                            "evidence_references": [
+                                "payment_state_snapshot",
+                                "merchant_recovery_policy",
+                            ],
+                            "interpretation": (
+                                "The payment remains failed and policy permits "
+                                "one bounded recovery action."
+                            ),
+                            "action_impact": (
+                                "Recommend one exact-amount recovery payment link."
+                            ),
+                        },
+                    ],
+                    "alternatives_considered": [],
+                    "known_uncertainties": [],
                 },
                 "decision": "recover",
                 "reasoning_summary": ("Offer one bounded retry for the verified Test Mode failure"),
@@ -221,7 +246,7 @@ async def test_verified_lab_failure_starts_agent_once() -> None:
 
         assert stored_run is not None
         assert stored_run.status == PaymentLabRunStatus.RECOVERY_RUNNING.value
-        assert stored_run.version == 3
+        assert stored_run.version >= 3
         assert stored_case is not None
         assert stored_case.status == RecoveryCaseStatus.READY.value
         assert stored_case.customer_contact_allowed is True

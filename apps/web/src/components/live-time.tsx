@@ -52,3 +52,46 @@ export function LiveElapsed({ startedAt, endedAt = null }: { startedAt: string; 
   const minutes = Math.floor(seconds / 60);
   return <span>{String(minutes).padStart(2, "0")}:{String(seconds % 60).padStart(2, "0")}</span>;
 }
+
+export function LinkExpiryCountdown({ expiresAt }: { expiresAt: string }) {
+  const [now, setNow] = useState<number | null>(null);
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => setNow(Date.now()), 0);
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  if (now === null) return <span>Checking expiry…</span>;
+
+  const remaining = Math.max(0, Math.floor((new Date(expiresAt).getTime() - now) / 1_000));
+  if (remaining === 0) return <span>Link expiry time reached</span>;
+
+  const hours = Math.floor(remaining / 3_600);
+  const minutes = Math.floor((remaining % 3_600) / 60);
+  return <span>Link expires in {hours}h {String(minutes).padStart(2, "0")}m</span>;
+}
+
+export function ReviewDecisionCountdown({ expiresAt }: { expiresAt: string }) {
+  const [now, setNow] = useState<number | null>(null);
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => setNow(Date.now()), 0);
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  if (now === null) return <span>Calculating review time…</span>;
+  const remaining = Math.max(0, Math.floor((new Date(expiresAt).getTime() - now) / 1_000));
+  if (remaining === 0) return <span>Decision window ended</span>;
+
+  const hours = Math.floor(remaining / 3_600);
+  const minutes = Math.floor((remaining % 3_600) / 60);
+  return <span>{hours}h {String(minutes).padStart(2, "0")}m remaining</span>;
+}

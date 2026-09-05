@@ -22,6 +22,7 @@ from app.domain.recovery import (
     RecoveryCaseStatus,
     RecoveryChannel,
     RecoveryPolicyOutcome,
+    build_recovery_policy_checks,
     evaluate_recovery_proposal,
 )
 from app.integrations.razorpay.payment_customers import (
@@ -48,6 +49,8 @@ SessionFactory = async_sessionmaker[AsyncSession]
 DEFAULT_ACTION_CLAIM_TIMEOUT = timedelta(minutes=2)
 DEFAULT_MAXIMUM_EXECUTION_ATTEMPTS = 3
 DEFAULT_PAYMENT_LINK_LIFETIME = timedelta(hours=24)
+DEFAULT_PROVIDER_RETRY_DELAY = timedelta(seconds=30)
+DEFAULT_RATE_LIMIT_RETRY_DELAY = timedelta(minutes=5)
 
 
 class RecoveryActionExecutionDisposition(StrEnum):
@@ -242,6 +245,7 @@ async def prepare_recovery_payment_link_action(
     executed_at: datetime,
     claim_timeout: timedelta = DEFAULT_ACTION_CLAIM_TIMEOUT,
     maximum_attempts: int = DEFAULT_MAXIMUM_EXECUTION_ATTEMPTS,
+    payment_link_lifetime: timedelta = DEFAULT_PAYMENT_LINK_LIFETIME,
 ) -> RecoveryActionPreparation:
     """Lock, re-evaluate and claim one payment-link action."""
     _require_timezone_aware(executed_at)
@@ -255,6 +259,8 @@ async def prepare_recovery_payment_link_action(
         raise ValueError(
             "Maximum execution attempts must be positive",
         )
+    if payment_link_lifetime <= timedelta(0):
+        raise ValueError("Payment-link lifetime must be positive")
 
     action_result = await session.execute(
         select(RecoveryAction).where(RecoveryAction.id == action_id).with_for_update(),
@@ -348,14 +354,40 @@ async def prepare_recovery_payment_link_action(
     )
     proposal = _build_proposal(action)
 
-    decision = evaluate_recovery_proposal(
-        snapshot,
-        proposal,
-        evaluated_at=executed_at,
-    )
+    decision = evaluate_recovery_proposal(snapshot, proposal, evaluated_at=executed_at)
 
     action.policy_outcome = decision.outcome.value
     action.policy_guardrails = [guardrail.value for guardrail in decision.guardrails]
+    approval_checks = [
+        check
+        for check in (action.policy_check_results or [])
+        if check.get("code") == "human_approval_boundary"
+    ]
+    action.policy_check_results = [
+        check.as_dict()
+        for check in build_recovery_policy_checks(
+            snapshot,
+            proposal,
+            evaluated_at=executed_at,
+        )
+    ] + approval_checks
+    action.policy_check_results = [
+        check
+        for check in action.policy_check_results
+        if check.get("code") != "payment_link_expiry_window"
+    ]
+    action.policy_check_results.append(
+        {
+            "code": "payment_link_expiry_window",
+            "label": "Recovery payment-link expiry",
+            "actual_value": (
+                f"{int(payment_link_lifetime.total_seconds() // 3600)} hours; "
+                f"expires {(executed_at + payment_link_lifetime).isoformat()}"
+            ),
+            "rule": "Recovery payment links use the configured bounded expiry window",
+            "result": "passed",
+        },
+    )
     action.policy_explanation = decision.explanation
     action.policy_evaluated_at = decision.evaluated_at
 
@@ -383,6 +415,7 @@ async def prepare_recovery_payment_link_action(
                     "action_type": action.action_type,
                     "policy_outcome": (decision.outcome.value),
                     "guardrails": [guardrail.value for guardrail in decision.guardrails],
+                    "policy_check_results": action.policy_check_results,
                     "policy_version": action.policy_version,
                     "active_incident": (
                         {
@@ -433,7 +466,7 @@ async def prepare_recovery_payment_link_action(
         currency=action.currency,
         reference_id=reference_id,
         description=(f"ReclaimRail recovery for payment {payment_attempt.provider_payment_id}"),
-        expire_by=executed_at + DEFAULT_PAYMENT_LINK_LIFETIME,
+        expire_by=executed_at + payment_link_lifetime,
         notes={
             "recovery_case_id": str(recovery_case.id),
             "recovery_action_id": str(action.id),
@@ -640,17 +673,33 @@ async def fail_recovery_payment_link_action(
             f"Recovery case {action.recovery_case_id} does not exist",
         )
 
-    retryable = error.retryable and action.execution_attempt_count < maximum_attempts
+    rate_limited = error.status_code == 429
+    # A provider throttle is not a failed recovery decision.  Do not consume the
+    # final bounded attempt just because Razorpay asks us to slow down.
+    retryable = error.retryable and (
+        rate_limited or action.execution_attempt_count < maximum_attempts
+    )
 
     action.status = RecoveryActionStatus.FAILED.value
     action.completed_at = failed_at
     action.last_error = f"{type(error).__name__}: retryable={str(retryable).lower()}" + (
         f" status_code={error.status_code}" if error.status_code is not None else ""
+    ) + (
+        f" provider_code={error.provider_error_code}"
+        if error.provider_error_code is not None
+        else ""
     )
 
     if retryable:
         recovery_case.status = RecoveryCaseStatus.READY.value
-        recovery_case.next_action_at = failed_at
+        retry_delay = (
+            DEFAULT_RATE_LIMIT_RETRY_DELAY
+            if rate_limited
+            else DEFAULT_PROVIDER_RETRY_DELAY
+            * (2 ** (action.execution_attempt_count - 1))
+        )
+        action.execute_after = failed_at + retry_delay
+        recovery_case.next_action_at = action.execute_after
     else:
         recovery_case.status = RecoveryCaseStatus.ESCALATED.value
         recovery_case.next_action_at = None
@@ -669,6 +718,8 @@ async def fail_recovery_payment_link_action(
                 "attempt_number": (action.execution_attempt_count),
                 "retryable": retryable,
                 "provider_status_code": (error.status_code),
+                "provider_error_code": (error.provider_error_code),
+                "rate_limited": rate_limited,
                 "error_type": type(error).__name__,
             },
             occurred_at=failed_at,
@@ -692,12 +743,11 @@ async def attach_transient_customer_to_payment_link_request(
         customer = await customer_provider.fetch_payment_customer(
             prepared.provider_payment_id,
         )
-    except RazorpayPaymentCustomerProviderError as error:
-        raise RazorpayPaymentLinkProviderError(
-            "Razorpay payment customer lookup failed",
-            retryable=error.retryable,
-            status_code=error.status_code,
-        ) from error
+    except RazorpayPaymentCustomerProviderError:
+        # Contact lookup is optional enrichment for an unshared recovery link.
+        # A failed/declined original payment may not have a retrievable customer
+        # record, but that must never prevent the already-approved link itself.
+        return prepared
 
     if customer.email is None and customer.contact is None:
         return prepared
@@ -726,6 +776,7 @@ async def execute_recovery_payment_link_action(
     executed_at: datetime,
     claim_timeout: timedelta = DEFAULT_ACTION_CLAIM_TIMEOUT,
     maximum_attempts: int = (DEFAULT_MAXIMUM_EXECUTION_ATTEMPTS),
+    payment_link_lifetime: timedelta = DEFAULT_PAYMENT_LINK_LIFETIME,
 ) -> RecoveryActionExecutionResult:
     """Execute an approved action with provider idempotency."""
     _require_timezone_aware(executed_at)
@@ -737,6 +788,7 @@ async def execute_recovery_payment_link_action(
             executed_at=executed_at,
             claim_timeout=claim_timeout,
             maximum_attempts=maximum_attempts,
+            payment_link_lifetime=payment_link_lifetime,
         )
 
     if preparation.terminal_result is not None:
@@ -755,15 +807,25 @@ async def execute_recovery_payment_link_action(
             customer_provider=customer_provider,
         )
 
-        payment_link = await provider.find_payment_link_by_reference(
-            prepared.reference_id,
-        )
-        recovered_existing_link = payment_link is not None
-
-        if payment_link is None:
+        # A first execution owns a fresh, deterministic reference ID.  Creating
+        # directly avoids spending a Razorpay request on a list/search endpoint
+        # before the real action.  Retry attempts still recover any existing
+        # link by that same reference before creating another one.
+        if prepared.attempt_number == 1:
             payment_link = await provider.create_payment_link(
                 prepared.request,
             )
+            recovered_existing_link = False
+        else:
+            payment_link = await provider.find_payment_link_by_reference(
+                prepared.reference_id,
+            )
+            recovered_existing_link = payment_link is not None
+
+            if payment_link is None:
+                payment_link = await provider.create_payment_link(
+                    prepared.request,
+                )
 
         _validate_provider_link(
             prepared,

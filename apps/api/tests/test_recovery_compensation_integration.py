@@ -291,10 +291,6 @@ async def test_late_authorization_cancels_active_link_and_pending_actions() -> N
 
         assert provider_requests == [
             (
-                "GET",
-                "/v1/payment_links",
-            ),
-            (
                 "POST",
                 "/v1/payment_links",
             ),

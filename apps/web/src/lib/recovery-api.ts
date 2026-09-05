@@ -41,10 +41,16 @@ export type RecoveryCaseQueueItem = {
   next_action_at: string | null;
   late_authorization_detected_at: string | null;
   opened_at: string;
+  closed_at: string | null;
   updated_at: string;
   latest_action_type: string | null;
   latest_action_status: string | null;
   latest_action_policy_outcome: string | null;
+  latest_approval_status: string | null;
+  latest_approval_reason: string | null;
+  latest_approval_decision_reason: string | null;
+  latest_approval_decided_at: string | null;
+  latest_approval_decided_by: string | null;
   outcome_status: string | null;
 };
 
@@ -91,6 +97,9 @@ export type RecoveryApproval = {
   request_context: Record<string, unknown>;
   requested_at: string;
   expires_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  decision_reason: string | null;
   version: number;
 };
 
@@ -139,6 +148,36 @@ export type RecoveryCaseDetail = {
     failure_code: string | null;
     started_at: string;
     completed_at: string | null;
+    ai_trace: {
+      root_cause_category: string | null;
+      recoverability_assessment: string | null;
+      recommended_action: string | null;
+      operator_explanation: string | null;
+      evidence_references: string[];
+      evidence_citations: Array<{
+        reference: string;
+        label: string;
+        observations: string[];
+      }>;
+      reasoning_items: Array<{
+        evidence_references: string[];
+        interpretation: string;
+        action_impact: string;
+      }>;
+      alternatives_considered: Array<{
+        action_type: string;
+        disposition: string;
+        reason: string;
+        evidence_references: string[];
+      }>;
+      known_uncertainties: string[];
+      evidence_codes: string[];
+      evidence_tool_names: string[];
+      input_token_count: number | null;
+      output_token_count: number | null;
+      fallback_used: boolean | null;
+      fallback_reason: string | null;
+    };
   }>;
   actions: Array<{
     recovery_action_id: string;
@@ -154,6 +193,13 @@ export type RecoveryCaseDetail = {
     execute_after: string | null;
     policy_outcome: string;
     policy_guardrails: string[];
+    policy_check_results: Array<{
+      code: string;
+      label: string;
+      actual_value: string;
+      rule: string;
+      result: "passed" | "failed" | "not_applicable" | "requires_review";
+    }>;
     policy_explanation: string;
     policy_version: string;
     policy_evaluated_at: string;
@@ -162,8 +208,24 @@ export type RecoveryCaseDetail = {
     provider_action_status: string | null;
     provider_action_url: string | null;
     provider_action_expires_at: string | null;
+    last_error: string | null;
     started_at: string | null;
     completed_at: string | null;
+  }>;
+  approvals: Array<{
+    approval_id: string;
+    recovery_action_id: string;
+    status: string;
+    request_reason: string;
+    amount_minor: number;
+    currency: string;
+    threshold_minor: number | null;
+    requested_at: string;
+    expires_at: string;
+    decided_at: string | null;
+    decided_by: string | null;
+    decision_reason: string | null;
+    version: number;
   }>;
   outcome: {
     recovery_outcome_id: string;
@@ -251,10 +313,34 @@ export async function loadRecoveryDashboard(caseLimit = 8, outcomeLimit = 6): Pr
   return { summary, incidents, cases, outcomes };
 }
 
-export async function loadRecoveryApprovals(): Promise<RecoveryApproval[]> {
+const OUTCOME_HISTORY_PAGE_SIZE = 100;
+const OUTCOME_HISTORY_MAX_OFFSET = 10_000;
+
+/** Load durable ledger history instead of silently displaying one small page. */
+export async function loadRecoveryOutcomeHistory(): Promise<RecoveryOutcome[]> {
+  const items: RecoveryOutcome[] = [];
+  let offset = 0;
+  let totalCount: number | null = null;
+
+  while (offset <= OUTCOME_HISTORY_MAX_OFFSET && (totalCount === null || offset < totalCount)) {
+    const page = await getRecoveryApiJson<RecoveryOutcomePage>(
+      `/recovery/dashboard/outcomes?limit=${OUTCOME_HISTORY_PAGE_SIZE}&offset=${offset}`,
+    );
+    items.push(...page.items);
+    totalCount = page.total_count;
+    if (page.items.length === 0) break;
+    offset += page.items.length;
+  }
+
+  return items;
+}
+
+export async function loadRecoveryApprovals(
+  status: "pending" | "approved" | "rejected" | "expired" = "pending",
+): Promise<RecoveryApproval[]> {
   const operatorToken = process.env.RECLAIMRAIL_RECOVERY_OPERATOR_ACCESS_TOKEN?.trim();
-  if (!operatorToken) return [];
-  const response = await fetch(`${getApiBaseUrl()}/recovery/approvals?status=pending&limit=100`, {
+  if (!operatorToken) throw new Error("Protected-review access is not configured");
+  const response = await fetch(`${getApiBaseUrl()}/recovery/approvals?status=${status}&limit=100`, {
     cache: "no-store",
     headers: { Accept: "application/json", "X-ReclaimRail-Operator-Token": operatorToken },
   });
@@ -270,5 +356,3 @@ export async function loadRecoveryCaseDetail(
     `/recovery/dashboard/cases/${encodeURIComponent(recoveryCaseId)}`,
   );
 }
-
-

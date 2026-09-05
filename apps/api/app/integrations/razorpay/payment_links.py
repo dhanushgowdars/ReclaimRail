@@ -20,6 +20,23 @@ RAZORPAY_API_BASE_URL: Final = "https://api.razorpay.com"
 RAZORPAY_PAYMENT_LINK_PATH: Final = "/v1/payment_links"
 
 
+def _safe_provider_error_code(response: httpx2.Response) -> str | None:
+    """Return Razorpay's short machine code without retaining its message/body."""
+    try:
+        payload = json.loads(response.content)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    error = payload.get("error") if isinstance(payload, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
+
+    if not isinstance(code, str):
+        return None
+
+    normalized = code.strip()
+    return normalized[:80] if normalized else None
+
+
 class RazorpayPaymentLinkStatus(StrEnum):
     CREATED = "created"
     PARTIALLY_PAID = "partially_paid"
@@ -317,10 +334,12 @@ class RazorpayPaymentLinkProviderError(RuntimeError):
         *,
         retryable: bool,
         status_code: int | None = None,
+        provider_error_code: str | None = None,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
         self.status_code = status_code
+        self.provider_error_code = provider_error_code
 
 
 class RazorpayPaymentLinkProvider:
@@ -432,11 +451,13 @@ class RazorpayPaymentLinkProvider:
 
         if response.status_code >= 400:
             retryable = response.status_code == 429 or response.status_code >= 500
+            provider_error_code = _safe_provider_error_code(response)
 
             raise RazorpayPaymentLinkProviderError(
                 "Razorpay Payment Links API rejected the request",
                 retryable=retryable,
                 status_code=response.status_code,
+                provider_error_code=provider_error_code,
             )
 
         return response

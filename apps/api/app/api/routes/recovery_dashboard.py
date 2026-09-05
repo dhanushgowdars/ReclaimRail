@@ -82,10 +82,16 @@ class RecoveryCaseQueueItemResponse(BaseModel):
     next_action_at: datetime | None
     late_authorization_detected_at: datetime | None
     opened_at: datetime
+    closed_at: datetime | None
     updated_at: datetime
     latest_action_type: str | None
     latest_action_status: str | None
     latest_action_policy_outcome: str | None
+    latest_approval_status: str | None
+    latest_approval_reason: str | None
+    latest_approval_decision_reason: str | None
+    latest_approval_decided_at: datetime | None
+    latest_approval_decided_by: str | None
     outcome_status: str | None
 
 
@@ -139,10 +145,16 @@ def to_recovery_case_queue_item_response(
         next_action_at=item.next_action_at,
         late_authorization_detected_at=item.late_authorization_detected_at,
         opened_at=item.opened_at,
+        closed_at=item.closed_at,
         updated_at=item.updated_at,
         latest_action_type=item.latest_action_type,
         latest_action_status=item.latest_action_status,
         latest_action_policy_outcome=item.latest_action_policy_outcome,
+        latest_approval_status=item.latest_approval_status,
+        latest_approval_reason=item.latest_approval_reason,
+        latest_approval_decision_reason=item.latest_approval_decision_reason,
+        latest_approval_decided_at=item.latest_approval_decided_at,
+        latest_approval_decided_by=item.latest_approval_decided_by,
         outcome_status=item.outcome_status,
     )
 

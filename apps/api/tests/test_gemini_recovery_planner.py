@@ -71,6 +71,28 @@ def valid_payload() -> dict[str, object]:
             "allowed_action_recommendation": "create_payment_link",
             "evidence_references": ["payment_state_snapshot", "merchant_recovery_policy"],
             "operator_explanation": "Failure is verified and policy permits an exact-amount link.",
+            "observations": [
+                {"evidence_reference": "payment_state_snapshot"},
+                {"evidence_reference": "merchant_recovery_policy"},
+            ],
+            "reasoning_items": [
+                {
+                    "evidence_references": ["payment_state_snapshot"],
+                    "interpretation": "The provider recorded a failed payment.",
+                    "action_impact": "A recovery action can be evaluated.",
+                },
+            ],
+            "alternatives_considered": [
+                {
+                    "action_type": "wait",
+                    "disposition": "not_selected",
+                    "reason": "No active payment-rail incident was supplied.",
+                    "evidence_references": ["payment_state_snapshot"],
+                },
+            ],
+            "known_uncertainties": [
+                "Customer intent is not observable from provider evidence.",
+            ],
         },
         "decision": "recover",
         "reasoning_summary": "Offer a safe alternate method and one approved reminder",
@@ -137,9 +159,10 @@ async def test_uses_valid_structured_gemini_plan() -> None:
         RecoveryActionType.OFFER_ALTERNATE_METHOD,
     ]
     assert result.plan.evidence_codes[0] == "payment_state:failed"
-    assert result.plan.planner_version == "gemini-structured-v2"
+    assert result.plan.planner_version == "gemini-structured-v3"
     assert result.analysis is not None
     assert result.analysis.confidence == 0.91
+    assert result.analysis.reasoning_items[0].action_impact == "A recovery action can be evaluated."
 
 
 def test_exposes_only_the_four_read_only_evidence_tools() -> None:
@@ -190,6 +213,29 @@ async def test_unknown_analysis_evidence_reference_uses_fallback() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nested_analysis_reference_must_be_declared_in_top_level_evidence() -> None:
+    payload = valid_payload()
+    analysis = payload["analysis"]
+    assert isinstance(analysis, dict)
+    reasoning_items = analysis["reasoning_items"]
+    assert isinstance(reasoning_items, list)
+    reasoning_item = reasoning_items[0]
+    assert isinstance(reasoning_item, dict)
+    reasoning_item["evidence_references"] = ["attempt_and_recovery_history"]
+    provider = StubProvider(
+        response=GeminiProviderResponse(
+            structured_plan=payload,
+            model_name="gemini-3.7-flash",
+        ),
+    )
+
+    result = await plan_with_gemini_fallback(create_context(), provider=provider)
+
+    assert result.source is RecoveryPlannerSource.DETERMINISTIC
+    assert result.fallback_reason is GeminiPlannerFallbackReason.INVALID_RESPONSE
+
+
+@pytest.mark.asyncio
 async def test_provider_error_uses_deterministic_fallback() -> None:
     provider = StubProvider(
         error=GeminiPlannerProviderError("quota unavailable"),
@@ -208,15 +254,18 @@ async def test_provider_error_uses_deterministic_fallback() -> None:
 async def test_provider_timeout_uses_deterministic_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class SlowModels:
-        async def generate_content(self, **_: object) -> object:
+    class SlowChat:
+        async def send_message(self, _: object) -> object:
             await asyncio.sleep(10)
             raise AssertionError("unreachable")
 
     class SlowAsyncClient:
         def __init__(self) -> None:
-            self.models = SlowModels()
+            self.chats = self
             self.closed = False
+
+        def create(self, **_: object) -> SlowChat:
+            return SlowChat()
 
         async def aclose(self) -> None:
             self.closed = True

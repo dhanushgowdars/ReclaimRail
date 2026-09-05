@@ -196,6 +196,34 @@ async def test_classifies_provider_http_failures(
 
 
 @pytest.mark.asyncio
+async def test_records_only_safe_provider_error_code() -> None:
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            400,
+            request=request,
+            json={
+                "error": {
+                    "code": "BAD_REQUEST_ERROR",
+                    "description": "Do not persist this provider message",
+                }
+            },
+        )
+
+    provider = RazorpayPaymentLinkProvider(
+        key_id="rzp_test_key",
+        key_secret="test-secret",
+        base_url="https://api.razorpay.test",
+        transport=httpx2.MockTransport(handler),
+    )
+
+    with pytest.raises(RazorpayPaymentLinkProviderError) as caught:
+        await provider.create_payment_link(create_request())
+
+    assert caught.value.provider_error_code == "BAD_REQUEST_ERROR"
+    assert "Do not persist" not in str(caught.value)
+
+
+@pytest.mark.asyncio
 async def test_rejects_invalid_success_response() -> None:
     async def handler(
         request: httpx2.Request,

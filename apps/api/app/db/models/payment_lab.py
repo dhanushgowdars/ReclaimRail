@@ -172,6 +172,14 @@ class PaymentLabRun(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    provider_evidence_source: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+    provider_evidence_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     payment_attempt_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
         ForeignKey(

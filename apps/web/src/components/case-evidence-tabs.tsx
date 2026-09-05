@@ -23,14 +23,14 @@ const tabs = [
     label: "Provider action",
     icon: Link2,
     helper: "See the exact bounded action recorded by Razorpay.",
-    next: "Wait for provider evidence before treating a payment as recovered.",
+    next: "Only an executed provider action can produce a payment outcome for Razorpay to confirm.",
   },
   {
     id: "outcome",
     label: "Outcome & audit",
     icon: Banknote,
     helper: "Confirm the financial result and inspect the evidence chain.",
-    next: "Recovered revenue changes only after provider reconciliation.",
+    next: "Provider evidence proves financial outcomes; policy or reviewer evidence can close execution safely.",
   },
 ] as const;
 
@@ -53,7 +53,7 @@ function guideFor(
     provider: providerStatus === "paid"
       ? "Razorpay reports the bounded recovery link as paid."
       : "The bounded Razorpay action has completed.",
-    outcome: "Provider reconciliation confirmed recovered revenue and closed the case.",
+    outcome: "Razorpay confirmed the recovered payment and the case was closed.",
   };
   return { helper: tab.helper, resultLabel: "Recorded result", result: completed[tabId] };
 }

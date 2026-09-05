@@ -73,6 +73,10 @@ def test_create_controlled_batch_labels_synthetic_data(monkeypatch: pytest.Monke
     body = response.json()
     assert body["provenance"] == "controlled_synthetic"
     assert body["financial_scope"] == "not_production_merchant_revenue"
+    assert body["run_key"] == "track3-controlled-batch-v1"
+    assert body["policy_version"] == "deterministic-recovery-policy-v1"
+    assert body["timing_scope"] == "deterministic_fixture_not_runtime_benchmark"
+    assert body["created_at"] == run.created_at.isoformat().replace("+00:00", "Z")
     assert body["metrics"]["payments_evaluated"] == 100
     assert body["metrics"]["recovery_rate_percent"] == 68.8
     assert body["metrics"]["incremental_recovered_minor"] == 1_176_000

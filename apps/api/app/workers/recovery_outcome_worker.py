@@ -97,7 +97,11 @@ async def run_recovery_outcome_worker(
                     session_factory,
                     provider=provider,
                     reference_time=utc_now(),
-                    batch_size=settings.recovery_outcome_batch_size,
+                    # Razorpay Test Mode is shared and rate-limited.  Webhooks
+                    # deliver changes immediately; this is only a fallback
+                    # poll, so one link every two minutes prevents historical
+                    # pending links from starving a newly approved link.
+                    batch_size=min(settings.recovery_outcome_batch_size, 1),
                 )
             except asyncio.CancelledError:
                 raise
@@ -111,7 +115,7 @@ async def run_recovery_outcome_worker(
                     raise
 
                 await asyncio.sleep(
-                    settings.recovery_outcome_poll_interval_seconds,
+                    max(settings.recovery_outcome_poll_interval_seconds, 120.0),
                 )
                 continue
 
@@ -130,7 +134,7 @@ async def run_recovery_outcome_worker(
                 return
 
             await asyncio.sleep(
-                settings.recovery_outcome_poll_interval_seconds,
+                max(settings.recovery_outcome_poll_interval_seconds, 120.0),
             )
     finally:
         await heartbeat.stop()

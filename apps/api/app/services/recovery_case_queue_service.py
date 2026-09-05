@@ -6,20 +6,13 @@ from uuid import UUID
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.recovery import RecoveryAction, RecoveryCase
+from app.db.models.recovery import RecoveryAction, RecoveryApproval, RecoveryCase
 from app.db.models.recovery_outcome import RecoveryOutcome
 from app.domain.recovery import RecoveryCaseStatus
 from app.services.recovery_dashboard_service import normalize_dashboard_currency
 
-DEFAULT_QUEUE_STATUSES: Final = (
-    RecoveryCaseStatus.OPEN.value,
-    RecoveryCaseStatus.PLANNING.value,
-    RecoveryCaseStatus.READY.value,
-    RecoveryCaseStatus.EXECUTING.value,
-    RecoveryCaseStatus.WAITING.value,
-    RecoveryCaseStatus.ESCALATED.value,
-)
 ALL_RECOVERY_CASE_STATUSES: Final = frozenset(status.value for status in RecoveryCaseStatus)
+DEFAULT_QUEUE_STATUSES: Final = tuple(status.value for status in RecoveryCaseStatus)
 MAX_QUEUE_LIMIT: Final = 100
 MAX_QUEUE_OFFSET: Final = 10_000
 
@@ -76,10 +69,16 @@ class RecoveryCaseQueueItem:
     next_action_at: datetime | None
     late_authorization_detected_at: datetime | None
     opened_at: datetime
+    closed_at: datetime | None
     updated_at: datetime
     latest_action_type: str | None
     latest_action_status: str | None
     latest_action_policy_outcome: str | None
+    latest_approval_status: str | None
+    latest_approval_reason: str | None
+    latest_approval_decision_reason: str | None
+    latest_approval_decided_at: datetime | None
+    latest_approval_decided_by: str | None
     outcome_status: str | None
 
 
@@ -105,6 +104,14 @@ def build_recovery_case_queue_statement(
         .correlate(RecoveryCase)
         .scalar_subquery()
     )
+    latest_approval_id = (
+        select(RecoveryApproval.id)
+        .where(RecoveryApproval.recovery_case_id == RecoveryCase.id)
+        .order_by(RecoveryApproval.requested_at.desc(), RecoveryApproval.id.desc())
+        .limit(1)
+        .correlate(RecoveryCase)
+        .scalar_subquery()
+    )
 
     statement = (
         select(
@@ -118,10 +125,16 @@ def build_recovery_case_queue_statement(
             RecoveryCase.next_action_at,
             RecoveryCase.late_authorization_detected_at,
             RecoveryCase.opened_at,
+            RecoveryCase.closed_at,
             RecoveryCase.updated_at,
             RecoveryAction.action_type,
             RecoveryAction.status,
             RecoveryAction.policy_outcome,
+            RecoveryApproval.status,
+            RecoveryApproval.request_reason,
+            RecoveryApproval.decision_reason,
+            RecoveryApproval.decided_at,
+            RecoveryApproval.decided_by,
             RecoveryOutcome.status,
         )
         .outerjoin(
@@ -131,6 +144,10 @@ def build_recovery_case_queue_statement(
         .outerjoin(
             RecoveryAction,
             RecoveryAction.id == latest_action_id,
+        )
+        .outerjoin(
+            RecoveryApproval,
+            RecoveryApproval.id == latest_approval_id,
         )
         .where(
             RecoveryCase.currency == filters.currency,
@@ -189,11 +206,17 @@ async def load_recovery_case_queue(
             next_action_at=row[7],
             late_authorization_detected_at=row[8],
             opened_at=row[9],
-            updated_at=row[10],
-            latest_action_type=row[11],
-            latest_action_status=row[12],
-            latest_action_policy_outcome=row[13],
-            outcome_status=row[14],
+            closed_at=row[10],
+            updated_at=row[11],
+            latest_action_type=row[12],
+            latest_action_status=row[13],
+            latest_action_policy_outcome=row[14],
+            latest_approval_status=row[15],
+            latest_approval_reason=row[16],
+            latest_approval_decision_reason=row[17],
+            latest_approval_decided_at=row[18],
+            latest_approval_decided_by=row[19],
+            outcome_status=row[20],
         )
         for row in rows
     )

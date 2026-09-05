@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -24,7 +25,9 @@ from app.domain.recovery import (
     build_recovery_evidence_codes,
 )
 
-GEMINI_RECOVERY_PROMPT_VERSION = "gemini-structured-v2"
+LOGGER = logging.getLogger(__name__)
+
+GEMINI_RECOVERY_PROMPT_VERSION = "gemini-structured-v3"
 
 GEMINI_RECOVERY_SYSTEM_INSTRUCTION = """You are ReclaimRail's bounded payment-recovery planner.
 You only propose actions; you never execute actions or contact customers.
@@ -42,7 +45,13 @@ creating an unshared Payment Link for an authorised merchant reviewer.
 Do not escalate an otherwise eligible recovery merely because no contact channel
 is approved.
 Deterministic server-side policy will independently approve or reject every proposal.
-Keep the reasoning summary concise and operational."""
+For each observation and reasoning item, cite only a supplied read-only evidence
+reference. Do not reveal hidden reasoning or claim a recovery probability.
+State uncertainties only when the supplied evidence cannot answer them.
+Amounts whose field names end in _minor are stored in paise. In every operator-facing
+explanation, convert them to major currency units (for example, 349900 INR is ₹3,499).
+Never describe a minor-unit integer as an INR amount.
+Keep every explanation concise and operational."""
 
 
 GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA: dict[str, object] = {
@@ -64,6 +73,75 @@ GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA: dict[str, object] = {
                     "items": {"type": "string"},
                 },
                 "operator_explanation": {"type": "string"},
+                "observations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {"evidence_reference": {"type": "string"}},
+                        "required": ["evidence_reference"],
+                    },
+                },
+                "reasoning_items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 3,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "evidence_references": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 2,
+                                "items": {"type": "string"},
+                            },
+                            "interpretation": {"type": "string"},
+                            "action_impact": {"type": "string"},
+                        },
+                        "required": ["evidence_references", "interpretation", "action_impact"],
+                    },
+                },
+                "alternatives_considered": {
+                    "type": "array",
+                    "maxItems": 4,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "action_type": {
+                                "type": "string",
+                                "enum": [
+                                    "create_payment_link",
+                                    "send_recovery_message",
+                                    "offer_alternate_method",
+                                    "wait",
+                                    "escalate_human",
+                                    "stop_recovery",
+                                ],
+                            },
+                            "disposition": {
+                                "type": "string",
+                                "enum": ["not_selected", "not_applicable"],
+                            },
+                            "reason": {"type": "string"},
+                            "evidence_references": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 2,
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["action_type", "disposition", "reason", "evidence_references"],
+                    },
+                },
+                "known_uncertainties": {
+                    "type": "array",
+                    "maxItems": 3,
+                    "items": {"type": "string"},
+                },
             },
             "required": [
                 "root_cause_category",
@@ -72,6 +150,10 @@ GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA: dict[str, object] = {
                 "allowed_action_recommendation",
                 "evidence_references",
                 "operator_explanation",
+                "observations",
+                "reasoning_items",
+                "alternatives_considered",
+                "known_uncertainties",
             ],
         },
         "decision": {
@@ -215,6 +297,41 @@ class GeminiRecoveryAnalysisPayload(BaseModel):
     allowed_action_recommendation: str = Field(min_length=1, max_length=80)
     evidence_references: tuple[str, ...] = Field(min_length=1, max_length=4)
     operator_explanation: str = Field(min_length=1, max_length=400)
+    observations: tuple["GeminiRecoveryObservationPayload", ...] = Field(
+        min_length=1,
+        max_length=4,
+    )
+    reasoning_items: tuple["GeminiRecoveryReasoningItemPayload", ...] = Field(
+        min_length=1,
+        max_length=3,
+    )
+    alternatives_considered: tuple["GeminiRecoveryAlternativePayload", ...] = Field(
+        max_length=4,
+    )
+    known_uncertainties: tuple[str, ...] = Field(max_length=3)
+
+
+class GeminiRecoveryObservationPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_reference: str = Field(min_length=1, max_length=80)
+
+
+class GeminiRecoveryReasoningItemPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_references: tuple[str, ...] = Field(min_length=1, max_length=2)
+    interpretation: str = Field(min_length=1, max_length=240)
+    action_impact: str = Field(min_length=1, max_length=240)
+
+
+class GeminiRecoveryAlternativePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action_type: RecoveryActionType
+    disposition: str = Field(pattern="^(not_selected|not_applicable)$")
+    reason: str = Field(min_length=1, max_length=240)
+    evidence_references: tuple[str, ...] = Field(min_length=1, max_length=2)
 
 
 class GeminiRecoveryPlanPayload(BaseModel):
@@ -307,6 +424,10 @@ def build_recovery_evidence_tools(context: RecoveryPlanningContext) -> dict[str,
             "ref": "payment_state_snapshot",
             "state": case.payment_state.value,
             "amount_minor": case.amount_minor,
+            "amount_display": (
+                f"₹{case.amount_minor // 100:,}"
+                + (f".{case.amount_minor % 100:02d}" if case.amount_minor % 100 else "")
+            ),
             "currency": case.currency,
             "payment_method": case.payment_method,
             "late_authorization_detected": case.late_authorization_detected_at is not None,
@@ -436,9 +557,13 @@ class GoogleGenAIRecoveryPlanProvider:
 
         try:
             async with asyncio.timeout(self._request_timeout_seconds):
-                response = await async_client.models.generate_content(
+                # The SDK documents Chat.send_message as the supported async
+                # path when automatic function calling is present.  Recovery
+                # planning has no executable tools, but using an explicit chat
+                # keeps the request away from the SDK's direct-model AFC path
+                # that can close its HTTP client before the request is sent.
+                chat = async_client.chats.create(
                     model=self.model_name,
-                    contents=build_recovery_planning_prompt(context),
                     config=types.GenerateContentConfig(
                         system_instruction=GEMINI_RECOVERY_SYSTEM_INSTRUCTION,
                         temperature=self._temperature,
@@ -447,9 +572,18 @@ class GoogleGenAIRecoveryPlanProvider:
                         thinking_config=types.ThinkingConfig(
                             thinking_level=types.ThinkingLevel.MINIMAL,
                         ),
+                        # Recovery planning uses a fixed JSON schema and no callable
+                        # tools. Disable SDK automatic function calling so a model
+                        # request cannot acquire unneeded agent-tool behaviour.
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                            disable=True,
+                        ),
                         response_mime_type="application/json",
                         response_json_schema=GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA,
                     ),
+                )
+                response = await chat.send_message(
+                    build_recovery_planning_prompt(context),
                 )
 
             if not response.text:
@@ -467,8 +601,12 @@ class GoogleGenAIRecoveryPlanProvider:
         except GeminiPlannerProviderError:
             raise
         except Exception as error:
+            status_code = getattr(error, "status_code", None)
+            if not isinstance(status_code, int):
+                status_code = None
+            status_suffix = f" status={status_code}" if status_code is not None else ""
             raise GeminiPlannerProviderError(
-                f"Gemini recovery planning failed: {type(error).__name__}",
+                f"Gemini recovery planning failed: {type(error).__name__}{status_suffix}",
             ) from error
         finally:
             await async_client.aclose()
@@ -576,6 +714,26 @@ def _violates_policy_contract(
     )
 
 
+def _analysis_uses_only_supplied_evidence(
+    analysis: GeminiRecoveryAnalysisPayload,
+    *,
+    valid_references: set[str],
+) -> bool:
+    """Reject model-authored trace entries that cannot be tied to supplied facts."""
+    top_level_references = set(analysis.evidence_references)
+    nested_references = {
+        observation.evidence_reference for observation in analysis.observations
+    }
+    for item in analysis.reasoning_items:
+        nested_references.update(item.evidence_references)
+    for alternative in analysis.alternatives_considered:
+        nested_references.update(alternative.evidence_references)
+    return (
+        top_level_references.issubset(valid_references)
+        and nested_references.issubset(top_level_references)
+    )
+
+
 async def plan_with_gemini_fallback(
     context: RecoveryPlanningContext,
     *,
@@ -591,7 +749,10 @@ async def plan_with_gemini_fallback(
 
     try:
         response = await provider.generate_plan(context)
-    except GeminiPlannerProviderError:
+    except GeminiPlannerProviderError as error:
+        # This is deliberately limited to exception type/status: never log the
+        # payment evidence, prompt, customer data, or API key.
+        LOGGER.warning("Gemini planner used deterministic fallback: %s", error)
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.PROVIDER_ERROR,
@@ -623,7 +784,10 @@ async def plan_with_gemini_fallback(
         )
 
     valid_evidence_references = set(build_recovery_evidence_tools(context))
-    if not set(payload.analysis.evidence_references).issubset(valid_evidence_references):
+    if not _analysis_uses_only_supplied_evidence(
+        payload.analysis,
+        valid_references=valid_evidence_references,
+    ):
         return _deterministic_fallback(
             context,
             reason=GeminiPlannerFallbackReason.INVALID_RESPONSE,

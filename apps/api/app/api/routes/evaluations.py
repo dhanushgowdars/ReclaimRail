@@ -39,12 +39,16 @@ class EvaluationMetricsResponse(BaseModel):
 
 class EvaluationRunResponse(BaseModel):
     evaluation_run_id: UUID
+    run_key: str
     label: str
     provenance: str
     financial_scope: str
+    policy_version: str
+    timing_scope: str
     currency: str
     scenario_count: int
     audit_root_hash: str
+    created_at: datetime
     metrics: EvaluationMetricsResponse
 
 
@@ -70,6 +74,7 @@ class EvaluationScenarioResponse(BaseModel):
     pending_minor: int
     protected_minor: int
     decision_latency_ms: int
+    audit_previous_hash: str | None
     audit_event_hash: str
     evaluated_at: datetime
 
@@ -80,12 +85,16 @@ def response(
 ) -> EvaluationRunResponse:
     return EvaluationRunResponse(
         evaluation_run_id=run.id,
+        run_key=run.run_key,
         label=run.label,
         provenance=SYNTHETIC_PROVENANCE,
         financial_scope="not_production_merchant_revenue",
+        policy_version=run.policy_version,
+        timing_scope="deterministic_fixture_not_runtime_benchmark",
         currency=run.currency,
         scenario_count=run.scenario_count,
         audit_root_hash=run.audit_root_hash,
+        created_at=run.created_at,
         metrics=EvaluationMetricsResponse(**asdict(metrics)),
     )
 
@@ -152,6 +161,7 @@ async def list_evaluation_scenarios(
             pending_minor=row.pending_minor,
             protected_minor=row.protected_minor,
             decision_latency_ms=row.decision_latency_ms,
+            audit_previous_hash=row.audit_previous_hash,
             audit_event_hash=row.audit_event_hash,
             evaluated_at=row.evaluated_at,
         )

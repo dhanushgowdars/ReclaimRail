@@ -28,6 +28,14 @@ def create_settings() -> SimpleNamespace:
     )
 
 
+def stub_order_provider(monkeypatch: pytest.MonkeyPatch, provider: object | None = None) -> None:
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "create_razorpay_order_provider",
+        MagicMock(return_value=provider),
+    )
+
+
 def create_batch_result() -> PaymentLabRecoveryBatchResult:
     return PaymentLabRecoveryBatchResult(
         discovered_run_ids=(),
@@ -75,6 +83,7 @@ async def test_run_once_executes_batch_and_closes_database(
         "create_gemini_recovery_plan_provider",
         MagicMock(return_value=provider),
     )
+    stub_order_provider(monkeypatch)
     monkeypatch.setattr(
         payment_lab_recovery_worker,
         "get_session_factory",
@@ -128,6 +137,7 @@ async def test_run_once_closes_database_after_batch_failure(
         "create_gemini_recovery_plan_provider",
         MagicMock(return_value=None),
     )
+    stub_order_provider(monkeypatch)
     monkeypatch.setattr(
         payment_lab_recovery_worker,
         "get_session_factory",
@@ -166,6 +176,7 @@ async def test_continuous_empty_batch_sleeps_and_closes_on_cancellation(
         "create_gemini_recovery_plan_provider",
         MagicMock(return_value=None),
     )
+    stub_order_provider(monkeypatch)
     monkeypatch.setattr(
         payment_lab_recovery_worker,
         "get_session_factory",

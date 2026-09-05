@@ -23,6 +23,13 @@ class RazorpayOrderStatus(StrEnum):
     PAID = "paid"
 
 
+class RazorpayOrderPaymentStatus(StrEnum):
+    FAILED = "failed"
+    AUTHORIZED = "authorized"
+    CAPTURED = "captured"
+    REFUNDED = "refunded"
+
+
 class RazorpayOrderRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -100,6 +107,30 @@ class RazorpayOrder(BaseModel):
     status: RazorpayOrderStatus
     attempts: int = Field(ge=0)
     provider_created_at: int = Field(alias="created_at", ge=0)
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        return value.upper()
+
+
+class RazorpayOrderPayment(BaseModel):
+    """Sanitised payment evidence fetched for one Razorpay Order."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True, str_strip_whitespace=True)
+
+    payment_id: str = Field(alias="id", min_length=1, max_length=128)
+    amount_minor: int = Field(alias="amount", gt=0)
+    currency: str = Field(min_length=3, max_length=3)
+    status: RazorpayOrderPaymentStatus
+    order_id: str = Field(min_length=1, max_length=128)
+    method: str | None = Field(default=None, max_length=64)
+    provider_created_at: int = Field(alias="created_at", ge=0)
+    error_code: str | None = Field(default=None, max_length=128)
+    error_description: str | None = Field(default=None, max_length=1000)
+    error_source: str | None = Field(default=None, max_length=128)
+    error_step: str | None = Field(default=None, max_length=128)
+    error_reason: str | None = Field(default=None, max_length=128)
 
     @field_validator("currency")
     @classmethod
@@ -190,6 +221,50 @@ class RazorpayOrderProvider:
         except (json.JSONDecodeError, ValidationError, TypeError) as error:
             raise RazorpayOrderProviderError(
                 "Razorpay Orders API returned an invalid response",
+                retryable=False,
+                status_code=response.status_code,
+            ) from error
+
+    async def fetch_order_payments(self, order_id: str) -> tuple[RazorpayOrderPayment, ...]:
+        """Read Razorpay's current payment evidence for a known Test Mode Order."""
+
+        normalized_order_id = order_id.strip()
+        if not normalized_order_id:
+            raise ValueError("Razorpay Order ID cannot be empty")
+
+        try:
+            async with httpx2.AsyncClient(
+                base_url=self._base_url,
+                auth=httpx2.BasicAuth(self._key_id, self._key_secret),
+                timeout=httpx2.Timeout(self._timeout_seconds),
+                transport=self._transport,
+            ) as client:
+                response = await client.get(
+                    f"{RAZORPAY_ORDERS_PATH}/{normalized_order_id}/payments",
+                    headers={"Accept": "application/json"},
+                )
+        except httpx2.RequestError as error:
+            raise RazorpayOrderProviderError(
+                f"Razorpay Order payment verification failed: {type(error).__name__}",
+                retryable=True,
+            ) from error
+
+        if response.status_code >= 400:
+            raise RazorpayOrderProviderError(
+                "Razorpay Order payment verification was rejected",
+                retryable=response.status_code == 429 or response.status_code >= 500,
+                status_code=response.status_code,
+            )
+
+        try:
+            payload = json.loads(response.content)
+            items = payload["items"]
+            if not isinstance(items, list):
+                raise TypeError("items is not a list")
+            return tuple(RazorpayOrderPayment.model_validate(item) for item in items)
+        except (KeyError, json.JSONDecodeError, ValidationError, TypeError) as error:
+            raise RazorpayOrderProviderError(
+                "Razorpay Order payment verification returned an invalid response",
                 retryable=False,
                 status_code=response.status_code,
             ) from error

@@ -7,6 +7,7 @@ from pydantic import SecretStr, ValidationError
 
 from app.core.config import Settings
 from app.integrations.razorpay.orders import (
+    RazorpayOrderPaymentStatus,
     RazorpayOrderProvider,
     RazorpayOrderProviderError,
     RazorpayOrderRequest,
@@ -100,6 +101,50 @@ async def test_creates_order_with_basic_auth_and_safe_payload() -> None:
     assert order.amount_minor == 349_900
     assert provider.checkout_key_id == "rzp_test_key"
     assert "test-secret" not in repr(provider)
+
+
+@pytest.mark.asyncio
+async def test_fetches_order_payment_evidence() -> None:
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        assert str(request.url) == (
+            "https://api.razorpay.test/v1/orders/order_test_001/payments"
+        )
+        assert request.method == "GET"
+        return httpx2.Response(
+            200,
+            request=request,
+            json={
+                "entity": "collection",
+                "count": 1,
+                "items": [
+                    {
+                        "id": "pay_test_001",
+                        "amount": 349_900,
+                        "currency": "inr",
+                        "status": "failed",
+                        "order_id": "order_test_001",
+                        "method": "netbanking",
+                        "created_at": 1_777_392_010,
+                        "error_code": "BAD_REQUEST_ERROR",
+                    },
+                ],
+            },
+        )
+
+    provider = RazorpayOrderProvider(
+        key_id="rzp_test_key",
+        key_secret="test-secret",
+        base_url="https://api.razorpay.test",
+        transport=httpx2.MockTransport(handler),
+    )
+
+    payments = await provider.fetch_order_payments(" order_test_001 ")
+
+    assert len(payments) == 1
+    assert payments[0].payment_id == "pay_test_001"
+    assert payments[0].status is RazorpayOrderPaymentStatus.FAILED
+    assert payments[0].currency == "INR"
+    assert payments[0].error_code == "BAD_REQUEST_ERROR"
 
 
 @pytest.mark.asyncio

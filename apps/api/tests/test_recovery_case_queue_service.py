@@ -46,15 +46,21 @@ def build_row() -> tuple[object, ...]:
         NOW,
         None,
         NOW,
+        None,
         NOW,
         "create_payment_link",
         "succeeded",
         "allow",
+        None,
+        None,
+        None,
+        None,
+        None,
         "payment_link_pending",
     )
 
 
-def test_default_filters_only_include_active_recovery_cases() -> None:
+def test_default_filters_include_complete_persisted_case_history() -> None:
     filters = RecoveryCaseQueueFilters(currency=" inr ")
 
     assert filters.currency == "INR"
@@ -128,8 +134,14 @@ async def test_loads_bounded_pii_safe_recovery_case_queue() -> None:
     assert item.currency == "INR"
     assert item.payment_method == "upi"
     assert item.source_incident_id == INCIDENT_ID
+    assert item.closed_at is None
     assert item.latest_action_type == "create_payment_link"
     assert item.latest_action_status == "succeeded"
     assert item.latest_action_policy_outcome == "allow"
+    assert item.latest_approval_status is None
+    assert item.latest_approval_reason is None
+    assert item.latest_approval_decision_reason is None
+    assert item.latest_approval_decided_at is None
+    assert item.latest_approval_decided_by is None
     assert item.outcome_status == "payment_link_pending"
     assert session.execute.await_count == 2

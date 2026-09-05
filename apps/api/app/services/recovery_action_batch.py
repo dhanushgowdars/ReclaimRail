@@ -23,6 +23,7 @@ from app.integrations.razorpay.payment_links import (
 from app.services.recovery_action_executor import (
     DEFAULT_ACTION_CLAIM_TIMEOUT,
     DEFAULT_MAXIMUM_EXECUTION_ATTEMPTS,
+    DEFAULT_PAYMENT_LINK_LIFETIME,
     RecoveryActionExecutionDisposition,
     RecoveryActionExecutionResult,
     RecoveryActionInProgressError,
@@ -146,7 +147,13 @@ async def discover_executable_recovery_action_ids(
         select(RecoveryAction.id)
         .where(
             RecoveryAction.action_type == RecoveryActionType.CREATE_PAYMENT_LINK.value,
-            RecoveryAction.execution_attempt_count < maximum_attempts,
+            or_(
+                RecoveryAction.execution_attempt_count < maximum_attempts,
+                # A 429 is a temporary provider throttle, not a recovery-plan
+                # failure.  Its five-minute cooldown is enforced by
+                # execute_after below.
+                RecoveryAction.last_error.like("%status_code=429%"),
+            ),
             or_(
                 RecoveryAction.status == RecoveryActionStatus.ALLOWED.value,
                 and_(
@@ -154,7 +161,13 @@ async def discover_executable_recovery_action_ids(
                     RecoveryAction.execute_after.is_not(None),
                     RecoveryAction.execute_after <= reference_time,
                 ),
-                RecoveryAction.status == RecoveryActionStatus.FAILED.value,
+                and_(
+                    RecoveryAction.status == RecoveryActionStatus.FAILED.value,
+                    or_(
+                        RecoveryAction.execute_after.is_(None),
+                        RecoveryAction.execute_after <= reference_time,
+                    ),
+                ),
                 and_(
                     RecoveryAction.status == RecoveryActionStatus.EXECUTING.value,
                     or_(
@@ -186,6 +199,7 @@ async def run_recovery_action_batch(
     batch_size: int = 25,
     claim_timeout: timedelta = (DEFAULT_ACTION_CLAIM_TIMEOUT),
     maximum_attempts: int = (DEFAULT_MAXIMUM_EXECUTION_ATTEMPTS),
+    payment_link_lifetime: timedelta = DEFAULT_PAYMENT_LINK_LIFETIME,
 ) -> RecoveryActionBatchResult:
     _require_timezone_aware(
         reference_time,
@@ -222,6 +236,7 @@ async def run_recovery_action_batch(
                 executed_at=reference_time,
                 claim_timeout=claim_timeout,
                 maximum_attempts=maximum_attempts,
+                payment_link_lifetime=payment_link_lifetime,
             )
 
             execution_results.append(

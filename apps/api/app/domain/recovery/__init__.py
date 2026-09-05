@@ -22,6 +22,8 @@ from app.domain.recovery.planner import (
 from app.domain.recovery.policy import (
     DEFAULT_RECOVERY_POLICY,
     RecoveryPolicy,
+    RecoveryPolicyCheck,
+    build_recovery_policy_checks,
     evaluate_recovery_proposal,
 )
 
@@ -43,7 +45,9 @@ __all__ = [
     "RecoveryPolicyDecision",
     "RecoveryPolicyOutcome",
     "RecoveryPolicy",
+    "RecoveryPolicyCheck",
     "build_deterministic_recovery_plan",
     "build_recovery_evidence_codes",
+    "build_recovery_policy_checks",
     "evaluate_recovery_proposal",
 ]

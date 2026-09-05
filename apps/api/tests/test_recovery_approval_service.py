@@ -137,29 +137,24 @@ async def test_creates_durable_approval_request_and_blocks_action(
     assert append.await_args.kwargs["request"].event_type == "approval.requested"
 
 
-def test_medium_incident_requires_review_without_misrepresenting_amount_threshold() -> None:
+def test_medium_incident_below_threshold_does_not_enter_amount_review_queue() -> None:
     requirement = build_recovery_approval_requirement(
         build_action(status=RecoveryActionStatus.ALLOWED),
         threshold_minor=1_000_000,
         active_incident_severity=IncidentSeverity.MEDIUM,
     )
 
-    assert requirement is not None
-    assert requirement.primary_reason == "active_incident_uncertainty"
-    assert requirement.threshold_minor is None
-    assert requirement.context["reason_codes"] == ["active_incident_uncertainty"]
+    assert requirement is None
 
 
-def test_near_maximum_attempts_requires_review() -> None:
+def test_near_maximum_attempts_below_threshold_does_not_enter_amount_review_queue() -> None:
     requirement = build_recovery_approval_requirement(
         build_action(status=RecoveryActionStatus.ALLOWED),
         threshold_minor=1_000_000,
         recovery_attempt_count=2,
     )
 
-    assert requirement is not None
-    assert requirement.primary_reason == "near_maximum_attempts"
-    assert requirement.context["maximum_recovery_attempts"] == 3
+    assert requirement is None
 
 
 @pytest.mark.asyncio
@@ -197,7 +192,7 @@ async def test_approval_atomically_releases_action_for_worker(
 
 
 @pytest.mark.asyncio
-async def test_rejection_cancels_action_and_escalates_case(
+async def test_rejection_cancels_action_and_closes_case(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     approval = build_approval()
@@ -223,7 +218,9 @@ async def test_rejection_cancels_action_and_escalates_case(
 
     assert approval.status == RecoveryApprovalStatus.REJECTED.value
     assert action.status == RecoveryActionStatus.CANCELLED.value
-    assert recovery_case.status == RecoveryCaseStatus.ESCALATED.value
+    assert recovery_case.status == RecoveryCaseStatus.CANCELLED.value
+    assert recovery_case.closed_at == NOW
+    assert recovery_case.close_reason == "approval_rejected_without_execution"
     assert append.await_args.kwargs["request"].event_type == "approval.rejected"
 
 
@@ -256,7 +253,9 @@ async def test_expired_decision_never_releases_provider_action(
     assert result.disposition is RecoveryApprovalDecisionDisposition.EXPIRED
     assert approval.status == RecoveryApprovalStatus.EXPIRED.value
     assert action.status == RecoveryActionStatus.CANCELLED.value
-    assert recovery_case.status == RecoveryCaseStatus.ESCALATED.value
+    assert recovery_case.status == RecoveryCaseStatus.CANCELLED.value
+    assert recovery_case.closed_at == NOW
+    assert recovery_case.close_reason == "approval_expired_without_execution"
     assert append.await_args.kwargs["request"].event_type == "approval.expired"
 
 

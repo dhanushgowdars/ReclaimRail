@@ -160,6 +160,7 @@ def apply_payment_lab_webhook_correlation(
     projection: PaymentProjectionResult,
     *,
     observed_at: datetime,
+    evidence_source: str = "signed_webhook",
 ) -> PaymentLabWebhookCorrelationResult:
     """Attach projected payment truth without allowing replay regression."""
 
@@ -200,6 +201,15 @@ def apply_payment_lab_webhook_correlation(
 
     if payment_lab_run.failure_code != target_failure_code:
         payment_lab_run.failure_code = target_failure_code
+        changed = True
+
+    # Existing signed-webhook records predate this optional field. Do not make
+    # a replay look like a new state transition merely to backfill that label.
+    if (
+        evidence_source != "signed_webhook"
+        and payment_lab_run.provider_evidence_source != evidence_source
+    ):
+        payment_lab_run.provider_evidence_source = evidence_source
         changed = True
 
     if (

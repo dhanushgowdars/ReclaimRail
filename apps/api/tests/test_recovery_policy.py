@@ -15,6 +15,7 @@ from app.domain.recovery import (
     RecoveryGuardrail,
     RecoveryPolicy,
     RecoveryPolicyOutcome,
+    build_recovery_policy_checks,
     evaluate_recovery_proposal,
 )
 
@@ -78,6 +79,41 @@ def test_allows_safe_payment_link_proposal() -> None:
     assert decision.outcome is RecoveryPolicyOutcome.ALLOW
     assert decision.guardrails == ()
     assert "passed" in decision.explanation
+
+
+def test_persists_the_evidence_for_every_safe_payment_link_check() -> None:
+    checks = build_recovery_policy_checks(
+        create_case(),
+        create_payment_link_proposal(),
+        evaluated_at=NOW,
+    )
+
+    check_by_code = {check.code: check for check in checks}
+
+    assert check_by_code["amount_matches_original"].result == "passed"
+    assert check_by_code["amount_matches_original"].actual_value == (
+        "Proposed 250000; original 250000"
+    )
+    assert check_by_code["customer_contact_consent"].result == "not_applicable"
+    assert check_by_code["incident_circuit_breaker"].rule == (
+        "High or critical rail incidents block automated recovery"
+    )
+
+
+def test_policy_checks_show_the_exact_active_quiet_period() -> None:
+    checks = build_recovery_policy_checks(
+        replace(
+            create_case(),
+            last_customer_contact_at=NOW - timedelta(hours=1),
+        ),
+        create_message_proposal(),
+        evaluated_at=NOW,
+    )
+
+    check_by_code = {check.code: check for check in checks}
+
+    assert check_by_code["customer_quiet_period"].result == "failed"
+    assert "Active until" in check_by_code["customer_quiet_period"].actual_value
 
 
 @pytest.mark.parametrize(

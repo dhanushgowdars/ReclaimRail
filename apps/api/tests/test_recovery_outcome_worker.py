@@ -138,7 +138,7 @@ async def test_run_once_executes_batch_and_closes_database(
         session_factory,
         provider=provider,
         reference_time=NOW,
-        batch_size=25,
+        batch_size=1,
     )
     close_database.assert_awaited_once_with()
 
@@ -312,6 +312,6 @@ async def test_continuous_batch_sleeps_and_closes_on_cancellation(
         )
 
     sleep.assert_awaited_once_with(
-        30.0,
+        120.0,
     )
     close_database.assert_awaited_once_with()

@@ -21,7 +21,12 @@ from app.db.models.recovery import (
 from app.db.models.recovery_outcome import RecoveryOutcome
 from app.domain.payments import STOP_RECOVERY_STATES, PaymentState
 from app.domain.recovery import RecoveryActionType, RecoveryCaseStatus
-from app.services.recovery_ai_trace import RecoveryAiTrace, build_recovery_ai_trace
+from app.services.money_display import format_minor_amount
+from app.services.recovery_ai_trace import (
+    RecoveryAiTrace,
+    build_recovery_ai_trace,
+    display_recovery_ai_text,
+)
 
 
 class PaymentLabLiveRunNotFoundError(LookupError):
@@ -101,6 +106,7 @@ class PaymentLabPaymentEvidence:
     failure_code: str | None
     failure_reason: str | None
     observed_at: datetime
+    source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,10 +131,12 @@ class PaymentLabActionEvidence:
     recovery_action_id: UUID
     sequence_number: int
     action_type: str
+    proposal_reason: str
     channel: str | None
     status: str
     policy_outcome: str
     policy_guardrails: tuple[str, ...]
+    policy_check_results: tuple[dict[str, str], ...]
     policy_explanation: str
     provider_action_id: str | None
     provider_action_status: str | None
@@ -220,6 +228,7 @@ def _fallback_metadata(
 
 def _build_payment_evidence(
     payment_attempt: PaymentAttempt | None,
+    run: PaymentLabRun,
 ) -> PaymentLabPaymentEvidence | None:
     if payment_attempt is None:
         return None
@@ -230,6 +239,7 @@ def _build_payment_evidence(
         failure_code=payment_attempt.error_code,
         failure_reason=payment_attempt.error_reason,
         observed_at=payment_attempt.state_event_created_at,
+        source=run.provider_evidence_source,
     )
 
 
@@ -254,7 +264,11 @@ def _build_agent_evidence(
         model_name=agent_run.model_name if agent_run is not None else None,
         fallback_used=fallback_used,
         fallback_reason=fallback_reason,
-        reasoning_summary=(agent_run.reasoning_summary if agent_run is not None else None),
+        reasoning_summary=(
+            display_recovery_ai_text(agent_run.reasoning_summary, agent_run.evidence)
+            if agent_run is not None
+            else None
+        ),
         proposed_action_count=(agent_run.proposed_action_count if agent_run is not None else 0),
         started_at=agent_run.started_at if agent_run is not None else None,
         completed_at=agent_run.completed_at if agent_run is not None else None,
@@ -270,10 +284,12 @@ def _build_action_evidence(
             recovery_action_id=action.id,
             sequence_number=action.sequence_number,
             action_type=action.action_type,
+            proposal_reason=action.proposal_reason,
             channel=action.channel,
             status=action.status,
             policy_outcome=action.policy_outcome,
             policy_guardrails=tuple(action.policy_guardrails),
+            policy_check_results=tuple(action.policy_check_results),
             policy_explanation=action.policy_explanation,
             provider_action_id=action.provider_action_id,
             provider_action_status=action.provider_action_status,
@@ -549,6 +565,51 @@ def _recorded_duration_milliseconds(
     return duration if duration > 0 else None
 
 
+def _agent_step_detail(agent_run: RecoveryAgentRun) -> str:
+    """Build a concise explanation from persisted planning evidence only."""
+    trace = build_recovery_ai_trace(agent_run.evidence)
+    if trace.fallback_used:
+        reason = (
+            trace.fallback_reason.replace("_", " ")
+            if trace.fallback_reason
+            else "provider fallback"
+        )
+        return (
+            f"Gemini did not return a usable plan ({reason}); deterministic policy produced "
+            "the bounded recommendation instead."
+        )
+
+    recommendation = (
+        trace.recommended_action.replace("_", " ")
+        if trace.recommended_action
+        else "a bounded action"
+    )
+    diagnosis = (
+        trace.root_cause_category.replace("_", " ")
+        if trace.root_cause_category
+        else "the signed payment failure"
+    )
+    explanation = f" {trace.operator_explanation}" if trace.operator_explanation else ""
+    return f"Gemini diagnosed {diagnosis} and recommended {recommendation}.{explanation}"
+
+
+def _policy_step_detail(action: RecoveryAction) -> str:
+    """Explain the deterministic decision and exact proposed intervention."""
+    action_label = action.action_type.replace("_", " ")
+    guardrails = ", ".join(code.replace("_", " ") for code in action.policy_guardrails)
+    guardrail_detail = f" Guardrails evaluated: {guardrails}." if guardrails else ""
+    verb = {
+        "allow": "allowed",
+        "block": "blocked",
+        "escalate": "escalated",
+        "stop": "stopped",
+    }.get(action.policy_outcome, action.policy_outcome)
+    return (
+        f"Policy {verb} {action_label}: {action.policy_explanation}"
+        f" Proposed reason: {action.proposal_reason}.{guardrail_detail}"
+    )
+
+
 def _build_steps(
     run: PaymentLabRun,
     *,
@@ -742,8 +803,12 @@ def _build_steps(
             status=case_status,
             occurred_at=(recovery_case.opened_at if recovery_case is not None else None),
             detail=(
-                "A controlled recovery case opened only after Razorpay confirmed the "
-                "failed payment."
+                (
+                    "A controlled recovery case opened for the original "
+                    f"{format_minor_amount(run.amount_minor, run.currency)} "
+                    "payment only after "
+                    "Razorpay confirmed the failure and the payment remained recovery eligible."
+                )
                 if recovery_case is not None
                 else "Five-second signed-evidence stabilization window before recovery begins"
             ),
@@ -757,8 +822,7 @@ def _build_steps(
             ),
             detail=(
                 (
-                    agent_run.reasoning_summary
-                    or "Gemini persisted a bounded recommendation from the signed payment evidence."
+                    _agent_step_detail(agent_run)
                 )
                 if (agent_run is not None and agent_status is PaymentLabLiveStepStatus.COMPLETED)
                 else "Gemini is preparing a bounded proposal"
@@ -779,8 +843,7 @@ def _build_steps(
             occurred_at=(latest_action.policy_evaluated_at if latest_action is not None else None),
             detail=(
                 (
-                    latest_action.policy_explanation
-                    or f"Deterministic policy decided: {latest_action.policy_outcome}."
+                    _policy_step_detail(latest_action)
                 )
                 if latest_action is not None
                 else "Waiting for deterministic guardrails"
@@ -796,14 +859,14 @@ def _build_steps(
         PaymentLabLiveStep(
             key="provider_action",
             label=(
-                "Customer message"
-                if latest_action_is_message
-                else "Safe disposition"
+                "Safe disposition"
                 if approval_stopped_execution
                 or (
                     latest_action is not None
                     and latest_action.policy_outcome in {"block", "escalate", "stop"}
                 )
+                else "Customer message"
+                if latest_action_is_message
                 else "Provider action"
             ),
             status=provider_status,
@@ -813,7 +876,9 @@ def _build_steps(
                 else None
             ),
             detail=(
-                "Resend accepted the controlled recovery email request"
+                "Approval closed without provider execution"
+                if approval_stopped_execution
+                else "Resend accepted the controlled recovery email request"
                 if latest_action_is_message
                 and latest_action is not None
                 and latest_action.provider_action_status == "direct_email_accepted"
@@ -833,8 +898,6 @@ def _build_steps(
                 if latest_action_is_message
                 else "Stopping active recovery after original-payment completion"
                 if derived_state.business_state is PaymentLabLiveBusinessState.STOPPING_RECOVERY
-                else "Approval closed without provider execution"
-                if approval_stopped_execution
                 else (
                     "Razorpay created recovery link "
                     f"{latest_action.provider_action_id}. The customer can now choose to pay it."
@@ -996,7 +1059,7 @@ async def load_payment_lab_live_run(
             approval=approval,
             outcome=outcome,
         ),
-        payment=_build_payment_evidence(payment_attempt),
+        payment=_build_payment_evidence(payment_attempt, run),
         agent=_build_agent_evidence(recovery_case, agent_run),
         actions=_build_action_evidence(actions),
         approval=_build_approval_evidence(approval),

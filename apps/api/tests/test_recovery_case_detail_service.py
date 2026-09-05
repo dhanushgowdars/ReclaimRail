@@ -220,7 +220,9 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
     assert detail.recovery_case.recovery_case_id == CASE_ID
     assert detail.payment_lifecycle.current_state == "failed"
     assert detail.agent_runs[0].planner_provider == "gemini"
-    assert detail.agent_runs[0].ai_trace.confidence == 0.91
+    assert detail.agent_runs[0].ai_trace.evidence_citations[0].reference == (
+        "payment_state_snapshot"
+    )
     assert detail.agent_runs[0].ai_trace.root_cause_category == "bank_authorization_failure"
     assert detail.agent_runs[0].ai_trace.evidence_tool_names == (
         "merchant_recovery_policy",

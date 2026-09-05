@@ -2,6 +2,7 @@ import {
   BookCheck,
   Boxes,
   BrainCircuit,
+  FlaskConical,
   LayoutDashboard,
   ListChecks,
   Play,
@@ -16,14 +17,15 @@ const navigation = [
   { id: "reviews", href: "/reviews", label: "Human reviews", icon: ListChecks },
   { id: "outcomes", href: "/outcomes", label: "Outcome ledger", icon: BookCheck },
   { id: "controls", href: "/safety-controls", label: "Safety controls", icon: ShieldCheck },
-  { id: "intelligence", href: "/intelligence", label: "Rail intelligence", icon: BrainCircuit },
+  { id: "intelligence", href: "/intelligence", label: "Recovery Brain", icon: BrainCircuit },
+  { id: "evaluations", href: "/evaluations", label: "Evidence Lab", icon: FlaskConical },
 ] as const;
 
 export function RecoveryNavigation({ active = "overview" }: { active?: (typeof navigation)[number]["id"] | "case" }) {
   return (
     <header className="sidebar">
       <Link className="product-lockup" href="/" aria-label="ReclaimRail overview">
-        <span className="product-mark">R</span>
+        <span className="product-mark" aria-hidden="true"><b>R</b><i /></span>
         <span className="product-lockup__copy">
           <strong>ReclaimRail</strong>
           <small>Recovery control plane</small>

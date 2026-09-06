@@ -557,12 +557,7 @@ class GoogleGenAIRecoveryPlanProvider:
 
         try:
             async with asyncio.timeout(self._request_timeout_seconds):
-                # The SDK documents Chat.send_message as the supported async
-                # path when automatic function calling is present.  Recovery
-                # planning has no executable tools, but using an explicit chat
-                # keeps the request away from the SDK's direct-model AFC path
-                # that can close its HTTP client before the request is sent.
-                chat = async_client.chats.create(
+                response = await async_client.models.generate_content(
                     model=self.model_name,
                     config=types.GenerateContentConfig(
                         system_instruction=GEMINI_RECOVERY_SYSTEM_INSTRUCTION,
@@ -581,9 +576,7 @@ class GoogleGenAIRecoveryPlanProvider:
                         response_mime_type="application/json",
                         response_json_schema=GEMINI_RECOVERY_RESPONSE_JSON_SCHEMA,
                     ),
-                )
-                response = await chat.send_message(
-                    build_recovery_planning_prompt(context),
+                    contents=build_recovery_planning_prompt(context),
                 )
 
             if not response.text:

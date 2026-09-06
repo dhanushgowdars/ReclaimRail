@@ -261,11 +261,11 @@ async def test_provider_timeout_uses_deterministic_fallback(
 
     class SlowAsyncClient:
         def __init__(self) -> None:
-            self.chats = self
+            self.models = self
             self.closed = False
 
-        def create(self, **_: object) -> SlowChat:
-            return SlowChat()
+        async def generate_content(self, **_: object) -> object:
+            return await SlowChat().send_message(None)
 
         async def aclose(self) -> None:
             self.closed = True

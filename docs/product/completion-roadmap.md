@@ -1,4 +1,10 @@
-# ReclaimRail completion roadmap
+# ReclaimRail completion roadmap (historical)
+
+> **Superseded on 22 September 2026.** This file preserves the earlier delivery
+> history. New implementation work follows
+> [`roadmap-phases-14-23.md`](roadmap-phases-14-23.md) and the architectural
+> constraints in [`../INVARIANTS.md`](../INVARIANTS.md). The newer roadmap must
+> not erase provider-backed evidence delivered by the phases recorded here.
 
 Status: active source of truth  
 Baseline: merged `main` at PR #12 / `4721195`  

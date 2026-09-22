@@ -31,6 +31,12 @@ part of the product.
 | 22 | Investigation Room | A reviewer can trace evidence, hypotheses, alternatives, policy, execution and outcome |
 | 23 | Scenario Lab, evaluation and submission | Real and simulated results are separated; hero scenarios and four-arm evaluation are reproducible |
 
+## Delivery checkpoint
+
+- Phase 14: complete and merged.
+- Phase 15: implementation in progress on `phase-15/payment-truth-resolver`.
+- Phases 16–23: pending; their scope remains locked below.
+
 ## Hero scenarios
 
 1. Failed Test Mode payment to provider-confirmed recovery.

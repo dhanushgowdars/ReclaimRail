@@ -15,6 +15,7 @@ from app.domain.payments import (
     PaymentTransitionOutcome,
     PaymentTransitionReason,
 )
+from app.domain.recovery.contracts import PaymentTruthState
 from app.services.payment_projector import (
     PaymentProjectionConflictError,
     project_payment_lifecycle_event,
@@ -138,9 +139,17 @@ def required_scalar_result(
 
 
 @pytest.mark.asyncio
-async def test_projects_new_event_exactly_once() -> None:
+async def test_projects_new_event_exactly_once(monkeypatch: pytest.MonkeyPatch) -> None:
     attempt = make_attempt()
     session = AsyncMock(spec=AsyncSession)
+    truth_result = MagicMock()
+    truth_result.snapshot.state = PaymentTruthState.PAYMENT_FAILED.value
+    truth_result.snapshot.version = 1
+    truth_writer = AsyncMock(return_value=truth_result)
+    monkeypatch.setattr(
+        "app.services.payment_projector.record_webhook_transition_truth",
+        truth_writer,
+    )
 
     session.execute.side_effect = [
         optional_scalar_result(None),
@@ -161,6 +170,8 @@ async def test_projects_new_event_exactly_once() -> None:
     assert result.state_version == 1
     assert result.outcome is PaymentTransitionOutcome.APPLIED
     assert result.reason is PaymentTransitionReason.INITIALIZED
+    assert result.truth_state is PaymentTruthState.PAYMENT_FAILED
+    assert result.truth_version == 1
 
     session.add.assert_called_once()
     added_transition = session.add.call_args.args[0]
@@ -173,6 +184,8 @@ async def test_projects_new_event_exactly_once() -> None:
 
     assert session.execute.await_count == 4
     session.flush.assert_awaited_once()
+    truth_writer.assert_awaited_once()
+    assert truth_writer.await_args.kwargs["content_sha256"] is None
     session.commit.assert_not_awaited()
     session.rollback.assert_not_awaited()
 

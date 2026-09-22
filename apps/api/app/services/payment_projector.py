@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -18,6 +18,8 @@ from app.domain.payments import (
     PaymentTransitionReason,
     decide_payment_transition,
 )
+from app.domain.recovery.contracts import PaymentTruthState
+from app.services.payment_truth_service import record_webhook_transition_truth
 
 
 class PaymentProjectionConflictError(ValueError):
@@ -33,6 +35,8 @@ class PaymentProjectionResult:
     outcome: PaymentTransitionOutcome
     reason: PaymentTransitionReason
     duplicate: bool
+    truth_state: PaymentTruthState | None = None
+    truth_version: int | None = None
 
 
 def validate_payment_identity(
@@ -295,6 +299,7 @@ async def project_payment_lifecycle_event(
     event: PaymentLifecycleEvent,
     *,
     processed_at: datetime,
+    evidence_content_sha256: str | None = None,
 ) -> PaymentProjectionResult:
     """
     Persist one payment event exactly once.
@@ -343,7 +348,20 @@ async def project_payment_lifecycle_event(
     session.add(transition)
     await session.flush()
 
-    return result_from_transition(
-        transition,
-        duplicate=False,
+    truth = await record_webhook_transition_truth(
+        session,
+        payment_attempt=attempt,
+        event=event,
+        transition=transition,
+        observed_at=processed_at,
+        content_sha256=evidence_content_sha256,
+    )
+
+    return replace(
+        result_from_transition(
+            transition,
+            duplicate=False,
+        ),
+        truth_state=PaymentTruthState(truth.snapshot.state),
+        truth_version=truth.snapshot.version,
     )

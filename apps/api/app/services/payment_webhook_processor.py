@@ -245,6 +245,7 @@ async def process_canonical_payment_webhook(
             session,
             lifecycle_event,
             processed_at=processed_at,
+            evidence_content_sha256=webhook_event.payload_sha256,
         )
     except PaymentProjectionConflictError as error:
         return await complete_without_projection(

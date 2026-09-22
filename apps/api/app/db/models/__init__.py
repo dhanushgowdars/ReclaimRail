@@ -20,6 +20,10 @@ from app.db.models.payment_lab import (
     PaymentLabRunProvenance,
     PaymentLabRunStatus,
 )
+from app.db.models.payment_truth import (
+    PaymentEvidenceRecord,
+    PaymentTruthSnapshotRecord,
+)
 from app.db.models.recovery import (
     RecoveryAction,
     RecoveryActionStatus,
@@ -53,11 +57,13 @@ __all__ = [
     "OutboxMessage",
     "OutboxMessageStatus",
     "PaymentAttempt",
+    "PaymentEvidenceRecord",
     "PaymentLabRun",
     "PaymentLabRunMode",
     "PaymentLabRunProvenance",
     "PaymentLabRunStatus",
     "PaymentStateTransition",
+    "PaymentTruthSnapshotRecord",
     "RecoveryAction",
     "RecoveryActionStatus",
     "RecoveryAgentRun",

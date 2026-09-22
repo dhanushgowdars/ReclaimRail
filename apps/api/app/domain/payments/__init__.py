@@ -8,6 +8,11 @@ from app.domain.payments.state_machine import (
     PaymentTransitionReason,
     decide_payment_transition,
 )
+from app.domain.payments.truth import (
+    PaymentTruthDecision,
+    PaymentTruthEvidenceFact,
+    resolve_payment_truth,
+)
 
 __all__ = [
     "ALLOWED_TRANSITIONS",
@@ -17,5 +22,8 @@ __all__ = [
     "PaymentTransitionDecision",
     "PaymentTransitionOutcome",
     "PaymentTransitionReason",
+    "PaymentTruthDecision",
+    "PaymentTruthEvidenceFact",
     "decide_payment_transition",
+    "resolve_payment_truth",
 ]

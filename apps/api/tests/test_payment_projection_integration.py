@@ -9,6 +9,10 @@ from app.db.models.payment import (
     PaymentAttempt,
     PaymentStateTransition,
 )
+from app.db.models.payment_truth import (
+    PaymentEvidenceRecord,
+    PaymentTruthSnapshotRecord,
+)
 from app.db.models.webhook import (
     WebhookEvent,
     WebhookProcessingStatus,
@@ -18,6 +22,7 @@ from app.domain.payments import (
     PaymentTransitionOutcome,
     PaymentTransitionReason,
 )
+from app.domain.recovery.contracts import PaymentTruthState
 from app.services.payment_webhook_processor import (
     PaymentWebhookDisposition,
     process_canonical_payment_webhook,
@@ -164,6 +169,8 @@ async def test_failure_then_late_authorization_is_atomic_and_idempotent() -> Non
         assert failed_result.disposition is (PaymentWebhookDisposition.PROJECTED)
         assert failed_result.projection is not None
         assert failed_result.projection.state is PaymentState.FAILED
+        assert failed_result.projection.truth_state is PaymentTruthState.PAYMENT_FAILED
+        assert failed_result.projection.truth_version == 1
 
         async with session_factory() as session, session.begin():
             authorized_result = await process_canonical_payment_webhook(
@@ -176,6 +183,8 @@ async def test_failure_then_late_authorization_is_atomic_and_idempotent() -> Non
         assert authorized_result.projection is not None
         assert authorized_result.projection.state is (PaymentState.AUTHORIZED)
         assert authorized_result.projection.reason is (PaymentTransitionReason.LATE_AUTHORIZATION)
+        assert authorized_result.projection.truth_state is PaymentTruthState.LATE_AUTHORIZATION
+        assert authorized_result.projection.truth_version == 2
 
         async with session_factory() as session, session.begin():
             replay_result = await process_canonical_payment_webhook(
@@ -207,6 +216,18 @@ async def test_failure_then_late_authorization_is_atomic_and_idempotent() -> Non
             transitions = list(
                 transition_result.scalars().all(),
             )
+            evidence_result = await session.execute(
+                select(PaymentEvidenceRecord)
+                .where(PaymentEvidenceRecord.payment_attempt_id == attempt.id)
+                .order_by(PaymentEvidenceRecord.observed_at, PaymentEvidenceRecord.fact_name),
+            )
+            evidence = list(evidence_result.scalars().all())
+            truth_result = await session.execute(
+                select(PaymentTruthSnapshotRecord)
+                .where(PaymentTruthSnapshotRecord.payment_attempt_id == attempt.id)
+                .order_by(PaymentTruthSnapshotRecord.version),
+            )
+            truth = list(truth_result.scalars().all())
 
             failed_event = await session.get(
                 WebhookEvent,
@@ -237,6 +258,15 @@ async def test_failure_then_late_authorization_is_atomic_and_idempotent() -> Non
             assert transitions[1].reason == (PaymentTransitionReason.LATE_AUTHORIZATION.value)
             assert transitions[1].late_authorization is True
             assert transitions[1].stop_recovery is True
+
+            assert len(evidence) == 3
+            assert all(item.verified for item in evidence)
+            assert {item.content_sha256 for item in evidence} == {"b" * 64}
+            assert [item.state for item in truth] == [
+                PaymentTruthState.PAYMENT_FAILED.value,
+                PaymentTruthState.LATE_AUTHORIZATION.value,
+            ]
+            assert [item.version for item in truth] == [1, 2]
 
             assert failed_event is not None
             assert failed_event.processing_status == (WebhookProcessingStatus.PROCESSED.value)

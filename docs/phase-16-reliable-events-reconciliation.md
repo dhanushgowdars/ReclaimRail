@@ -1,5 +1,10 @@
 # Phase 16 — Reliable Events and Reconciliation
 
+- **Status:** Complete and merged
+- **Merge:** PR #17 / `67c950c`
+- **Verification:** 669 passed, 1 skipped; Alembic upgrade/check, frontend
+  lint/build and npm audit passed
+
 ## Result
 
 Signed webhooks and server-side Razorpay reads feed the same deterministic state

@@ -2,8 +2,13 @@
 
 - **Status:** Locked
 - **Date:** 2026-09-22
-- **Baseline:** `054a026` (Phase 15 merged)
+- **Baseline:** `67c950c` (Phases 15 and 16 merged)
 - **Product:** Evidence-Grounded Payment Truth and Recovery Control Plane
+
+> The detailed implementation source of truth is
+> [`MASTER-EXECUTION-PLAN.md`](MASTER-EXECUTION-PLAN.md). That document defines
+> stable requirement IDs, runtime deliverables, tests and phase exit gates. This
+> file remains the compact roadmap.
 
 ## Thesis
 
@@ -34,10 +39,13 @@ part of the product.
 ## Delivery checkpoint
 
 - Phase 14: complete and merged.
-- Phase 15: merged; corrective evidence-source completion is included with Phase 16.
-- Phase 16: corrective implementation complete on the working branch; PostgreSQL
-  migration verification and merge remain pending.
-- Phases 17–23: pending; their scope remains locked below.
+- Phase 15: complete and merged; corrective evidence-source completion was included
+  and verified with Phase 16.
+- Phase 16: complete and merged through PR #17 (`67c950c`). Backend tests reported
+  669 passed and 1 skipped; PostgreSQL migrations/schema check, frontend lint/build
+  and npm audit passed.
+- Phase 17: next; implementation must follow P17-01 through P17-16 in the master plan.
+- Phases 18–23: pending; their scope remains locked below.
 
 ## Hero scenarios
 

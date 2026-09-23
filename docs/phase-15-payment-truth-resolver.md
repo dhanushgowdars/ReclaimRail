@@ -2,7 +2,7 @@
 
 - **Branch:** `phase-15/payment-truth-resolver`
 - **Baseline:** `afd99baf8d836ffb988fbb4da2b013dd6786a921`
-- **Status:** Implemented; PostgreSQL-backed verification required before merge
+- **Status:** Complete and merged; PostgreSQL-backed verification passed
 
 ## Problem
 
@@ -72,3 +72,10 @@ The Gemini planner is intentionally unchanged in this phase.
 Phase 16 adds provider polling evidence, missing-event detection, reconciliation
 jobs and explicit handling of duplicate, delayed and out-of-order delivery across
 webhook and provider API sources.
+
+## Closure
+
+The remaining evidence-source and reconciliation acceptance requirements were
+completed and verified with Phase 16. The combined gate reported 669 passed and
+1 skipped, with Alembic upgrade/schema check, frontend lint/build and npm audit
+passing before merge.

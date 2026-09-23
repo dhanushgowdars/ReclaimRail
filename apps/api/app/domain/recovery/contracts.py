@@ -5,7 +5,7 @@ define the safety boundary that the payment-truth, investigator and execution
 phases will adopt incrementally.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from string import hexdigits
@@ -19,6 +19,8 @@ class PaymentEvidenceSource(StrEnum):
     MERCHANT_DATABASE = "merchant_database"
     RECOVERY_STATE = "recovery_state"
     RECONCILIATION = "reconciliation"
+    PAYMENT_LAB = "payment_lab"
+    RECOVERY_LINK = "recovery_link"
 
 
 class PaymentTruthState(StrEnum):
@@ -111,6 +113,10 @@ class PaymentEvidence:
     event_at: datetime | None = None
     fresh_until: datetime | None = None
     verified: bool = False
+    signature_verified: bool | None = None
+    normalized_fields: dict[str, object] = field(default_factory=dict)
+    reliability: str = "corroborating"
+    unavailable_reason: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -142,6 +148,10 @@ class PaymentEvidence:
                 _aware(value, field_name=field_name)
         if self.fresh_until is not None and self.fresh_until <= self.observed_at:
             raise ValueError("Evidence freshness deadline must follow observation time")
+        if self.reliability not in {"authoritative", "corroborating", "weak"}:
+            raise ValueError("Evidence reliability classification is invalid")
+        if self.unavailable_reason is not None and not self.unavailable_reason.strip():
+            raise ValueError("Evidence unavailability reason cannot be blank")
 
 
 @dataclass(frozen=True, slots=True)

@@ -32,6 +32,7 @@ class PaymentStreamConsumerConfig:
     claim_idle_milliseconds: int
     dead_letter_stream_name: str
     dead_letter_stream_max_length: int
+    max_processing_attempts: int = 5
 
 
 class WebhookReceivedPayload(BaseModel):
@@ -99,6 +100,7 @@ def create_payment_consumer_config(
         claim_idle_milliseconds=(settings.payment_consumer_claim_idle_milliseconds),
         dead_letter_stream_name=(settings.payment_consumer_dead_letter_stream_name),
         dead_letter_stream_max_length=(settings.payment_consumer_dead_letter_stream_max_length),
+        max_processing_attempts=settings.payment_consumer_max_processing_attempts,
     )
 
 
@@ -269,6 +271,27 @@ async def dead_letter_payment_stream_message(
     )
 
 
+async def payment_stream_delivery_count(
+    redis_client: Redis,
+    config: PaymentStreamConsumerConfig,
+    stream_message_id: str,
+) -> int:
+    pending = await redis_client.xpending_range(
+        config.stream_name,
+        config.group_name,
+        min=stream_message_id,
+        max=stream_message_id,
+        count=1,
+    )
+    if not isinstance(pending, list) or not pending:
+        return 1
+    item = pending[0]
+    if not isinstance(item, dict):
+        return 1
+    value = item.get("times_delivered", 1)
+    return int(value) if isinstance(value, (int, str, bytes)) else 1
+
+
 def map_webhook_disposition(
     disposition: PaymentWebhookDisposition,
 ) -> PaymentStreamDisposition:
@@ -341,10 +364,55 @@ async def process_payment_stream_entry(
             error=str(error),
         )
     except Exception as error:
+        delivery_count = await payment_stream_delivery_count(
+            redis_client,
+            config,
+            stream_message_id,
+        )
+        if delivery_count >= config.max_processing_attempts:
+            await dead_letter_payment_stream_message(
+                redis_client,
+                config,
+                stream_message_id=stream_message_id,
+                fields=fields,
+                error=error,
+            )
+            await acknowledge_payment_stream_message(
+                redis_client,
+                config,
+                stream_message_id,
+            )
+            return PaymentStreamProcessingResult(
+                stream_message_id=stream_message_id,
+                disposition=PaymentStreamDisposition.DEAD_LETTERED,
+                error=f"Retry budget exhausted: {type(error).__name__}: {error}"[:2000],
+            )
         return PaymentStreamProcessingResult(
             stream_message_id=stream_message_id,
             disposition=PaymentStreamDisposition.RETRY,
             error=f"{type(error).__name__}: {error}"[:2000],
+        )
+
+    if processing_result.disposition is PaymentWebhookDisposition.FAILED:
+        permanent_error = PaymentStreamMessageError(
+            processing_result.error or "Canonical webhook processing failed"
+        )
+        await dead_letter_payment_stream_message(
+            redis_client,
+            config,
+            stream_message_id=stream_message_id,
+            fields=fields,
+            error=permanent_error,
+        )
+        await acknowledge_payment_stream_message(
+            redis_client,
+            config,
+            stream_message_id,
+        )
+        return PaymentStreamProcessingResult(
+            stream_message_id=stream_message_id,
+            disposition=PaymentStreamDisposition.DEAD_LETTERED,
+            error=processing_result.error,
         )
 
     await acknowledge_payment_stream_message(

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
@@ -10,10 +10,12 @@ from app.db.models.webhook import (
     WebhookProcessingStatus,
 )
 from app.domain.payments import (
+    PROVIDER_API_EVIDENCE_LABEL,
     PaymentState,
     PaymentTransitionOutcome,
     PaymentTransitionReason,
 )
+from app.domain.recovery.contracts import PaymentEvidenceSource
 from app.services import payment_webhook_processor
 from app.services.payment_lab_webhook_correlation import (
     PaymentLabWebhookCorrelationError,
@@ -194,6 +196,7 @@ async def test_projects_canonical_webhook_and_marks_it_processed(
     assert normalized_event.payment_id == "pay_processor_test"
     assert normalized_event.state is PaymentState.FAILED
     assert normalized_event.amount_minor == 50_000
+    assert projector.await_args.kwargs["evidence_source"] is PaymentEvidenceSource.VERIFIED_WEBHOOK
 
     statement = session.execute.await_args.args[0]
     assert "FOR UPDATE" in str(statement)
@@ -201,6 +204,35 @@ async def test_projects_canonical_webhook_and_marks_it_processed(
     session.flush.assert_awaited_once()
     session.commit.assert_not_awaited()
     session.rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_reconciliation_is_not_mislabeled_as_signed_webhook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = valid_payment_payload()
+    payload["reclaimrail_evidence_source"] = PROVIDER_API_EVIDENCE_LABEL
+    webhook_event = make_webhook_event(payload=payload)
+    webhook_event.provider_event_id = "provider-api:pay_processor_test:failed"
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(webhook_event)
+    projector = AsyncMock(return_value=make_projection_result())
+    monkeypatch.setattr(
+        payment_webhook_processor,
+        "project_payment_lifecycle_event",
+        projector,
+    )
+
+    result = await process_canonical_payment_webhook(
+        session,
+        WEBHOOK_ID,
+        processed_at=PROCESSED_AT,
+    )
+
+    assert result.disposition is PaymentWebhookDisposition.PROJECTED
+    assert (
+        projector.await_args.kwargs["evidence_source"] is PaymentEvidenceSource.PROVIDER_PAYMENT_API
+    )
 
 
 @pytest.mark.asyncio
@@ -274,6 +306,33 @@ async def test_unsupported_webhook_is_skipped_without_projection(
 
     projector.assert_not_awaited()
     session.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stale_signed_event_is_stored_but_not_projected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    webhook_event = make_webhook_event()
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = optional_scalar_result(webhook_event)
+    projector = AsyncMock()
+    monkeypatch.setattr(
+        payment_webhook_processor,
+        "project_payment_lifecycle_event",
+        projector,
+    )
+
+    result = await process_canonical_payment_webhook(
+        session,
+        WEBHOOK_ID,
+        processed_at=PROVIDER_CREATED_AT + timedelta(days=8),
+    )
+
+    assert result.disposition is PaymentWebhookDisposition.SKIPPED
+    assert result.error is not None
+    assert "event-age policy" in result.error
+    assert webhook_event.processing_status == WebhookProcessingStatus.PROCESSED.value
+    projector.assert_not_awaited()
 
 
 @pytest.mark.asyncio

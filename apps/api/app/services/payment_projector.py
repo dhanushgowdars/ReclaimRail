@@ -16,9 +16,10 @@ from app.domain.payments import (
     PaymentTransitionDecision,
     PaymentTransitionOutcome,
     PaymentTransitionReason,
+    classify_payment_event_reliability,
     decide_payment_transition,
 )
-from app.domain.recovery.contracts import PaymentTruthState
+from app.domain.recovery.contracts import PaymentEvidenceSource, PaymentTruthState
 from app.services.payment_truth_service import record_webhook_transition_truth
 
 
@@ -153,6 +154,7 @@ def apply_payment_event_to_projection(
     event: PaymentLifecycleEvent,
     *,
     processed_at: datetime,
+    evidence_source: PaymentEvidenceSource = PaymentEvidenceSource.VERIFIED_WEBHOOK,
 ) -> PaymentStateTransition:
     """Apply one normalized event and return its immutable audit record."""
     validate_payment_identity(
@@ -170,6 +172,12 @@ def apply_payment_event_to_projection(
     decision = decide_payment_transition(
         current_state,
         event.state,
+    )
+    reliability = classify_payment_event_reliability(
+        evidence_source=evidence_source.value,
+        transition_reason=decision.reason,
+        event_created_at=event.event_created_at,
+        processed_at=processed_at,
     )
 
     if decision.applied:
@@ -191,6 +199,9 @@ def apply_payment_event_to_projection(
         resulting_version=attempt.state_version,
         outcome=decision.outcome.value,
         reason=decision.reason.value,
+        evidence_source=reliability.evidence_source,
+        delivery_classification=reliability.classification.value,
+        delivery_latency_ms=reliability.delivery_latency_ms,
         late_authorization=decision.late_authorization,
         stop_recovery=decision.stop_recovery,
         event_created_at=event.event_created_at,
@@ -300,6 +311,7 @@ async def project_payment_lifecycle_event(
     *,
     processed_at: datetime,
     evidence_content_sha256: str | None = None,
+    evidence_source: PaymentEvidenceSource = PaymentEvidenceSource.VERIFIED_WEBHOOK,
 ) -> PaymentProjectionResult:
     """
     Persist one payment event exactly once.
@@ -343,6 +355,7 @@ async def project_payment_lifecycle_event(
         attempt,
         event,
         processed_at=processed_at,
+        evidence_source=evidence_source,
     )
 
     session.add(transition)
@@ -355,6 +368,7 @@ async def project_payment_lifecycle_event(
         transition=transition,
         observed_at=processed_at,
         content_sha256=evidence_content_sha256,
+        evidence_source=evidence_source,
     )
 
     return replace(

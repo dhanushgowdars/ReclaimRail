@@ -18,6 +18,8 @@ class PaymentTruthEvidenceFact:
     event_at: datetime | None = None
     fresh_until: datetime | None = None
     verified: bool = False
+    reliability: str = "corroborating"
+    unavailable_reason: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("evidence_id", "fact_name", "fact_value"):
@@ -31,6 +33,8 @@ class PaymentTruthEvidenceFact:
             value = getattr(self, field_name)
             if value is not None and (value.tzinfo is None or value.utcoffset() is None):
                 raise ValueError(f"{field_name} must be timezone-aware")
+        if self.reliability not in {"authoritative", "corroborating", "weak"}:
+            raise ValueError("reliability must be authoritative, corroborating, or weak")
 
     def is_fresh_at(self, resolved_at: datetime) -> bool:
         return self.fresh_until is None or self.fresh_until >= resolved_at
@@ -43,10 +47,12 @@ class PaymentTruthDecision:
     conflict_codes: tuple[str, ...] = ()
 
 
-_CONFIRMED_STATUSES = frozenset({"authorized", "captured", "paid", "refunded"})
+_CONFIRMED_STATUSES = frozenset({"captured", "paid", "refunded"})
 _FAILED_STATUSES = frozenset({"failed"})
-_PENDING_STATUSES = frozenset({"created", "pending", "attempted"})
-_ACTIVE_RECOVERY_STATUSES = frozenset({"active", "scheduled", "executing", "waiting"})
+_PENDING_STATUSES = frozenset({"created", "pending", "attempted", "authorized"})
+_ACTIVE_RECOVERY_STATUSES = frozenset(
+    {"active", "ready", "awaiting_approval", "scheduled", "executing", "waiting"}
+)
 _CONFIRMED_RECOVERY_STATUSES = frozenset({"recovered", "paid", "verified"})
 _TRUE_VALUES = frozenset({"1", "true", "yes"})
 _FALSE_VALUES = frozenset({"0", "false", "no"})
@@ -68,6 +74,13 @@ def resolve_payment_truth(
             state=PaymentTruthState.OUTCOME_UNKNOWN,
             evidence_refs=(),
         )
+
+    provider_unavailable = any(item.unavailable_reason for item in usable)
+    provider_payment_missing = any(
+        item.fact_name.strip().casefold() == "provider.matching_payment_count"
+        and item.fact_value.strip() == "0"
+        for item in usable
+    )
 
     payment_statuses = {
         item.fact_value.strip().casefold()
@@ -94,6 +107,7 @@ def resolve_payment_truth(
     )
 
     confirmed = bool(payment_statuses & _CONFIRMED_STATUSES)
+    authorized = "authorized" in payment_statuses
     failed = bool(payment_statuses & _FAILED_STATUSES)
     pending = bool(payment_statuses & _PENDING_STATUSES)
 
@@ -106,9 +120,14 @@ def resolve_payment_truth(
             evidence_refs=refs,
             conflict_codes=tuple(conflict_codes),
         )
+    if (provider_unavailable or provider_payment_missing) and not confirmed:
+        return PaymentTruthDecision(
+            state=PaymentTruthState.MANUAL_INVESTIGATION_REQUIRED,
+            evidence_refs=refs,
+        )
     if recovery_statuses & _CONFIRMED_RECOVERY_STATUSES:
         return PaymentTruthDecision(PaymentTruthState.RECOVERY_CONFIRMED, refs)
-    if late_authorization and confirmed:
+    if late_authorization and (confirmed or authorized):
         return PaymentTruthDecision(PaymentTruthState.LATE_AUTHORIZATION, refs)
     if confirmed:
         return PaymentTruthDecision(PaymentTruthState.PAYMENT_CONFIRMED, refs)

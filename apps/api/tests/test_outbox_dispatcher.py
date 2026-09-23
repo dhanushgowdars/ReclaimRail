@@ -1,3 +1,4 @@
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
@@ -50,6 +51,15 @@ def test_calculates_bounded_exponential_retry_delay() -> None:
     assert calculate_retry_delay_seconds(1, config) == 2.0
     assert calculate_retry_delay_seconds(2, config) == 4.0
     assert calculate_retry_delay_seconds(3, config) == 8.0
+    assert calculate_retry_delay_seconds(20, config) == 300.0
+
+
+def test_retry_jitter_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = make_config()
+    config = replace(config, retry_jitter_ratio=0.25)
+    monkeypatch.setattr(outbox_dispatcher.random, "uniform", lambda _low, high: high)
+
+    assert calculate_retry_delay_seconds(2, config) == 5.0
     assert calculate_retry_delay_seconds(20, config) == 300.0
 
 

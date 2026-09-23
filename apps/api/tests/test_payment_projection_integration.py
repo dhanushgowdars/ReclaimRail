@@ -18,11 +18,13 @@ from app.db.models.webhook import (
     WebhookProcessingStatus,
 )
 from app.domain.payments import (
+    PROVIDER_API_EVIDENCE_LABEL,
+    PaymentDeliveryClassification,
     PaymentState,
     PaymentTransitionOutcome,
     PaymentTransitionReason,
 )
-from app.domain.recovery.contracts import PaymentTruthState
+from app.domain.recovery.contracts import PaymentEvidenceSource, PaymentTruthState
 from app.services.payment_webhook_processor import (
     PaymentWebhookDisposition,
     process_canonical_payment_webhook,
@@ -55,10 +57,11 @@ def payment_payload(
     status: str,
     payment_id: str,
     event_timestamp: int,
+    evidence_source: str | None = None,
 ) -> dict[str, object]:
     is_failure = status == PaymentState.FAILED.value
 
-    return {
+    payload: dict[str, object] = {
         "entity": "event",
         "account_id": "acc_integration_test",
         "event": event_type,
@@ -84,6 +87,9 @@ def payment_payload(
         },
         "created_at": event_timestamp,
     }
+    if evidence_source is not None:
+        payload["reclaimrail_evidence_source"] = evidence_source
+    return payload
 
 
 def make_webhook_event(
@@ -94,6 +100,7 @@ def make_webhook_event(
     status: str,
     payment_id: str,
     event_timestamp: int,
+    evidence_source: str | None = None,
 ) -> WebhookEvent:
     event_time = datetime.fromtimestamp(
         event_timestamp,
@@ -112,6 +119,7 @@ def make_webhook_event(
             status=status,
             payment_id=payment_id,
             event_timestamp=event_timestamp,
+            evidence_source=evidence_source,
         ),
         payload_sha256="b" * 64,
         processing_status=WebhookProcessingStatus.RECEIVED.value,
@@ -131,7 +139,7 @@ async def test_failure_then_late_authorization_is_atomic_and_idempotent() -> Non
     authorized_webhook_id = uuid4()
 
     failed_provider_event_id = f"evt_failed_{uuid4().hex}"
-    authorized_provider_event_id = f"evt_authorized_{uuid4().hex}"
+    authorized_provider_event_id = f"provider-api:{payment_id}:authorized"
 
     failed_webhook = make_webhook_event(
         webhook_id=failed_webhook_id,
@@ -148,6 +156,7 @@ async def test_failure_then_late_authorization_is_atomic_and_idempotent() -> Non
         status=PaymentState.AUTHORIZED.value,
         payment_id=payment_id,
         event_timestamp=AUTHORIZED_EVENT_TIMESTAMP,
+        evidence_source=PROVIDER_API_EVIDENCE_LABEL,
     )
 
     try:
@@ -252,16 +261,54 @@ async def test_failure_then_late_authorization_is_atomic_and_idempotent() -> Non
             assert transitions[0].incoming_state == (PaymentState.FAILED.value)
             assert transitions[0].outcome == (PaymentTransitionOutcome.APPLIED.value)
             assert transitions[0].reason == (PaymentTransitionReason.INITIALIZED.value)
+            assert transitions[0].evidence_source == (PaymentEvidenceSource.VERIFIED_WEBHOOK.value)
+            assert transitions[0].delivery_classification == (
+                PaymentDeliveryClassification.DELAYED.value
+            )
+            assert transitions[0].delivery_latency_ms > 0
 
             assert transitions[1].incoming_state == (PaymentState.AUTHORIZED.value)
             assert transitions[1].outcome == (PaymentTransitionOutcome.APPLIED.value)
             assert transitions[1].reason == (PaymentTransitionReason.LATE_AUTHORIZATION.value)
             assert transitions[1].late_authorization is True
             assert transitions[1].stop_recovery is True
+            assert transitions[1].evidence_source == (
+                PaymentEvidenceSource.PROVIDER_PAYMENT_API.value
+            )
+            assert transitions[1].delivery_classification == (
+                PaymentDeliveryClassification.PROVIDER_RECONCILED.value
+            )
+            assert transitions[1].delivery_latency_ms > 0
 
-            assert len(evidence) == 3
+            assert len(evidence) == 5
             assert all(item.verified for item in evidence)
-            assert {item.content_sha256 for item in evidence} == {"b" * 64}
+            assert {item.source for item in evidence} == {
+                PaymentEvidenceSource.VERIFIED_WEBHOOK.value,
+                PaymentEvidenceSource.PROVIDER_PAYMENT_API.value,
+                PaymentEvidenceSource.MERCHANT_DATABASE.value,
+            }
+            provider_evidence = [
+                item
+                for item in evidence
+                if item.source
+                in {
+                    PaymentEvidenceSource.VERIFIED_WEBHOOK.value,
+                    PaymentEvidenceSource.PROVIDER_PAYMENT_API.value,
+                }
+            ]
+            assert len(provider_evidence) == 3
+            assert {item.content_sha256 for item in provider_evidence} == {"b" * 64}
+            merchant_evidence = [
+                item
+                for item in evidence
+                if item.source == PaymentEvidenceSource.MERCHANT_DATABASE.value
+            ]
+            assert len(merchant_evidence) == 2
+            assert {item.fact_name for item in merchant_evidence} == {"payment.status"}
+            assert {item.fact_value for item in merchant_evidence} == {
+                PaymentState.FAILED.value,
+                PaymentState.AUTHORIZED.value,
+            }
             assert [item.state for item in truth] == [
                 PaymentTruthState.PAYMENT_FAILED.value,
                 PaymentTruthState.LATE_AUTHORIZATION.value,

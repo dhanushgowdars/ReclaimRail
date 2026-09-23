@@ -30,6 +30,16 @@ class RazorpayOrderPaymentStatus(StrEnum):
     REFUNDED = "refunded"
 
 
+class RazorpayProviderFailureKind(StrEnum):
+    DNS_NETWORK = "dns_network"
+    CONNECTION_TIMEOUT = "connection_timeout"
+    READ_TIMEOUT = "read_timeout"
+    RATE_LIMITED = "rate_limited"
+    VALIDATION_REJECTED = "validation_rejected"
+    SERVER_ERROR = "server_error"
+    MALFORMED_RESPONSE = "malformed_response"
+
+
 class RazorpayOrderRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -145,10 +155,28 @@ class RazorpayOrderProviderError(RuntimeError):
         *,
         retryable: bool,
         status_code: int | None = None,
+        kind: RazorpayProviderFailureKind = RazorpayProviderFailureKind.DNS_NETWORK,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
         self.status_code = status_code
+        self.kind = kind
+
+
+def _transport_failure_kind(error: httpx2.RequestError) -> RazorpayProviderFailureKind:
+    if isinstance(error, httpx2.ConnectTimeout):
+        return RazorpayProviderFailureKind.CONNECTION_TIMEOUT
+    if isinstance(error, httpx2.ReadTimeout):
+        return RazorpayProviderFailureKind.READ_TIMEOUT
+    return RazorpayProviderFailureKind.DNS_NETWORK
+
+
+def _status_failure_kind(status_code: int) -> RazorpayProviderFailureKind:
+    if status_code == 429:
+        return RazorpayProviderFailureKind.RATE_LIMITED
+    if status_code >= 500:
+        return RazorpayProviderFailureKind.SERVER_ERROR
+    return RazorpayProviderFailureKind.VALIDATION_REJECTED
 
 
 class RazorpayOrderProvider:
@@ -204,6 +232,7 @@ class RazorpayOrderProvider:
             raise RazorpayOrderProviderError(
                 f"Razorpay Orders request failed: {type(error).__name__}",
                 retryable=True,
+                kind=_transport_failure_kind(error),
             ) from error
 
         if response.status_code >= 400:
@@ -213,6 +242,7 @@ class RazorpayOrderProvider:
                 "Razorpay Orders API rejected the request",
                 retryable=retryable,
                 status_code=response.status_code,
+                kind=_status_failure_kind(response.status_code),
             )
 
         try:
@@ -223,6 +253,7 @@ class RazorpayOrderProvider:
                 "Razorpay Orders API returned an invalid response",
                 retryable=False,
                 status_code=response.status_code,
+                kind=RazorpayProviderFailureKind.MALFORMED_RESPONSE,
             ) from error
 
     async def fetch_order_payments(self, order_id: str) -> tuple[RazorpayOrderPayment, ...]:
@@ -247,6 +278,7 @@ class RazorpayOrderProvider:
             raise RazorpayOrderProviderError(
                 f"Razorpay Order payment verification failed: {type(error).__name__}",
                 retryable=True,
+                kind=_transport_failure_kind(error),
             ) from error
 
         if response.status_code >= 400:
@@ -254,6 +286,7 @@ class RazorpayOrderProvider:
                 "Razorpay Order payment verification was rejected",
                 retryable=response.status_code == 429 or response.status_code >= 500,
                 status_code=response.status_code,
+                kind=_status_failure_kind(response.status_code),
             )
 
         try:
@@ -267,6 +300,7 @@ class RazorpayOrderProvider:
                 "Razorpay Order payment verification returned an invalid response",
                 retryable=False,
                 status_code=response.status_code,
+                kind=RazorpayProviderFailureKind.MALFORMED_RESPONSE,
             ) from error
 
 

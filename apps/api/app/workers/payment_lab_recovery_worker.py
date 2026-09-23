@@ -16,6 +16,7 @@ from app.services.payment_lab_recovery_batch import (
     PaymentLabRecoveryBatchResult,
     run_payment_lab_recovery_batch,
 )
+from app.services.payment_truth_reconciliation import reconcile_payment_truth_batch
 from app.services.worker_supervision_service import (
     WorkerName,
     create_worker_heartbeat_reporter,
@@ -92,6 +93,24 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
         while True:
             try:
                 if order_provider is not None:
+                    reconciliation = await reconcile_payment_truth_batch(
+                        session_factory,
+                        provider=order_provider,
+                        reference_time=utc_now(),
+                        batch_size=settings.payment_lab_recovery_batch_size,
+                    )
+                    if reconciliation.checked > 0:
+                        LOGGER.info(
+                            (
+                                "Payment truth reconciliation checked=%d projected=%d "
+                                "unavailable=%d persistence_failures=%d circuit_opened=%s"
+                            ),
+                            reconciliation.checked,
+                            reconciliation.projected,
+                            reconciliation.unavailable,
+                            reconciliation.persistence_failures,
+                            reconciliation.circuit_opened,
+                        )
                     verification = await verify_payment_lab_provider_evidence_batch(
                         session_factory,
                         provider=order_provider,
@@ -135,6 +154,7 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
                     "discovered": result.discovered,
                     "started": result.started,
                     "retryable_failures": result.retryable_failures,
+                    "truth_reconciliation_enabled": order_provider is not None,
                 },
             )
 

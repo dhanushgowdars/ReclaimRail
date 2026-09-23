@@ -12,6 +12,7 @@ from app.integrations.razorpay.orders import (
     RazorpayOrderProviderError,
     RazorpayOrderRequest,
     RazorpayOrderStatus,
+    RazorpayProviderFailureKind,
     create_razorpay_order_provider,
 )
 
@@ -173,6 +174,13 @@ async def test_classifies_provider_failures(
 
     assert caught.value.retryable is retryable
     assert caught.value.status_code == status_code
+    expected_kind = {
+        400: RazorpayProviderFailureKind.VALIDATION_REJECTED,
+        401: RazorpayProviderFailureKind.VALIDATION_REJECTED,
+        429: RazorpayProviderFailureKind.RATE_LIMITED,
+        503: RazorpayProviderFailureKind.SERVER_ERROR,
+    }[status_code]
+    assert caught.value.kind is expected_kind
     assert "sensitive-provider-detail" not in str(caught.value)
 
 

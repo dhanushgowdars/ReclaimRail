@@ -15,7 +15,7 @@ from app.domain.payments import (
     PaymentTransitionOutcome,
     PaymentTransitionReason,
 )
-from app.domain.recovery.contracts import PaymentTruthState
+from app.domain.recovery.contracts import PaymentEvidenceSource, PaymentTruthState
 from app.services.payment_projector import (
     PaymentProjectionConflictError,
     project_payment_lifecycle_event,
@@ -181,11 +181,17 @@ async def test_projects_new_event_exactly_once(monkeypatch: pytest.MonkeyPatch) 
         PaymentStateTransition,
     )
     assert added_transition.webhook_event_id == WEBHOOK_ID
+    assert added_transition.evidence_source == PaymentEvidenceSource.VERIFIED_WEBHOOK.value
+    assert added_transition.delivery_classification == "on_time"
+    assert added_transition.delivery_latency_ms == 60_000
 
     assert session.execute.await_count == 4
     session.flush.assert_awaited_once()
     truth_writer.assert_awaited_once()
     assert truth_writer.await_args.kwargs["content_sha256"] is None
+    assert (
+        truth_writer.await_args.kwargs["evidence_source"] is PaymentEvidenceSource.VERIFIED_WEBHOOK
+    )
     session.commit.assert_not_awaited()
     session.rollback.assert_not_awaited()
 

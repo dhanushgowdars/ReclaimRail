@@ -7,15 +7,26 @@ from datetime import datetime
 from string import hexdigits
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.payment import PaymentAttempt, PaymentStateTransition
+from app.db.models.payment_lab import PaymentLabRun
 from app.db.models.payment_truth import (
     PaymentEvidenceRecord,
     PaymentTruthSnapshotRecord,
 )
+from app.db.models.recovery import (
+    RecoveryAction,
+    RecoveryActionStatus,
+    RecoveryAgentRun,
+    RecoveryAgentRunStatus,
+    RecoveryApproval,
+    RecoveryApprovalStatus,
+    RecoveryCase,
+)
+from app.db.models.recovery_outcome import RecoveryOutcome
 from app.domain.payments import PaymentLifecycleEvent, PaymentState
 from app.domain.payments.truth import (
     PaymentTruthDecision,
@@ -40,6 +51,10 @@ class PaymentEvidenceWrite:
     fresh_until: datetime | None = None
     recovery_case_id: UUID | None = None
     verified: bool = False
+    signature_verified: bool | None = None
+    normalized_fields: dict[str, object] | None = None
+    reliability: str = "corroborating"
+    unavailable_reason: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("source_reference", "fact_name", "fact_value"):
@@ -55,6 +70,10 @@ class PaymentEvidenceWrite:
                 raise ValueError(f"{field_name} must be timezone-aware")
         if self.fresh_until is not None and self.fresh_until <= self.observed_at:
             raise ValueError("fresh_until must follow observed_at")
+        if self.reliability not in {"authoritative", "corroborating", "weak"}:
+            raise ValueError("reliability must be authoritative, corroborating, or weak")
+        if self.unavailable_reason is not None and not self.unavailable_reason.strip():
+            raise ValueError("unavailable_reason cannot be blank")
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +126,10 @@ async def record_payment_evidence(
             observed_at=request.observed_at,
             fresh_until=request.fresh_until,
             verified=request.verified,
+            signature_verified=request.signature_verified,
+            normalized_fields=request.normalized_fields or {},
+            reliability=request.reliability,
+            unavailable_reason=request.unavailable_reason,
         )
         .on_conflict_do_nothing(constraint="uq_payment_evidence_fact_identity")
         .returning(PaymentEvidenceRecord.id)
@@ -130,6 +153,220 @@ def _as_domain_evidence(record: PaymentEvidenceRecord) -> PaymentTruthEvidenceFa
         observed_at=record.observed_at,
         fresh_until=record.fresh_until,
         verified=record.verified,
+        reliability=record.reliability,
+        unavailable_reason=record.unavailable_reason,
+    )
+
+
+async def record_linked_runtime_evidence(
+    session: AsyncSession,
+    *,
+    payment_attempt: PaymentAttempt,
+    observed_at: datetime,
+) -> None:
+    """Snapshot every local source linked to an attempt into the immutable ledger."""
+    internal_payload = {
+        "state": payment_attempt.current_state,
+        "version": payment_attempt.state_version,
+        "provider_payment_id": payment_attempt.provider_payment_id,
+        "provider_order_id": payment_attempt.provider_order_id,
+    }
+    await record_payment_evidence(
+        session,
+        PaymentEvidenceWrite(
+            payment_attempt_id=payment_attempt.id,
+            source=PaymentEvidenceSource.MERCHANT_DATABASE,
+            source_reference=f"payment-attempt:{payment_attempt.id}:v{payment_attempt.state_version}",
+            fact_name="payment.status",
+            fact_value=payment_attempt.current_state,
+            content_sha256=canonical_sha256(internal_payload),
+            observed_at=observed_at,
+            normalized_fields=internal_payload,
+            verified=True,
+            reliability="corroborating",
+        ),
+    )
+
+    lab_result = await session.execute(
+        select(PaymentLabRun).where(
+            (PaymentLabRun.payment_attempt_id == payment_attempt.id)
+            | (
+                (PaymentLabRun.payment_attempt_id.is_(None))
+                & (PaymentLabRun.provider_order_id == payment_attempt.provider_order_id)
+            ),
+        ),
+    )
+    for run in lab_result.scalars():
+        payload: dict[str, object] = {
+            "run_id": str(run.id),
+            "status": run.status,
+            "mode": run.mode,
+            "provenance": run.provenance,
+            "order_id": run.provider_order_id,
+        }
+        await record_payment_evidence(
+            session,
+            PaymentEvidenceWrite(
+                payment_attempt_id=payment_attempt.id,
+                source=PaymentEvidenceSource.PAYMENT_LAB,
+                source_reference=f"payment-lab:{run.id}:v{run.version}",
+                fact_name="payment_lab.status",
+                fact_value=run.status,
+                content_sha256=canonical_sha256(payload),
+                observed_at=observed_at,
+                normalized_fields=payload,
+                verified=True,
+                reliability="corroborating",
+            ),
+        )
+        if run.provider_order_status:
+            await record_payment_evidence(
+                session,
+                PaymentEvidenceWrite(
+                    payment_attempt_id=payment_attempt.id,
+                    source=PaymentEvidenceSource.PROVIDER_ORDER_API,
+                    source_reference=f"provider-order:{run.provider_order_id}:{run.provider_order_status}",
+                    fact_name="order.status",
+                    fact_value=run.provider_order_status,
+                    content_sha256=canonical_sha256(payload),
+                    observed_at=observed_at,
+                    event_at=run.provider_created_at,
+                    normalized_fields=payload,
+                    verified=True,
+                    reliability="authoritative",
+                ),
+            )
+
+    case_result = await session.execute(
+        select(RecoveryCase).where(RecoveryCase.payment_attempt_id == payment_attempt.id),
+    )
+    recovery_case = case_result.scalar_one_or_none()
+    if recovery_case is None:
+        return
+    recovery_payload: dict[str, object] = {
+        "case_id": str(recovery_case.id),
+        "status": recovery_case.status,
+        "version": recovery_case.version,
+        "active_payment_link_id": recovery_case.active_payment_link_id,
+    }
+    await record_payment_evidence(
+        session,
+        PaymentEvidenceWrite(
+            payment_attempt_id=payment_attempt.id,
+            recovery_case_id=recovery_case.id,
+            source=PaymentEvidenceSource.RECOVERY_STATE,
+            source_reference=f"recovery-case:{recovery_case.id}:v{recovery_case.version}",
+            fact_name="recovery.status",
+            fact_value=recovery_case.status,
+            content_sha256=canonical_sha256(recovery_payload),
+            observed_at=observed_at,
+            normalized_fields=recovery_payload,
+            verified=True,
+            reliability="corroborating",
+        ),
+    )
+    if recovery_case.active_payment_link_id:
+        await record_payment_evidence(
+            session,
+            PaymentEvidenceWrite(
+                payment_attempt_id=payment_attempt.id,
+                recovery_case_id=recovery_case.id,
+                source=PaymentEvidenceSource.RECOVERY_LINK,
+                source_reference=recovery_case.active_payment_link_id,
+                fact_name="recovery_link.status",
+                fact_value="active",
+                content_sha256=canonical_sha256(recovery_payload),
+                observed_at=observed_at,
+                normalized_fields=recovery_payload,
+                verified=True,
+                reliability="corroborating",
+            ),
+        )
+    outcome_result = await session.execute(
+        select(RecoveryOutcome).where(RecoveryOutcome.recovery_case_id == recovery_case.id),
+    )
+    outcome = outcome_result.scalar_one_or_none()
+    if outcome is not None:
+        outcome_payload = {
+            "outcome_id": str(outcome.id),
+            "status": outcome.status,
+            "version": outcome.version,
+            "payment_link_id": outcome.payment_link_id,
+            "provider_outcome_id": outcome.provider_outcome_id,
+        }
+        await record_payment_evidence(
+            session,
+            PaymentEvidenceWrite(
+                payment_attempt_id=payment_attempt.id,
+                recovery_case_id=recovery_case.id,
+                source=PaymentEvidenceSource.RECONCILIATION,
+                source_reference=f"recovery-outcome:{outcome.id}:v{outcome.version}",
+                fact_name="recovery.status",
+                fact_value=("verified" if outcome.status == "recovered" else outcome.status),
+                content_sha256=canonical_sha256(outcome_payload),
+                observed_at=observed_at,
+                normalized_fields=outcome_payload,
+                verified=True,
+                reliability="authoritative" if outcome.status == "recovered" else "corroborating",
+            ),
+        )
+
+
+async def _invalidate_stale_recovery_plan(
+    session: AsyncSession,
+    *,
+    payment_attempt_id: UUID,
+    new_truth_version: int,
+    resolved_at: datetime,
+) -> None:
+    result = await session.execute(
+        select(RecoveryCase)
+        .where(RecoveryCase.payment_attempt_id == payment_attempt_id)
+        .with_for_update(),
+    )
+    recovery_case = result.scalar_one_or_none()
+    if recovery_case is None:
+        return
+    recovery_case.version += 1
+    await session.execute(
+        update(RecoveryAgentRun)
+        .where(
+            RecoveryAgentRun.recovery_case_id == recovery_case.id,
+            RecoveryAgentRun.status == RecoveryAgentRunStatus.SUCCEEDED.value,
+        )
+        .values(status=RecoveryAgentRunStatus.SUPERSEDED.value, completed_at=resolved_at),
+    )
+    await session.execute(
+        update(RecoveryAction)
+        .where(
+            RecoveryAction.recovery_case_id == recovery_case.id,
+            RecoveryAction.status.in_(
+                (
+                    RecoveryActionStatus.ALLOWED.value,
+                    RecoveryActionStatus.APPROVAL_REQUIRED.value,
+                    RecoveryActionStatus.SCHEDULED.value,
+                ),
+            ),
+        )
+        .values(
+            status=RecoveryActionStatus.CANCELLED.value,
+            last_error=f"Invalidated by payment truth version {new_truth_version}",
+        ),
+    )
+    await session.execute(
+        update(RecoveryApproval)
+        .where(
+            RecoveryApproval.recovery_case_id == recovery_case.id,
+            RecoveryApproval.status.in_(
+                (RecoveryApprovalStatus.PENDING.value, RecoveryApprovalStatus.APPROVED.value),
+            ),
+        )
+        .values(
+            status=RecoveryApprovalStatus.EXPIRED.value,
+            decided_at=resolved_at,
+            decided_by=None,
+            decision_reason=f"Invalidated by payment truth version {new_truth_version}",
+        ),
     )
 
 
@@ -225,6 +462,13 @@ async def resolve_and_persist_payment_truth(
     )
     session.add(snapshot)
     _apply_truth_gate(locked_attempt, decision, resolved_at=resolved_at)
+    if latest is not None:
+        await _invalidate_stale_recovery_plan(
+            session,
+            payment_attempt_id=locked_attempt.id,
+            new_truth_version=snapshot.version,
+            resolved_at=resolved_at,
+        )
     await session.flush()
     return PaymentTruthPersistenceResult(snapshot=snapshot, created=True)
 
@@ -237,8 +481,9 @@ async def record_webhook_transition_truth(
     transition: PaymentStateTransition,
     observed_at: datetime,
     content_sha256: str | None = None,
+    evidence_source: PaymentEvidenceSource = PaymentEvidenceSource.VERIFIED_WEBHOOK,
 ) -> PaymentTruthPersistenceResult:
-    """Turn a normalized, signed webhook transition into reproducible truth."""
+    """Turn a normalized provider event into reproducible payment truth."""
     payload_digest = content_sha256 or canonical_sha256(
         {
             "provider": event.provider,
@@ -255,7 +500,7 @@ async def record_webhook_transition_truth(
         session,
         PaymentEvidenceWrite(
             payment_attempt_id=payment_attempt.id,
-            source=PaymentEvidenceSource.VERIFIED_WEBHOOK,
+            source=evidence_source,
             source_reference=event.provider_event_id,
             fact_name="payment.status",
             fact_value=event.state.value,
@@ -263,6 +508,20 @@ async def record_webhook_transition_truth(
             event_at=event.event_created_at,
             observed_at=observed_at,
             verified=True,
+            signature_verified=(
+                True if evidence_source is PaymentEvidenceSource.VERIFIED_WEBHOOK else None
+            ),
+            normalized_fields={
+                "payment_id": event.payment_id,
+                "order_id": event.order_id,
+                "amount_minor": event.amount_minor,
+                "currency": event.currency,
+            },
+            reliability=(
+                "authoritative"
+                if evidence_source is PaymentEvidenceSource.PROVIDER_PAYMENT_API
+                else "corroborating"
+            ),
         ),
     )
     if transition.late_authorization:
@@ -270,7 +529,7 @@ async def record_webhook_transition_truth(
             session,
             PaymentEvidenceWrite(
                 payment_attempt_id=payment_attempt.id,
-                source=PaymentEvidenceSource.VERIFIED_WEBHOOK,
+                source=evidence_source,
                 source_reference=event.provider_event_id,
                 fact_name="payment.late_authorization",
                 fact_value="true",
@@ -280,6 +539,11 @@ async def record_webhook_transition_truth(
                 verified=True,
             ),
         )
+    await record_linked_runtime_evidence(
+        session,
+        payment_attempt=payment_attempt,
+        observed_at=observed_at,
+    )
     return await resolve_and_persist_payment_truth(
         session,
         payment_attempt=payment_attempt,

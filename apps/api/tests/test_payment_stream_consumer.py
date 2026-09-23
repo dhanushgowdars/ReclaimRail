@@ -282,6 +282,62 @@ async def test_transient_processing_failure_remains_unacknowledged(
 
 
 @pytest.mark.asyncio
+async def test_processing_retry_budget_dead_letters_and_acknowledges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    redis_client = AsyncMock()
+    redis_client.xpending_range.return_value = [{"times_delivered": 5}]
+    monkeypatch.setattr(
+        payment_stream_consumer,
+        "process_canonical_payment_webhook",
+        AsyncMock(side_effect=RuntimeError("database unavailable")),
+    )
+
+    result = await process_payment_stream_entry(
+        lambda: FakeSession(events),  # type: ignore[arg-type]
+        redis_client,
+        CONFIG,
+        create_valid_entry(),
+    )
+
+    assert result.disposition is PaymentStreamDisposition.DEAD_LETTERED
+    assert result.error is not None and "Retry budget exhausted" in result.error
+    redis_client.xadd.assert_awaited_once()
+    redis_client.xack.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_permanent_canonical_failure_is_dead_lettered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis_client = AsyncMock()
+    monkeypatch.setattr(
+        payment_stream_consumer,
+        "process_canonical_payment_webhook",
+        AsyncMock(
+            return_value=PaymentWebhookProcessingResult(
+                webhook_event_id=WEBHOOK_EVENT_ID,
+                disposition=PaymentWebhookDisposition.FAILED,
+                projection=None,
+                error="invalid canonical payload",
+            ),
+        ),
+    )
+
+    result = await process_payment_stream_entry(
+        lambda: FakeSession([]),  # type: ignore[arg-type]
+        redis_client,
+        CONFIG,
+        create_valid_entry(),
+    )
+
+    assert result.disposition is PaymentStreamDisposition.DEAD_LETTERED
+    redis_client.xadd.assert_awaited_once()
+    redis_client.xack.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_malformed_message_is_dead_lettered_and_acknowledged() -> None:
     redis_client = AsyncMock()
     session_factory = AsyncMock()

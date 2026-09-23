@@ -11,6 +11,8 @@ from app.db.models.webhook import (
     WebhookEvent,
     WebhookProcessingStatus,
 )
+from app.domain.payments import MAX_EVENT_AGE, PROVIDER_API_EVIDENCE_LABEL
+from app.domain.recovery.contracts import PaymentEvidenceSource
 from app.integrations.razorpay.payment_events import (
     PaymentEventNormalizationError,
     UnsupportedPaymentEventError,
@@ -120,6 +122,19 @@ async def process_canonical_payment_webhook(
         )
 
     webhook_event.processing_status = WebhookProcessingStatus.PROCESSING.value
+
+    if (
+        webhook_event.provider_created_at is not None
+        and webhook_event.provider_created_at < processed_at - MAX_EVENT_AGE
+        and not webhook_event.provider_event_id.startswith("provider-api:")
+    ):
+        return await complete_without_projection(
+            session,
+            webhook_event,
+            disposition=PaymentWebhookDisposition.SKIPPED,
+            processed_at=processed_at,
+            error="Signed event stored but not projected because it exceeded the event-age policy",
+        )
 
     if webhook_event.provider != "razorpay":
         return await complete_without_projection(
@@ -241,11 +256,19 @@ async def process_canonical_payment_webhook(
         )
 
     try:
+        evidence_source = (
+            PaymentEvidenceSource.PROVIDER_PAYMENT_API
+            if webhook_event.payload.get("reclaimrail_evidence_source")
+            == PROVIDER_API_EVIDENCE_LABEL
+            and webhook_event.provider_event_id.startswith("provider-api:")
+            else PaymentEvidenceSource.VERIFIED_WEBHOOK
+        )
         projection = await project_payment_lifecycle_event(
             session,
             lifecycle_event,
             processed_at=processed_at,
             evidence_content_sha256=webhook_event.payload_sha256,
+            evidence_source=evidence_source,
         )
     except PaymentProjectionConflictError as error:
         return await complete_without_projection(

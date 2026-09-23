@@ -54,6 +54,29 @@ function FailureContext({ detail }: { detail: RecoveryCaseDetail }) {
   </DetailCard>;
 }
 
+function PaymentEventProof({ detail }: { detail: RecoveryCaseDetail }) {
+  const latestTruth = [...detail.payment_truth].sort((left, right) => right.version - left.version)[0];
+  return <DetailCard eyebrow="Reliable payment evidence" title="Why ReclaimRail believes this payment state">
+    <p className="decision-summary">Every conclusion cites immutable evidence. Replayed IDs are idempotent, stale regressions are ignored, and server-side provider reconciliation continues when a webhook is missing.</p>
+    {latestTruth ? <div className="decision-boundary"><strong>Truth v{latestTruth.version}: {titleCase(latestTruth.state)}</strong><span>{latestTruth.evidence_refs.length} cited fact{latestTruth.evidence_refs.length === 1 ? "" : "s"} · resolver {latestTruth.resolver_version} · digest {shortValue(latestTruth.evidence_digest)}</span>{latestTruth.conflict_codes.length ? <span>Conflict: {latestTruth.conflict_codes.map(titleCase).join(" · ")}</span> : null}</div> : <p>No versioned truth snapshot is available.</p>}
+    <div className="trace-citations">
+      {detail.payment_evidence.length === 0 ? <p>No ledger evidence is available.</p> : detail.payment_evidence.map((evidence) => <article key={evidence.evidence_id}>
+        <strong>{titleCase(evidence.fact_name)} = {titleCase(evidence.fact_value)}</strong>
+        <span>{titleCase(evidence.source)} · {titleCase(evidence.reliability)} · {evidence.verified ? "Verified" : "Unverified"}{evidence.signature_verified === true ? " signature" : ""}</span>
+        <span>Source {shortValue(evidence.source_reference)} · SHA-256 {shortValue(evidence.content_sha256)} · observed {formatTimestamp(evidence.observed_at)}</span>
+        {evidence.unavailable_reason ? <span>Provider unavailable: {titleCase(evidence.unavailable_reason)}. Recovery is fail-closed.</span> : null}
+      </article>)}
+    </div>
+    <div className="trace-citations">
+      {detail.payment_transitions.length === 0 ? <p>No payment transition evidence is available.</p> : detail.payment_transitions.map((transition, index) => <article key={`${transition.event_type}-${transition.resulting_version}-${index}`}>
+        <strong>{titleCase(transition.event_type)} · {titleCase(transition.delivery_classification)}</strong>
+        <span>{titleCase(transition.evidence_source)} · {transition.previous_state} → {transition.resulting_state} · version {transition.resulting_version}</span>
+        <span>{transition.outcome === "ignored" ? `Ignored safely: ${titleCase(transition.reason)}` : `Applied from evidence: ${titleCase(transition.reason)}`} · observed {Math.round(transition.delivery_latency_ms / 1000)}s after provider time</span>
+      </article>)}
+    </div>
+  </DetailCard>;
+}
+
 function DecisionTrace({ detail }: { detail: RecoveryCaseDetail }) {
   const runs = [...detail.agent_runs].sort((left, right) => left.run_number - right.run_number);
   const latestRun = runs.at(-1);
@@ -181,7 +204,7 @@ function CaseDetail({ detail }: { detail: RecoveryCaseDetail }) {
     <header className="case-header"><div><Link className="back-link" href="/"><ArrowLeft size={16} /> Command center</Link><p className="kicker">Recovery case evidence</p><h1>CASE-{shortValue(detail.recovery_case.recovery_case_id)}</h1><p>Opened {formatTimestamp(detail.recovery_case.opened_at)} IST</p></div><div className="case-header__hero"><span>Amount under control</span><strong>{formatMoney(detail.recovery_case.amount_minor, detail.recovery_case.currency)}</strong><div><Badge value={displayStatus} /><span>{detail.recovery_case.active_payment_link_id === null ? "No active payment link" : `Test Link ${shortValue(detail.recovery_case.active_payment_link_id)}`}</span></div></div></header>
     <section className="case-summary"><div><span>Original payment</span><strong>{titleCase(detail.payment_lifecycle.current_state)}</strong><small>Recovery: {titleCase(displayStatus)}</small></div><div><span>Recovery attempts</span><strong>{detail.recovery_case.recovery_attempt_count}</strong></div><div><span>Actions planned</span><strong>{detail.actions.length}</strong></div><div><span>Audit events</span><strong>{detail.audit_chain.total_event_count}</strong></div></section>
     <CaseEvidenceTabs
-      lifecycle={<FailureContext detail={detail} />}
+      lifecycle={<div className="case-tab-stack"><FailureContext detail={detail} /><PaymentEventProof detail={detail} /></div>}
       decision={<div className="case-tab-grid"><DecisionTrace detail={detail} /><PolicyExecution detail={detail} /></div>}
       provider={<ProviderActions detail={detail} />}
       outcome={<div className="case-tab-stack"><OutcomeProof detail={detail} /><AuditTimeline detail={detail} /></div>}

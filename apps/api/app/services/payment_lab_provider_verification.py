@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
 from app.db.models.webhook import WebhookEvent, WebhookProcessingStatus
+from app.domain.payments import PROVIDER_API_EVIDENCE_LABEL
 from app.integrations.razorpay.orders import (
     RazorpayOrderPayment,
     RazorpayOrderPaymentStatus,
@@ -24,8 +25,8 @@ from app.integrations.razorpay.orders import (
 from app.services.payment_webhook_processor import process_canonical_payment_webhook
 
 SessionFactory = async_sessionmaker[AsyncSession]
-PROVIDER_API_EVIDENCE_SOURCE = "razorpay_api_verification"
-VERIFY_AFTER = timedelta(seconds=3)
+PROVIDER_API_EVIDENCE_SOURCE = PROVIDER_API_EVIDENCE_LABEL
+VERIFY_AFTER = timedelta(seconds=15)
 VERIFIABLE_RUN_STATUSES = (
     PaymentLabRunStatus.CHECKOUT_READY.value,
     PaymentLabRunStatus.PAYMENT_ATTEMPTED.value,
@@ -70,15 +71,11 @@ async def _candidate_ids(
             PaymentLabRun.status.in_(VERIFIABLE_RUN_STATUSES),
             PaymentLabRun.provider_order_id.is_not(None),
             # Before an attempt exists, an expired checkout cannot gain new
-            # payment evidence. Once the provider API supplied an attempt,
-            # keep observing it so a delayed authorisation can safely re-plan.
+            # payment evidence. Once any attempt exists, keep reconciling it:
+            # a later provider state may be missing from webhook delivery.
             or_(
                 PaymentLabRun.payment_attempt_id.is_not(None),
                 PaymentLabRun.checkout_expires_at > reference_time,
-            ),
-            or_(
-                PaymentLabRun.payment_attempt_id.is_(None),
-                PaymentLabRun.provider_evidence_source == PROVIDER_API_EVIDENCE_SOURCE,
             ),
             or_(
                 PaymentLabRun.provider_evidence_checked_at.is_(None),
@@ -102,15 +99,7 @@ async def _verify_one(
         select(PaymentLabRun).where(PaymentLabRun.id == payment_lab_run_id).with_for_update(),
     )
     run = result.scalar_one_or_none()
-    if (
-        run is None
-        or run.status not in VERIFIABLE_RUN_STATUSES
-        or run.provider_order_id is None
-        or (
-            run.payment_attempt_id is not None
-            and run.provider_evidence_source != PROVIDER_API_EVIDENCE_SOURCE
-        )
-    ):
+    if run is None or run.status not in VERIFIABLE_RUN_STATUSES or run.provider_order_id is None:
         return "skipped"
 
     payments = await provider.fetch_order_payments(run.provider_order_id)

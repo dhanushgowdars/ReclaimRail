@@ -248,10 +248,39 @@ export type RecoveryCaseDetail = {
     resulting_version: number;
     outcome: string;
     reason: string;
+    evidence_source: string;
+    delivery_classification: string;
+    delivery_latency_ms: number;
     late_authorization: boolean;
     stop_recovery: boolean;
     event_created_at: string;
     processed_at: string;
+  }>;
+  payment_evidence: Array<{
+    evidence_id: string;
+    source: string;
+    source_reference: string;
+    fact_name: string;
+    fact_value: string;
+    content_sha256: string;
+    observed_at: string;
+    event_at: string | null;
+    fresh_until: string | null;
+    verified: boolean;
+    signature_verified: boolean | null;
+    normalized_fields: Record<string, unknown>;
+    reliability: string;
+    unavailable_reason: string | null;
+  }>;
+  payment_truth: Array<{
+    truth_snapshot_id: string;
+    version: number;
+    state: string;
+    evidence_refs: string[];
+    conflict_codes: string[];
+    evidence_digest: string;
+    resolver_version: string;
+    resolved_at: string;
   }>;
   audit_chain: {
     valid: boolean;

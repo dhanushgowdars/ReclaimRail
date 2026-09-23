@@ -182,10 +182,41 @@ class PaymentTransitionSummaryResponse(ResponseModel):
     resulting_version: int = Field(ge=0)
     outcome: str
     reason: str
+    evidence_source: str
+    delivery_classification: str
+    delivery_latency_ms: int = Field(ge=0)
     late_authorization: bool
     stop_recovery: bool
     event_created_at: datetime
     processed_at: datetime
+
+
+class PaymentEvidenceSummaryResponse(ResponseModel):
+    evidence_id: UUID
+    source: str
+    source_reference: str
+    fact_name: str
+    fact_value: str
+    content_sha256: str = Field(min_length=64, max_length=64)
+    observed_at: datetime
+    event_at: datetime | None
+    fresh_until: datetime | None
+    verified: bool
+    signature_verified: bool | None
+    normalized_fields: dict[str, object]
+    reliability: str
+    unavailable_reason: str | None
+
+
+class PaymentTruthSummaryResponse(ResponseModel):
+    truth_snapshot_id: UUID
+    version: int = Field(ge=1)
+    state: str
+    evidence_refs: list[str]
+    conflict_codes: list[str]
+    evidence_digest: str = Field(min_length=64, max_length=64)
+    resolver_version: str
+    resolved_at: datetime
 
 
 class RecoveryAuditEventSummaryResponse(ResponseModel):
@@ -219,6 +250,8 @@ class RecoveryCaseDetailResponse(ResponseModel):
     approvals: list[RecoveryApprovalSummaryResponse]
     outcome: RecoveryOutcomeSummaryResponse | None
     payment_transitions: list[PaymentTransitionSummaryResponse]
+    payment_evidence: list[PaymentEvidenceSummaryResponse]
+    payment_truth: list[PaymentTruthSummaryResponse]
     audit_chain: RecoveryAuditChainSummaryResponse
 
 

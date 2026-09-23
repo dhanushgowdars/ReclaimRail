@@ -1,4 +1,5 @@
 import json
+import random
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -28,6 +29,7 @@ class OutboxDispatcherConfig:
     retry_base_seconds: float
     retry_max_seconds: float
     stream_max_length: int
+    retry_jitter_ratio: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +59,7 @@ def create_dispatcher_config(
         retry_base_seconds=settings.outbox_retry_base_seconds,
         retry_max_seconds=settings.outbox_retry_max_seconds,
         stream_max_length=settings.outbox_stream_max_length,
+        retry_jitter_ratio=settings.outbox_retry_jitter_ratio,
     )
 
 
@@ -67,7 +70,11 @@ def calculate_retry_delay_seconds(
     exponent = max(attempt_count - 1, 0)
     multiplier = float(2**exponent)
     delay = config.retry_base_seconds * multiplier
-    return min(delay, config.retry_max_seconds)
+    bounded = min(delay, config.retry_max_seconds)
+    if config.retry_jitter_ratio == 0:
+        return bounded
+    jitter = random.uniform(0.0, bounded * config.retry_jitter_ratio)
+    return min(bounded + jitter, config.retry_max_seconds)
 
 
 async def claim_outbox_messages(

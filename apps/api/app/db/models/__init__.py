@@ -1,5 +1,6 @@
 from app.db.base import Base
 from app.db.models.evaluation import EvaluationRun, EvaluationScenario  # noqa: F401
+from app.db.models.event_replay import PaymentEventReplayAudit
 from app.db.models.incident import (
     IncidentDetectionObservation,
     IncidentObservationOutcome,
@@ -57,6 +58,7 @@ __all__ = [
     "OutboxMessage",
     "OutboxMessageStatus",
     "PaymentAttempt",
+    "PaymentEventReplayAudit",
     "PaymentEvidenceRecord",
     "PaymentLabRun",
     "PaymentLabRunMode",

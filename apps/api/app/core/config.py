@@ -69,6 +69,7 @@ class Settings(BaseSettings):
         ge=1.0,
         le=3600.0,
     )
+    outbox_retry_jitter_ratio: float = Field(default=0.2, ge=0.0, le=1.0)
     outbox_stream_max_length: int = Field(
         default=10_000,
         ge=100,
@@ -102,6 +103,7 @@ class Settings(BaseSettings):
         ge=100,
         le=1_000_000,
     )
+    payment_consumer_max_processing_attempts: int = Field(default=5, ge=1, le=20)
 
     incident_payment_methods: tuple[str, ...] = (
         "upi",

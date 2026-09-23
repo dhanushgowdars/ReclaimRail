@@ -27,6 +27,13 @@ failed projection remains recovery-eligible.
   in the same database transaction.
 - Recovery eligibility is now derived from both the payment projection and resolved
   truth. Unknown, conflicting and successful outcomes cannot remain eligible.
+- Runtime collection for signed webhooks, provider payment state, provider order
+  state, the merchant projection, Payment Lab, recovery cases/actions, recovery
+  links and reconciled recovery outcomes.
+- Ledger proof includes signature status, normalized fields, freshness,
+  reliability classification and an explicit provider-unavailable reason.
+- A new truth version increments the linked case version and supersedes pending
+  plans, actions and approvals before they can execute against stale evidence.
 - Idempotent evidence identity and snapshot suppression prevent webhook replay from
   creating duplicate truth versions.
 
@@ -62,6 +69,6 @@ The Gemini planner is intentionally unchanged in this phase.
 
 ## Phase 16 handoff
 
-Phase 16 will add provider polling evidence, missing-event detection, reconciliation
+Phase 16 adds provider polling evidence, missing-event detection, reconciliation
 jobs and explicit handling of duplicate, delayed and out-of-order delivery across
 webhook and provider API sources.

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.payment import PaymentAttempt, PaymentStateTransition
+from app.db.models.payment_truth import PaymentEvidenceRecord, PaymentTruthSnapshotRecord
 from app.db.models.recovery import (
     RecoveryAction,
     RecoveryAgentRun,
@@ -27,6 +28,8 @@ from app.services.recovery_audit_store import (
 MAX_AGENT_RUN_SUMMARIES: Final = 10
 MAX_ACTION_SUMMARIES: Final = 50
 MAX_PAYMENT_TRANSITIONS: Final = 50
+MAX_PAYMENT_EVIDENCE: Final = 100
+MAX_TRUTH_SNAPSHOTS: Final = 25
 MAX_AUDIT_EVENTS: Final = 100
 
 
@@ -157,10 +160,43 @@ class PaymentTransitionSummary:
     resulting_version: int
     outcome: str
     reason: str
+    evidence_source: str
+    delivery_classification: str
+    delivery_latency_ms: int
     late_authorization: bool
     stop_recovery: bool
     event_created_at: datetime
     processed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentEvidenceSummary:
+    evidence_id: UUID
+    source: str
+    source_reference: str
+    fact_name: str
+    fact_value: str
+    content_sha256: str
+    observed_at: datetime
+    event_at: datetime | None
+    fresh_until: datetime | None
+    verified: bool
+    signature_verified: bool | None
+    normalized_fields: dict[str, object]
+    reliability: str
+    unavailable_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentTruthSummary:
+    truth_snapshot_id: UUID
+    version: int
+    state: str
+    evidence_refs: tuple[str, ...]
+    conflict_codes: tuple[str, ...]
+    evidence_digest: str
+    resolver_version: str
+    resolved_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +234,8 @@ class RecoveryCaseDetail:
     payment_transitions: tuple[PaymentTransitionSummary, ...]
     audit_chain: RecoveryAuditChainSummary
     approvals: tuple[RecoveryApprovalSummary, ...] = ()
+    payment_evidence: tuple[PaymentEvidenceSummary, ...] = ()
+    payment_truth: tuple[PaymentTruthSummary, ...] = ()
 
 
 def build_recovery_case_snapshot(case: RecoveryCase) -> RecoveryCaseSnapshot:
@@ -333,10 +371,45 @@ def build_payment_transition_summary(
         resulting_version=transition.resulting_version,
         outcome=transition.outcome,
         reason=transition.reason,
+        evidence_source=transition.evidence_source,
+        delivery_classification=transition.delivery_classification,
+        delivery_latency_ms=transition.delivery_latency_ms,
         late_authorization=transition.late_authorization,
         stop_recovery=transition.stop_recovery,
         event_created_at=transition.event_created_at,
         processed_at=transition.processed_at,
+    )
+
+
+def build_payment_evidence_summary(evidence: PaymentEvidenceRecord) -> PaymentEvidenceSummary:
+    return PaymentEvidenceSummary(
+        evidence_id=evidence.id,
+        source=evidence.source,
+        source_reference=evidence.source_reference,
+        fact_name=evidence.fact_name,
+        fact_value=evidence.fact_value,
+        content_sha256=evidence.content_sha256,
+        observed_at=evidence.observed_at,
+        event_at=evidence.event_at,
+        fresh_until=evidence.fresh_until,
+        verified=evidence.verified,
+        signature_verified=evidence.signature_verified,
+        normalized_fields=evidence.normalized_fields,
+        reliability=evidence.reliability,
+        unavailable_reason=evidence.unavailable_reason,
+    )
+
+
+def build_payment_truth_summary(snapshot: PaymentTruthSnapshotRecord) -> PaymentTruthSummary:
+    return PaymentTruthSummary(
+        truth_snapshot_id=snapshot.id,
+        version=snapshot.version,
+        state=snapshot.state,
+        evidence_refs=tuple(snapshot.evidence_refs),
+        conflict_codes=tuple(snapshot.conflict_codes),
+        evidence_digest=snapshot.evidence_digest,
+        resolver_version=snapshot.resolver_version,
+        resolved_at=snapshot.resolved_at,
     )
 
 
@@ -428,6 +501,18 @@ async def load_recovery_case_detail(
         )
         .limit(MAX_PAYMENT_TRANSITIONS),
     )
+    evidence_result = await session.execute(
+        select(PaymentEvidenceRecord)
+        .where(PaymentEvidenceRecord.payment_attempt_id == payment_attempt.id)
+        .order_by(PaymentEvidenceRecord.observed_at.desc(), PaymentEvidenceRecord.id)
+        .limit(MAX_PAYMENT_EVIDENCE),
+    )
+    truth_result = await session.execute(
+        select(PaymentTruthSnapshotRecord)
+        .where(PaymentTruthSnapshotRecord.payment_attempt_id == payment_attempt.id)
+        .order_by(PaymentTruthSnapshotRecord.version.desc())
+        .limit(MAX_TRUTH_SNAPSHOTS),
+    )
 
     audit_entries = await load_recovery_audit_chain(
         session,
@@ -452,6 +537,12 @@ async def load_recovery_case_detail(
         payment_transitions=tuple(
             build_payment_transition_summary(transition)
             for transition in transitions_result.scalars().all()
+        ),
+        payment_evidence=tuple(
+            build_payment_evidence_summary(evidence) for evidence in evidence_result.scalars().all()
+        ),
+        payment_truth=tuple(
+            build_payment_truth_summary(snapshot) for snapshot in truth_result.scalars().all()
         ),
         audit_chain=build_audit_chain_summary(
             entries=audit_entries,

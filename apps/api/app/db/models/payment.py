@@ -224,6 +224,25 @@ class PaymentStateTransition(Base):
             "resulting_version >= 0",
             name="ck_payment_state_transitions_resulting_version",
         ),
+        CheckConstraint(
+            (
+                "evidence_source IN ('provider_payment_api', 'provider_order_api', "
+                "'verified_webhook', 'merchant_database', 'recovery_state', "
+                "'reconciliation', 'payment_lab', 'recovery_link')"
+            ),
+            name="ck_payment_state_transitions_evidence_source",
+        ),
+        CheckConstraint(
+            (
+                "delivery_classification IN "
+                "('on_time', 'delayed', 'reordered', 'provider_reconciled', 'stale')"
+            ),
+            name="ck_payment_state_transitions_delivery_classification",
+        ),
+        CheckConstraint(
+            "delivery_latency_ms >= 0",
+            name="ck_payment_state_transitions_delivery_latency_ms",
+        ),
         Index(
             "ix_payment_state_transitions_attempt_processed",
             "payment_attempt_id",
@@ -290,6 +309,24 @@ class PaymentStateTransition(Base):
     reason: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
+    )
+    evidence_source: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="verified_webhook",
+        server_default="verified_webhook",
+    )
+    delivery_classification: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="on_time",
+        server_default="on_time",
+    )
+    delivery_latency_ms: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        server_default="0",
     )
     late_authorization: Mapped[bool] = mapped_column(
         nullable=False,

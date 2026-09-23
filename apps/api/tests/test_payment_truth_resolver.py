@@ -127,6 +127,59 @@ def test_pending_and_unknown_are_not_treated_as_failure() -> None:
     assert unknown.state is PaymentTruthState.OUTCOME_UNKNOWN
 
 
+def test_authorized_but_not_captured_remains_pending() -> None:
+    decision = resolve_payment_truth(
+        (
+            fact(
+                "ev_authorized",
+                "payment.status",
+                "authorized",
+                source=PaymentEvidenceSource.PROVIDER_PAYMENT_API,
+            ),
+        ),
+        resolved_at=NOW,
+    )
+
+    assert decision.state is PaymentTruthState.PAYMENT_PENDING
+
+
+def test_provider_unavailable_requires_manual_investigation() -> None:
+    unavailable = PaymentTruthEvidenceFact(
+        evidence_id="ev_provider_unavailable",
+        source=PaymentEvidenceSource.RECONCILIATION,
+        fact_name="provider.available",
+        fact_value="false",
+        content_sha256="b" * 64,
+        observed_at=NOW,
+        fresh_until=NOW + timedelta(minutes=2),
+        verified=True,
+        reliability="authoritative",
+        unavailable_reason="read_timeout",
+    )
+
+    decision = resolve_payment_truth((unavailable,), resolved_at=NOW)
+
+    assert decision.state is PaymentTruthState.MANUAL_INVESTIGATION_REQUIRED
+    assert decision.evidence_refs == ("ev_provider_unavailable",)
+
+
+def test_provider_scan_without_matching_payment_fails_closed() -> None:
+    decision = resolve_payment_truth(
+        (
+            fact("ev_internal_failed", "payment.status", "failed"),
+            fact(
+                "ev_provider_scan",
+                "provider.matching_payment_count",
+                "0",
+                source=PaymentEvidenceSource.RECONCILIATION,
+            ),
+        ),
+        resolved_at=NOW,
+    )
+
+    assert decision.state is PaymentTruthState.MANUAL_INVESTIGATION_REQUIRED
+
+
 def test_evidence_requires_a_valid_sha256_digest() -> None:
     with pytest.raises(ValueError, match="SHA-256"):
         PaymentTruthEvidenceFact(

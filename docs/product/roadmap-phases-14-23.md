@@ -2,7 +2,7 @@
 
 - **Status:** Locked
 - **Date:** 2026-09-22
-- **Baseline:** `8a7300b7bde387d5a295235b7ac02b3f31169911`
+- **Baseline:** `054a026` (Phase 15 merged)
 - **Product:** Evidence-Grounded Payment Truth and Recovery Control Plane
 
 ## Thesis
@@ -34,8 +34,10 @@ part of the product.
 ## Delivery checkpoint
 
 - Phase 14: complete and merged.
-- Phase 15: implementation in progress on `phase-15/payment-truth-resolver`.
-- Phases 16–23: pending; their scope remains locked below.
+- Phase 15: merged; corrective evidence-source completion is included with Phase 16.
+- Phase 16: corrective implementation complete on the working branch; PostgreSQL
+  migration verification and merge remain pending.
+- Phases 17–23: pending; their scope remains locked below.
 
 ## Hero scenarios
 

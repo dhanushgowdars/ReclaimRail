@@ -38,7 +38,7 @@ class PaymentEvidenceRecord(Base):
             (
                 "source IN ('provider_payment_api', 'provider_order_api', "
                 "'verified_webhook', 'merchant_database', 'recovery_state', "
-                "'reconciliation')"
+                "'reconciliation', 'payment_lab', 'recovery_link')"
             ),
             name="ck_payment_evidence_source",
         ),
@@ -49,6 +49,10 @@ class PaymentEvidenceRecord(Base):
         CheckConstraint(
             "fresh_until IS NULL OR fresh_until > observed_at",
             name="ck_payment_evidence_freshness",
+        ),
+        CheckConstraint(
+            "reliability IN ('authoritative', 'corroborating', 'weak')",
+            name="ck_payment_evidence_reliability",
         ),
         Index(
             "ix_payment_evidence_attempt_observed",
@@ -94,6 +98,20 @@ class PaymentEvidenceRecord(Base):
         default=False,
         server_default=false(),
     )
+    signature_verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    normalized_fields: Mapped[dict[str, object]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default="{}",
+    )
+    reliability: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="corroborating",
+        server_default="corroborating",
+    )
+    unavailable_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

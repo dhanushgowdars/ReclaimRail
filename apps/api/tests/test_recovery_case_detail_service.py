@@ -158,10 +158,45 @@ def build_transition() -> MagicMock:
     value.resulting_version = 1
     value.outcome = "applied"
     value.reason = "payment_failed"
+    value.evidence_source = "verified_webhook"
+    value.delivery_classification = "on_time"
+    value.delivery_latency_ms = 1_000
     value.late_authorization = False
     value.stop_recovery = False
     value.event_created_at = NOW
     value.processed_at = NOW
+    return value
+
+
+def build_evidence() -> MagicMock:
+    value = MagicMock()
+    value.id = UUID("60000000-0000-0000-0000-000000000001")
+    value.source = "verified_webhook"
+    value.source_reference = "evt_proof"
+    value.fact_name = "payment.status"
+    value.fact_value = "failed"
+    value.content_sha256 = "b" * 64
+    value.observed_at = NOW
+    value.event_at = NOW
+    value.fresh_until = None
+    value.verified = True
+    value.signature_verified = True
+    value.normalized_fields = {"payment_id": "pay_proof"}
+    value.reliability = "corroborating"
+    value.unavailable_reason = None
+    return value
+
+
+def build_truth() -> MagicMock:
+    value = MagicMock()
+    value.id = UUID("70000000-0000-0000-0000-000000000001")
+    value.version = 1
+    value.state = "payment_failed"
+    value.evidence_refs = [str(build_evidence().id)]
+    value.conflict_codes = []
+    value.evidence_digest = "c" * 64
+    value.resolver_version = "payment-truth-v1"
+    value.resolved_at = NOW
     return value
 
 
@@ -193,6 +228,8 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
         build_result(values=[build_action()]),
         build_result(),
         build_result(values=[build_transition()]),
+        build_result(values=[build_evidence()]),
+        build_result(values=[build_truth()]),
     )
     audit_entries = (build_audit_entry(),)
     monkeypatch.setattr(
@@ -233,13 +270,15 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
     assert detail.outcome is not None
     assert detail.outcome.gross_recovered_minor == 349_900
     assert detail.payment_transitions[0].event_type == "payment.failed"
+    assert detail.payment_evidence[0].signature_verified is True
+    assert detail.payment_truth[0].state == "payment_failed"
     assert detail.audit_chain.valid is True
     assert detail.audit_chain.total_event_count == 1
     assert detail.audit_chain.events[0].event_hash == "a" * 64
     assert detail.audit_chain.events[0].provider_status == "paid"
     assert detail.audit_chain.events[0].outcome_status == "recovered"
     assert not hasattr(detail.audit_chain.events[0], "event_data")
-    assert session.execute.await_count == 5
+    assert session.execute.await_count == 7
 
 
 @pytest.mark.asyncio
@@ -266,6 +305,8 @@ async def test_audit_timeline_is_bounded_without_changing_chain_verification(
     session = AsyncMock(spec=AsyncSession)
     session.execute.side_effect = (
         build_result(row=(build_case(), build_payment_attempt(), None)),
+        build_result(),
+        build_result(),
         build_result(),
         build_result(),
         build_result(),

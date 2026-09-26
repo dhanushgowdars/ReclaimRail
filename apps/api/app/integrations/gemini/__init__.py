@@ -1,3 +1,11 @@
+from app.integrations.gemini.evidence_investigator import (
+    INVESTIGATOR_PROMPT_VERSION,
+    EvidenceInvestigatorProvider,
+    EvidenceInvestigatorProviderError,
+    GoogleGenAIEvidenceInvestigator,
+    build_investigator_prompt,
+    create_gemini_evidence_investigator,
+)
 from app.integrations.gemini.recovery_planner import (
     BoundedRecoveryPlannerResult,
     GeminiPlannerFallbackReason,
@@ -16,16 +24,22 @@ from app.integrations.gemini.recovery_planner import (
 
 __all__ = [
     "BoundedRecoveryPlannerResult",
+    "EvidenceInvestigatorProvider",
+    "EvidenceInvestigatorProviderError",
     "GeminiPlannerFallbackReason",
     "GeminiPlannerProviderError",
     "GeminiRecoveryAnalysisPayload",
     "GeminiProviderResponse",
     "GeminiRecoveryPlanPayload",
     "GeminiRecoveryPlanProvider",
+    "GoogleGenAIEvidenceInvestigator",
     "GoogleGenAIRecoveryPlanProvider",
+    "INVESTIGATOR_PROMPT_VERSION",
     "RecoveryPlannerSource",
+    "build_investigator_prompt",
     "build_recovery_planning_prompt",
     "build_recovery_evidence_tools",
+    "create_gemini_evidence_investigator",
     "create_gemini_recovery_plan_provider",
     "plan_with_gemini_fallback",
 ]

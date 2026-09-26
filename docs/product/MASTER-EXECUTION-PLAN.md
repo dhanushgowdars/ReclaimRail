@@ -196,7 +196,7 @@ animation may visualize the workflow but may not create a stage or timestamp.
 | 14 | Safety invariants and contracts | **Complete** | PR #15 lineage; typed contracts, ADRs and invariant tests |
 | 15 | Versioned Payment Truth Resolver | **Complete** | PR #16 plus Phase 16 corrective completion |
 | 16 | Reliable events and reconciliation | **Complete** | PR #17, merge `67c950c`; 669 passed/1 skipped; migrations, lint, build and audit passed |
-| 17 | Gemini Evidence Investigator | **Next** | Not started |
+| 17 | Gemini Evidence Investigator | **In verification** | Runtime, tests and trace implemented; PostgreSQL/CI/merge evidence pending |
 | 18 | Evidence validation and action ranking | Pending | — |
 | 19 | Policy and state-bound approval | Pending | — |
 | 20 | Durable provider execution | Pending | — |
@@ -459,11 +459,11 @@ functional when the selected model is unavailable.
 ### Phase 17 completion gate
 
 - [ ] P17-01 through P17-16 have runtime and test evidence.
-- [ ] At least three cases produce meaningfully different tool sequences.
-- [ ] No baseline/deterministic answer is leaked into the model prompt.
-- [ ] Cross-case, future and unverified evidence cannot be cited.
-- [ ] Timeout, quota, malformed output and tool failure all fail safely.
-- [ ] Shadow mode proves the investigator cannot execute recovery.
+- [x] At least three cases produce meaningfully different tool sequences.
+- [x] No baseline/deterministic answer is leaked into the model prompt.
+- [x] Cross-case, future and unverified evidence cannot be cited.
+- [x] Timeout, quota, malformed output and tool failure all fail safely.
+- [x] Shadow mode proves the investigator cannot execute recovery.
 - [ ] Full backend, migration, frontend and CI gates pass.
 - [ ] Phase document and build log contain measured results, not adjectives.
 
@@ -875,6 +875,17 @@ Append entries; never rewrite old results to look cleaner.
 - Frontend lint/build passed; npm audit reported zero vulnerabilities.
 - Author and committer: `Dhanush R S <dhanushrs981@gmail.com>`.
 - Next authorized implementation: Phase 17 only.
+
+### 25 September 2026 — Phase 17 implementation checkpoint
+
+- Implemented the read-only Gemini investigator, durable session/step/hypothesis transcript,
+  bounded failure paths, truth-version invalidation and reviewer-safe trace.
+- Added deterministic tests for three different tool sequences, abstention, citation ownership,
+  prompt leakage, redaction, idempotency and exhausted budgets.
+- Reconstruction workspace: Ruff and strict mypy passed; frontend audit/lint/build passed.
+- Backend without PostgreSQL: 672 passed and 12 skipped; three existing database integration tests
+  were not runnable because the workspace had no configured PostgreSQL service.
+- Phase 17 remains in verification until the PostgreSQL, full CI, authorship and merge gates pass.
 
 ## 21. Priority and scope control
 

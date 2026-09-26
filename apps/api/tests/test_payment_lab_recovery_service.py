@@ -125,6 +125,8 @@ async def test_starts_existing_agent_with_bounded_inputs(
         "alternate_payment_methods": ("card", "upi"),
         "planned_at": NOW,
         "provider": provider,
+        "investigator_provider": None,
+        "investigator_budgets": None,
         "approval_threshold_minor": 1_000_000,
         "approval_window": timedelta(minutes=15),
         "planner_policy": DEFAULT_RECOVERY_PLANNER_POLICY,

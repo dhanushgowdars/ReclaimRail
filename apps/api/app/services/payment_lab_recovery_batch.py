@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
 from app.db.models.recovery import RecoveryCase
+from app.domain.investigation import InvestigationBudgets
 from app.domain.recovery import (
     DEFAULT_RECOVERY_PLANNER_POLICY,
     RecoveryCaseStatus,
@@ -16,6 +17,7 @@ from app.domain.recovery import (
     RecoveryPlannerPolicy,
 )
 from app.integrations.gemini import (
+    EvidenceInvestigatorProvider,
     GeminiRecoveryPlanProvider,
     RecoveryPlannerSource,
 )
@@ -216,6 +218,8 @@ async def run_payment_lab_recovery_batch(
     *,
     reference_time: datetime,
     provider: GeminiRecoveryPlanProvider | None,
+    investigator_provider: EvidenceInvestigatorProvider | None = None,
+    investigator_budgets: InvestigationBudgets | None = None,
     batch_size: int = 25,
     supported_payment_methods: Sequence[str] = DEFAULT_ALTERNATE_PAYMENT_METHODS,
     claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
@@ -259,6 +263,8 @@ async def run_payment_lab_recovery_batch(
                     supported_methods=supported_payment_methods,
                 ),
                 provider=provider,
+                investigator_provider=investigator_provider,
+                investigator_budgets=investigator_budgets,
                 claim_timeout=claim_timeout,
                 approval_threshold_minor=approval_threshold_minor,
                 approval_window=approval_window,

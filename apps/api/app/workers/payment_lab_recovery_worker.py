@@ -6,8 +6,12 @@ from datetime import UTC, datetime, timedelta
 from app.core.cache import close_redis
 from app.core.config import get_settings
 from app.core.database import close_database, get_session_factory
+from app.domain.investigation import InvestigationBudgets
 from app.domain.recovery import RecoveryPlannerPolicy
-from app.integrations.gemini import create_gemini_recovery_plan_provider
+from app.integrations.gemini import (
+    create_gemini_evidence_investigator,
+    create_gemini_recovery_plan_provider,
+)
 from app.integrations.razorpay.orders import create_razorpay_order_provider
 from app.services.payment_lab_provider_verification import (
     verify_payment_lab_provider_evidence_batch,
@@ -62,6 +66,7 @@ def log_batch_result(result: PaymentLabRecoveryBatchResult) -> None:
 async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
     settings = get_settings()
     provider = create_gemini_recovery_plan_provider(settings)
+    investigator_provider = create_gemini_evidence_investigator(settings)
     order_provider = create_razorpay_order_provider(settings)
     session_factory = get_session_factory()
     heartbeat = create_worker_heartbeat_reporter(
@@ -86,6 +91,12 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
         incident_recheck_delay=timedelta(
             seconds=settings.recovery_incident_recheck_delay_seconds,
         ),
+    )
+    investigator_budgets = InvestigationBudgets(
+        max_tool_calls=settings.recovery_investigator_max_tool_calls,
+        max_model_retries=settings.recovery_investigator_max_model_retries,
+        max_total_tokens=settings.recovery_investigator_max_total_tokens,
+        max_duration=timedelta(seconds=settings.recovery_investigator_max_duration_seconds),
     )
 
     await heartbeat.start()
@@ -127,6 +138,8 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
                     session_factory,
                     reference_time=utc_now(),
                     provider=provider,
+                    investigator_provider=investigator_provider,
+                    investigator_budgets=investigator_budgets,
                     batch_size=settings.payment_lab_recovery_batch_size,
                     claim_timeout=claim_timeout,
                     approval_threshold_minor=(settings.recovery_approval_threshold_minor),

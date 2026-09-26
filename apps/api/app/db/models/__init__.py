@@ -7,6 +7,11 @@ from app.db.models.incident import (
     RevenueIncident,
     RevenueIncidentStatus,
 )
+from app.db.models.investigation import (
+    RecoveryInvestigationHypothesis,
+    RecoveryInvestigationSession,
+    RecoveryInvestigationStep,
+)
 from app.db.models.outbox import (
     OutboxMessage,
     OutboxMessageStatus,
@@ -75,6 +80,9 @@ __all__ = [
     "RecoveryAuditActor",
     "RecoveryAuditEvent",
     "RecoveryCase",
+    "RecoveryInvestigationHypothesis",
+    "RecoveryInvestigationSession",
+    "RecoveryInvestigationStep",
     "RecoveryOutcome",
     "RecoveryOutcomeAttribution",
     "RecoveryOutcomeObservation",

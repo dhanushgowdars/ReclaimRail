@@ -44,7 +44,8 @@ part of the product.
 - Phase 16: complete and merged through PR #17 (`67c950c`). Backend tests reported
   669 passed and 1 skipped; PostgreSQL migrations/schema check, frontend lint/build
   and npm audit passed.
-- Phase 17: next; implementation must follow P17-01 through P17-16 in the master plan.
+- Phase 17: implementation complete on its branch; PostgreSQL, CI, authorship and merge verification
+  remain before closure. P17-01 through P17-16 are mapped in the Phase 17 acceptance matrix.
 - Phases 18–23: pending; their scope remains locked below.
 
 ## Hero scenarios

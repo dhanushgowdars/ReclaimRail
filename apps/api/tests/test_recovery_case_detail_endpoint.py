@@ -17,6 +17,9 @@ from app.services.recovery_ai_trace import (
     RecoveryAiTrace,
 )
 from app.services.recovery_case_detail_service import (
+    InvestigationHypothesisSummary,
+    InvestigationSessionSummary,
+    InvestigationStepSummary,
     PaymentLifecycleSnapshot,
     PaymentTransitionSummary,
     RecoveryActionSummary,
@@ -202,6 +205,58 @@ def build_detail() -> RecoveryCaseDetail:
                 processed_at=NOW,
             ),
         ),
+        investigations=(
+            InvestigationSessionSummary(
+                session_id=UUID("60000000-0000-0000-0000-000000000001"),
+                case_version=2,
+                truth_version=1,
+                evidence_cutoff_at=NOW,
+                status="completed",
+                provider="gemini",
+                model_name="gemini-test",
+                model_version="gemini-test",
+                prompt_version="evidence-investigator-v1",
+                tool_registry_version="recovery-read-tools-v1",
+                shadow_mode=True,
+                tool_call_count=1,
+                input_token_count=20,
+                output_token_count=10,
+                terminal_reason="evidence_conclusion",
+                result_summary="Verified evidence supports the conclusion.",
+                result_evidence_ids=("evidence:1",),
+                result_digest="d" * 64,
+                started_at=NOW,
+                completed_at=NOW,
+                steps=(
+                    InvestigationStepSummary(
+                        sequence_number=1,
+                        tool_name="get_truth_snapshot",
+                        outcome="succeeded",
+                        evidence_ids=("evidence:1",),
+                        error_code=None,
+                        started_at=NOW,
+                        completed_at=NOW,
+                        cumulative_tool_calls=1,
+                        cumulative_total_tokens=15,
+                        elapsed_ms=12,
+                    ),
+                ),
+                hypotheses=(
+                    InvestigationHypothesisSummary(
+                        hypothesis_key="payment_failed",
+                        claim="Payment failure is provider-confirmed.",
+                        status="supported",
+                        supporting_evidence_ids=("evidence:1",),
+                        contradicting_evidence_ids=(),
+                        missing_questions=(),
+                        next_observation=None,
+                        first_step=1,
+                        last_step=1,
+                        version=1,
+                    ),
+                ),
+            ),
+        ),
         audit_chain=RecoveryAuditChainSummary(
             valid=True,
             reason="valid",
@@ -260,6 +315,9 @@ def test_reads_pii_safe_recovery_case_detail(
         "Customer intent is not provider evidence.",
     ]
     assert body["outcome"]["gross_recovered_minor"] == 349_900
+    assert body["investigations"][0]["shadow_mode"] is True
+    assert body["investigations"][0]["steps"][0]["tool_name"] == "get_truth_snapshot"
+    assert body["investigations"][0]["hypotheses"][0]["status"] == "supported"
     assert body["audit_chain"]["valid"] is True
     assert body["audit_chain"]["events"][0]["event_hash"] == "a" * 64
     assert body["audit_chain"]["events"][0]["provider_status"] == "paid"

@@ -89,7 +89,13 @@ async def test_new_truth_invalidates_stale_recovery_work() -> None:
     first_result = MagicMock()
     first_result.scalar_one_or_none.return_value = recovery_case
     session = AsyncMock()
-    session.execute.side_effect = [first_result, MagicMock(), MagicMock(), MagicMock()]
+    session.execute.side_effect = [
+        first_result,
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+    ]
 
     await _invalidate_stale_recovery_plan(
         session,
@@ -99,11 +105,12 @@ async def test_new_truth_invalidates_stale_recovery_work() -> None:
     )
 
     assert recovery_case.version == 5
-    assert session.execute.await_count == 4
+    assert session.execute.await_count == 5
     statements = [str(call.args[0]) for call in session.execute.await_args_list]
-    assert "UPDATE recovery_agent_runs" in statements[1]
-    assert "UPDATE recovery_actions" in statements[2]
-    assert "UPDATE recovery_approvals" in statements[3]
+    assert "UPDATE recovery_investigation_sessions" in statements[1]
+    assert "UPDATE recovery_agent_runs" in statements[2]
+    assert "UPDATE recovery_actions" in statements[3]
+    assert "UPDATE recovery_approvals" in statements[4]
 
     with pytest.raises(ValueError, match="must follow"):
         PaymentEvidenceWrite(

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -5,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.domain.investigation import InvestigationBudgets
 from app.domain.recovery import (
     DEFAULT_RECOVERY_PLANNER_POLICY,
     RecoveryChannel,
@@ -12,12 +14,17 @@ from app.domain.recovery import (
 )
 from app.integrations.gemini import (
     BoundedRecoveryPlannerResult,
+    EvidenceInvestigatorProvider,
     GeminiRecoveryPlanProvider,
     plan_with_gemini_fallback,
 )
 from app.services.recovery_approval_service import (
     DEFAULT_APPROVAL_THRESHOLD_MINOR,
     DEFAULT_APPROVAL_WINDOW,
+)
+from app.services.recovery_investigator_service import (
+    RecoveryInvestigationResult,
+    run_shadow_investigation,
 )
 from app.services.recovery_plan_service import (
     PersistedRecoveryPlan,
@@ -26,12 +33,14 @@ from app.services.recovery_plan_service import (
 )
 
 SessionFactory = async_sessionmaker[AsyncSession]
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class RecoveryAgentExecution:
     planner_result: BoundedRecoveryPlannerResult
     persisted_plan: PersistedRecoveryPlan
+    investigation_result: RecoveryInvestigationResult | None = None
 
 
 def _require_timezone_aware(value: datetime) -> None:
@@ -49,6 +58,8 @@ async def execute_recovery_agent(
     alternate_payment_methods: Sequence[str],
     planned_at: datetime,
     provider: GeminiRecoveryPlanProvider | None,
+    investigator_provider: EvidenceInvestigatorProvider | None = None,
+    investigator_budgets: InvestigationBudgets | None = None,
     approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
     approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
     planner_policy: RecoveryPlannerPolicy = DEFAULT_RECOVERY_PLANNER_POLICY,
@@ -56,6 +67,21 @@ async def execute_recovery_agent(
     """Plan outside a database transaction, then persist through the policy gate."""
 
     _require_timezone_aware(planned_at)
+
+    investigation_result: RecoveryInvestigationResult | None = None
+    try:
+        investigation_result = await run_shadow_investigation(
+            session_factory,
+            recovery_case_id=recovery_case_id,
+            provider=investigator_provider,
+            started_at=planned_at,
+            budgets=investigator_budgets,
+        )
+    except Exception:  # noqa: BLE001 - shadow analysis must never block recovery
+        LOGGER.exception(
+            "Shadow evidence investigation failed without affecting recovery case %s",
+            recovery_case_id,
+        )
 
     async with session_factory() as read_session:
         context = await load_recovery_planning_context(
@@ -95,4 +121,5 @@ async def execute_recovery_agent(
     return RecoveryAgentExecution(
         planner_result=planner_result,
         persisted_plan=persisted_plan,
+        investigation_result=investigation_result,
     )

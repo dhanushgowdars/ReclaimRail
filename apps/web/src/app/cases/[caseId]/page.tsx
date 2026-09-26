@@ -83,6 +83,7 @@ function DecisionTrace({ detail }: { detail: RecoveryCaseDetail }) {
   const trace = latestRun?.ai_trace;
   const evidence = [...new Set([...(trace?.evidence_references ?? []), ...(trace?.evidence_codes ?? [])])];
   const latestApproval = [...detail.approvals].sort((left, right) => right.requested_at.localeCompare(left.requested_at))[0];
+  const investigation = [...detail.investigations].sort((left, right) => right.started_at.localeCompare(left.started_at))[0];
   return <DetailCard eyebrow="AI recovery brain" title="Gemini recommendation under control">
     <div className="decision-boundary"><strong>AI recommends.</strong><span>Deterministic policy and authorized humans decide what may execute.</span></div>
     <div className="decision-provider"><span>Planning run {latestRun?.run_number ?? "—"}</span><strong>{latestRun === undefined ? "Awaiting evidence" : trace?.fallback_used ? "Deterministic fallback" : titleCase(latestRun.planner_provider)}</strong></div>
@@ -97,6 +98,24 @@ function DecisionTrace({ detail }: { detail: RecoveryCaseDetail }) {
     {trace?.alternatives_considered.length ? <div className="trace-citations"><b>Alternatives evaluated</b>{trace.alternatives_considered.map((item) => <article key={`${item.action_type}-${item.disposition}`}><strong>{titleCase(item.action_type)}</strong><span>{item.reason}</span></article>)}</div> : null}
     {trace?.known_uncertainties.length ? <p className="brain-operator-explanation"><b>Known uncertainty:</b> {trace.known_uncertainties.join(" ")}</p> : null}
     {trace?.evidence_tool_names.length ? <p className="brain-tools"><b>Bounded evidence tools:</b> {trace.evidence_tool_names.map(titleCase).join(" · ")}</p> : null}
+    {investigation ? <div className="trace-citations">
+      <b>Live evidence investigation · {investigation.shadow_mode ? "shadow mode" : "active mode"}</b>
+      <article>
+        <strong><Badge value={investigation.status} /> {investigation.result_summary ?? titleCase(investigation.terminal_reason ?? "Investigation running")}</strong>
+        <span>Case v{investigation.case_version} · truth v{investigation.truth_version} · evidence cutoff {formatTimestamp(investigation.evidence_cutoff_at)}</span>
+        <span>{titleCase(investigation.provider)}{investigation.model_name ? ` · ${investigation.model_name}` : ""} · {investigation.tool_call_count} bounded read-only call{investigation.tool_call_count === 1 ? "" : "s"} · {investigation.input_token_count + investigation.output_token_count} tokens</span>
+      </article>
+      {investigation.steps.map((step) => <article key={`${investigation.session_id}-${step.sequence_number}`}>
+        <strong>{step.sequence_number}. {titleCase(step.tool_name)} · {titleCase(step.outcome)}</strong>
+        <span>{step.evidence_ids.length} ledger citation{step.evidence_ids.length === 1 ? "" : "s"} · cumulative calls {step.cumulative_tool_calls} · {step.elapsed_ms}ms</span>
+        {step.error_code ? <span>Safe failure: {titleCase(step.error_code)}</span> : null}
+      </article>)}
+      {investigation.hypotheses.map((hypothesis) => <article key={`${investigation.session_id}-${hypothesis.hypothesis_key}`}>
+        <strong>{hypothesis.claim} · {titleCase(hypothesis.status)}</strong>
+        <span>{hypothesis.supporting_evidence_ids.length} supporting · {hypothesis.contradicting_evidence_ids.length} contradicting citation{hypothesis.contradicting_evidence_ids.length === 1 ? "" : "s"}</span>
+        {hypothesis.next_observation ? <span>Next observation: {hypothesis.next_observation}</span> : null}
+      </article>)}
+    </div> : <p className="brain-fallback"><b>Evidence investigator:</b> No shadow investigation is recorded for this older case.</p>}
     {runs.length > 1 ? <p className="brain-replan"><b>{runs.length} planning runs are recorded.</b> The latest recommendation is shown above; earlier plans remain in the audit chain instead of being overwritten.</p> : null}
     {detail.recovery_case.late_authorization_detected_at ? <p className="brain-replan brain-replan--protected"><b>New provider evidence: late authorization detected.</b> Recovery work must be revalidated and obsolete collection actions may be stopped or cancelled. Check Outcome & audit for the recorded result.</p> : null}
     {latestApproval ? <div className="brain-approval"><span>Human authorization</span><strong>{titleCase(latestApproval.status)}</strong><p><b>Review trigger:</b> {titleCase(latestApproval.request_reason)}.</p>{latestApproval.decision_reason ? <p><b>Recorded decision reason:</b> {latestApproval.decision_reason}</p> : <p>No operator decision has been recorded yet.</p>}{latestApproval.decided_at ? <p><b>Decided:</b> {formatTimestamp(latestApproval.decided_at)}{latestApproval.decided_by ? ` by ${latestApproval.decided_by}` : ""}</p> : null}<p>Approval permits only the reviewed action and never bypasses a hard policy block.</p></div> : null}

@@ -25,6 +25,11 @@ def create_settings() -> SimpleNamespace:
         recovery_approval_threshold_minor=300_000,
         recovery_approval_ttl_seconds=900,
         recovery_incident_recheck_delay_seconds=900,
+        recovery_investigator_shadow_enabled=True,
+        recovery_investigator_max_tool_calls=8,
+        recovery_investigator_max_model_retries=2,
+        recovery_investigator_max_total_tokens=12_000,
+        recovery_investigator_max_duration_seconds=30,
     )
 
 
@@ -69,6 +74,7 @@ async def test_run_once_executes_batch_and_closes_database(
 ) -> None:
     settings = create_settings()
     provider = MagicMock(name="gemini_provider")
+    investigator_provider = MagicMock(name="investigator_provider")
     session_factory = MagicMock(name="session_factory")
     run_batch = AsyncMock(return_value=create_batch_result())
     close_database = AsyncMock()
@@ -82,6 +88,11 @@ async def test_run_once_executes_batch_and_closes_database(
         payment_lab_recovery_worker,
         "create_gemini_recovery_plan_provider",
         MagicMock(return_value=provider),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "create_gemini_evidence_investigator",
+        MagicMock(return_value=investigator_provider),
     )
     stub_order_provider(monkeypatch)
     monkeypatch.setattr(
@@ -111,6 +122,8 @@ async def test_run_once_executes_batch_and_closes_database(
         session_factory,
         reference_time=NOW,
         provider=provider,
+        investigator_provider=investigator_provider,
+        investigator_budgets=payment_lab_recovery_worker.InvestigationBudgets(),
         batch_size=25,
         claim_timeout=timedelta(seconds=60),
         approval_threshold_minor=300_000,
@@ -135,6 +148,11 @@ async def test_run_once_closes_database_after_batch_failure(
     monkeypatch.setattr(
         payment_lab_recovery_worker,
         "create_gemini_recovery_plan_provider",
+        MagicMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "create_gemini_evidence_investigator",
         MagicMock(return_value=None),
     )
     stub_order_provider(monkeypatch)
@@ -174,6 +192,11 @@ async def test_continuous_empty_batch_sleeps_and_closes_on_cancellation(
     monkeypatch.setattr(
         payment_lab_recovery_worker,
         "create_gemini_recovery_plan_provider",
+        MagicMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "create_gemini_evidence_investigator",
         MagicMock(return_value=None),
     )
     stub_order_provider(monkeypatch)

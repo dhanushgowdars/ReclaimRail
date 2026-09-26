@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.investigation import RecoveryInvestigationSession
 from app.db.models.payment import PaymentAttempt, PaymentStateTransition
 from app.db.models.payment_lab import PaymentLabRun
 from app.db.models.payment_truth import (
@@ -328,6 +329,19 @@ async def _invalidate_stale_recovery_plan(
     if recovery_case is None:
         return
     recovery_case.version += 1
+    await session.execute(
+        update(RecoveryInvestigationSession)
+        .where(
+            RecoveryInvestigationSession.recovery_case_id == recovery_case.id,
+            RecoveryInvestigationSession.status == "running",
+        )
+        .values(
+            status="failed_safe",
+            terminal_reason="superseded_by_new_evidence",
+            result_summary=f"Superseded by payment truth version {new_truth_version}.",
+            completed_at=resolved_at,
+        ),
+    )
     await session.execute(
         update(RecoveryAgentRun)
         .where(

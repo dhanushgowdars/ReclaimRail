@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.payment_lab import PaymentLabRun, PaymentLabRunStatus
 from app.db.models.recovery import RecoveryAction, RecoveryActionStatus, RecoveryCase
+from app.domain.investigation import InvestigationBudgets
 from app.domain.recovery import (
     DEFAULT_RECOVERY_PLANNER_POLICY,
     RecoveryActionType,
@@ -18,6 +19,7 @@ from app.domain.recovery import (
     RecoveryPlannerPolicy,
 )
 from app.integrations.gemini import (
+    EvidenceInvestigatorProvider,
     GeminiRecoveryPlanProvider,
     RecoveryPlannerSource,
 )
@@ -406,6 +408,8 @@ async def start_payment_lab_recovery(
     available_channels: Sequence[RecoveryChannel],
     alternate_payment_methods: Sequence[str],
     provider: GeminiRecoveryPlanProvider | None,
+    investigator_provider: EvidenceInvestigatorProvider | None = None,
+    investigator_budgets: InvestigationBudgets | None = None,
     claim_timeout: timedelta = DEFAULT_PAYMENT_LAB_RECOVERY_CLAIM_TIMEOUT,
     approval_threshold_minor: int = DEFAULT_APPROVAL_THRESHOLD_MINOR,
     approval_window: timedelta = DEFAULT_APPROVAL_WINDOW,
@@ -446,6 +450,8 @@ async def start_payment_lab_recovery(
             alternate_payment_methods=alternate_payment_methods,
             planned_at=started_at,
             provider=provider,
+            investigator_provider=investigator_provider,
+            investigator_budgets=investigator_budgets,
             approval_threshold_minor=approval_threshold_minor,
             approval_window=approval_window,
             planner_policy=planner_policy,

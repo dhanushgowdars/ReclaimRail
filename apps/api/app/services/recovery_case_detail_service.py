@@ -6,6 +6,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.investigation import (
+    RecoveryInvestigationHypothesis,
+    RecoveryInvestigationSession,
+    RecoveryInvestigationStep,
+)
 from app.db.models.payment import PaymentAttempt, PaymentStateTransition
 from app.db.models.payment_truth import PaymentEvidenceRecord, PaymentTruthSnapshotRecord
 from app.db.models.recovery import (
@@ -31,6 +36,8 @@ MAX_PAYMENT_TRANSITIONS: Final = 50
 MAX_PAYMENT_EVIDENCE: Final = 100
 MAX_TRUTH_SNAPSHOTS: Final = 25
 MAX_AUDIT_EVENTS: Final = 100
+MAX_INVESTIGATION_SESSIONS: Final = 10
+MAX_INVESTIGATION_STEPS: Final = 100
 
 
 class RecoveryCaseDetailNotFoundError(LookupError):
@@ -200,6 +207,60 @@ class PaymentTruthSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class InvestigationStepSummary:
+    sequence_number: int
+    tool_name: str
+    outcome: str
+    evidence_ids: tuple[str, ...]
+    error_code: str | None
+    started_at: datetime
+    completed_at: datetime
+    cumulative_tool_calls: int
+    cumulative_total_tokens: int
+    elapsed_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class InvestigationHypothesisSummary:
+    hypothesis_key: str
+    claim: str
+    status: str
+    supporting_evidence_ids: tuple[str, ...]
+    contradicting_evidence_ids: tuple[str, ...]
+    missing_questions: tuple[str, ...]
+    next_observation: str | None
+    first_step: int
+    last_step: int
+    version: int
+
+
+@dataclass(frozen=True, slots=True)
+class InvestigationSessionSummary:
+    session_id: UUID
+    case_version: int
+    truth_version: int
+    evidence_cutoff_at: datetime
+    status: str
+    provider: str
+    model_name: str | None
+    model_version: str | None
+    prompt_version: str
+    tool_registry_version: str
+    shadow_mode: bool
+    tool_call_count: int
+    input_token_count: int
+    output_token_count: int
+    terminal_reason: str | None
+    result_summary: str | None
+    result_evidence_ids: tuple[str, ...]
+    result_digest: str | None
+    started_at: datetime
+    completed_at: datetime | None
+    steps: tuple[InvestigationStepSummary, ...]
+    hypotheses: tuple[InvestigationHypothesisSummary, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class RecoveryAuditEventSummary:
     sequence_number: int
     event_type: str
@@ -236,6 +297,7 @@ class RecoveryCaseDetail:
     approvals: tuple[RecoveryApprovalSummary, ...] = ()
     payment_evidence: tuple[PaymentEvidenceSummary, ...] = ()
     payment_truth: tuple[PaymentTruthSummary, ...] = ()
+    investigations: tuple[InvestigationSessionSummary, ...] = ()
 
 
 def build_recovery_case_snapshot(case: RecoveryCase) -> RecoveryCaseSnapshot:
@@ -513,6 +575,37 @@ async def load_recovery_case_detail(
         .order_by(PaymentTruthSnapshotRecord.version.desc())
         .limit(MAX_TRUTH_SNAPSHOTS),
     )
+    investigation_result = await session.execute(
+        select(RecoveryInvestigationSession)
+        .where(RecoveryInvestigationSession.recovery_case_id == recovery_case_id)
+        .order_by(RecoveryInvestigationSession.started_at.desc())
+        .limit(MAX_INVESTIGATION_SESSIONS),
+    )
+    investigation_sessions = tuple(investigation_result.scalars().all())
+    investigation_ids = tuple(item.id for item in investigation_sessions)
+    steps_by_session: dict[UUID, list[RecoveryInvestigationStep]] = {}
+    hypotheses_by_session: dict[UUID, list[RecoveryInvestigationHypothesis]] = {}
+    if investigation_ids:
+        steps_result = await session.execute(
+            select(RecoveryInvestigationStep)
+            .where(RecoveryInvestigationStep.session_id.in_(investigation_ids))
+            .order_by(
+                RecoveryInvestigationStep.session_id, RecoveryInvestigationStep.sequence_number
+            )
+            .limit(MAX_INVESTIGATION_STEPS),
+        )
+        for step in steps_result.scalars().all():
+            steps_by_session.setdefault(step.session_id, []).append(step)
+        hypotheses_result = await session.execute(
+            select(RecoveryInvestigationHypothesis)
+            .where(RecoveryInvestigationHypothesis.session_id.in_(investigation_ids))
+            .order_by(
+                RecoveryInvestigationHypothesis.session_id,
+                RecoveryInvestigationHypothesis.hypothesis_key,
+            ),
+        )
+        for hypothesis in hypotheses_result.scalars().all():
+            hypotheses_by_session.setdefault(hypothesis.session_id, []).append(hypothesis)
 
     audit_entries = await load_recovery_audit_chain(
         session,
@@ -543,6 +636,61 @@ async def load_recovery_case_detail(
         ),
         payment_truth=tuple(
             build_payment_truth_summary(snapshot) for snapshot in truth_result.scalars().all()
+        ),
+        investigations=tuple(
+            InvestigationSessionSummary(
+                session_id=item.id,
+                case_version=item.case_version,
+                truth_version=item.truth_version,
+                evidence_cutoff_at=item.evidence_cutoff_at,
+                status=item.status,
+                provider=item.provider,
+                model_name=item.model_name,
+                model_version=item.model_version,
+                prompt_version=item.prompt_version,
+                tool_registry_version=item.tool_registry_version,
+                shadow_mode=item.shadow_mode,
+                tool_call_count=item.tool_call_count,
+                input_token_count=item.input_token_count,
+                output_token_count=item.output_token_count,
+                terminal_reason=item.terminal_reason,
+                result_summary=item.result_summary,
+                result_evidence_ids=tuple(item.result_evidence_ids),
+                result_digest=item.result_digest,
+                started_at=item.started_at,
+                completed_at=item.completed_at,
+                steps=tuple(
+                    InvestigationStepSummary(
+                        sequence_number=step.sequence_number,
+                        tool_name=step.tool_name,
+                        outcome=step.outcome,
+                        evidence_ids=tuple(step.evidence_ids),
+                        error_code=step.error_code,
+                        started_at=step.started_at,
+                        completed_at=step.completed_at,
+                        cumulative_tool_calls=step.cumulative_tool_calls,
+                        cumulative_total_tokens=step.cumulative_total_tokens,
+                        elapsed_ms=step.elapsed_ms,
+                    )
+                    for step in steps_by_session.get(item.id, [])
+                ),
+                hypotheses=tuple(
+                    InvestigationHypothesisSummary(
+                        hypothesis_key=hypothesis.hypothesis_key,
+                        claim=hypothesis.claim,
+                        status=hypothesis.status,
+                        supporting_evidence_ids=tuple(hypothesis.supporting_evidence_ids),
+                        contradicting_evidence_ids=tuple(hypothesis.contradicting_evidence_ids),
+                        missing_questions=tuple(hypothesis.missing_questions),
+                        next_observation=hypothesis.next_observation,
+                        first_step=hypothesis.first_step,
+                        last_step=hypothesis.last_step,
+                        version=hypothesis.version,
+                    )
+                    for hypothesis in hypotheses_by_session.get(item.id, [])
+                ),
+            )
+            for item in investigation_sessions
         ),
         audit_chain=build_audit_chain_summary(
             entries=audit_entries,

@@ -37,6 +37,11 @@ class Settings(BaseSettings):
         ge=1.0,
         le=60.0,
     )
+    recovery_investigator_shadow_enabled: bool = True
+    recovery_investigator_max_tool_calls: int = Field(default=8, ge=1, le=20)
+    recovery_investigator_max_model_retries: int = Field(default=2, ge=0, le=5)
+    recovery_investigator_max_total_tokens: int = Field(default=12_000, ge=256, le=100_000)
+    recovery_investigator_max_duration_seconds: int = Field(default=30, ge=1, le=300)
 
     outbox_stream_name: str = "reclaimrail:webhook-events:v1"
     outbox_batch_size: int = Field(

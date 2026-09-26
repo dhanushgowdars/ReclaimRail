@@ -230,6 +230,7 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
         build_result(values=[build_transition()]),
         build_result(values=[build_evidence()]),
         build_result(values=[build_truth()]),
+        build_result(),
     )
     audit_entries = (build_audit_entry(),)
     monkeypatch.setattr(
@@ -278,7 +279,7 @@ async def test_loads_pii_safe_case_detail_with_verified_audit_chain(
     assert detail.audit_chain.events[0].provider_status == "paid"
     assert detail.audit_chain.events[0].outcome_status == "recovered"
     assert not hasattr(detail.audit_chain.events[0], "event_data")
-    assert session.execute.await_count == 7
+    assert session.execute.await_count == 8
 
 
 @pytest.mark.asyncio
@@ -305,6 +306,7 @@ async def test_audit_timeline_is_bounded_without_changing_chain_verification(
     session = AsyncMock(spec=AsyncSession)
     session.execute.side_effect = (
         build_result(row=(build_case(), build_payment_attempt(), None)),
+        build_result(),
         build_result(),
         build_result(),
         build_result(),

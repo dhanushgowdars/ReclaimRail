@@ -219,6 +219,57 @@ class PaymentTruthSummaryResponse(ResponseModel):
     resolved_at: datetime
 
 
+class InvestigationStepSummaryResponse(ResponseModel):
+    sequence_number: int = Field(ge=1)
+    tool_name: str
+    outcome: str
+    evidence_ids: list[str]
+    error_code: str | None
+    started_at: datetime
+    completed_at: datetime
+    cumulative_tool_calls: int = Field(ge=1)
+    cumulative_total_tokens: int = Field(ge=0)
+    elapsed_ms: int = Field(ge=0)
+
+
+class InvestigationHypothesisSummaryResponse(ResponseModel):
+    hypothesis_key: str
+    claim: str
+    status: str
+    supporting_evidence_ids: list[str]
+    contradicting_evidence_ids: list[str]
+    missing_questions: list[str]
+    next_observation: str | None
+    first_step: int = Field(ge=0)
+    last_step: int = Field(ge=0)
+    version: int = Field(ge=1)
+
+
+class InvestigationSessionSummaryResponse(ResponseModel):
+    session_id: UUID
+    case_version: int = Field(ge=0)
+    truth_version: int = Field(ge=1)
+    evidence_cutoff_at: datetime
+    status: str
+    provider: str
+    model_name: str | None
+    model_version: str | None
+    prompt_version: str
+    tool_registry_version: str
+    shadow_mode: bool
+    tool_call_count: int = Field(ge=0)
+    input_token_count: int = Field(ge=0)
+    output_token_count: int = Field(ge=0)
+    terminal_reason: str | None
+    result_summary: str | None
+    result_evidence_ids: list[str]
+    result_digest: str | None
+    started_at: datetime
+    completed_at: datetime | None
+    steps: list[InvestigationStepSummaryResponse]
+    hypotheses: list[InvestigationHypothesisSummaryResponse]
+
+
 class RecoveryAuditEventSummaryResponse(ResponseModel):
     sequence_number: int = Field(ge=1)
     event_type: str
@@ -252,6 +303,7 @@ class RecoveryCaseDetailResponse(ResponseModel):
     payment_transitions: list[PaymentTransitionSummaryResponse]
     payment_evidence: list[PaymentEvidenceSummaryResponse]
     payment_truth: list[PaymentTruthSummaryResponse]
+    investigations: list[InvestigationSessionSummaryResponse]
     audit_chain: RecoveryAuditChainSummaryResponse
 
 

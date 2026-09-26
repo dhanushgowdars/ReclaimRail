@@ -282,6 +282,52 @@ export type RecoveryCaseDetail = {
     resolver_version: string;
     resolved_at: string;
   }>;
+  investigations: Array<{
+    session_id: string;
+    case_version: number;
+    truth_version: number;
+    evidence_cutoff_at: string;
+    status: string;
+    provider: string;
+    model_name: string | null;
+    model_version: string | null;
+    prompt_version: string;
+    tool_registry_version: string;
+    shadow_mode: boolean;
+    tool_call_count: number;
+    input_token_count: number;
+    output_token_count: number;
+    terminal_reason: string | null;
+    result_summary: string | null;
+    result_evidence_ids: string[];
+    result_digest: string | null;
+    started_at: string;
+    completed_at: string | null;
+    steps: Array<{
+      sequence_number: number;
+      tool_name: string;
+      outcome: string;
+      evidence_ids: string[];
+      error_code: string | null;
+      started_at: string;
+      completed_at: string;
+      cumulative_tool_calls: number;
+      cumulative_total_tokens: number;
+      elapsed_ms: number;
+    }>;
+    hypotheses: Array<{
+      hypothesis_key: string;
+      claim: string;
+      status: string;
+      supporting_evidence_ids: string[];
+      contradicting_evidence_ids: string[];
+      missing_questions: string[];
+      next_observation: string | null;
+      first_step: number;
+      last_step: number;
+      version: number;
+    }>;
+  }>;
   audit_chain: {
     valid: boolean;
     reason: string;

@@ -27,6 +27,15 @@ CASE_ID = UUID("83000000-0000-0000-0000-000000000001")
 PAYMENT_ID = UUID("83000000-0000-0000-0000-000000000002")
 
 
+@pytest.fixture(autouse=True)
+def stub_shadow_investigator(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        recovery_agent_service,
+        "run_shadow_investigation",
+        AsyncMock(return_value=None),
+    )
+
+
 def create_context() -> RecoveryPlanningContext:
     return RecoveryPlanningContext(
         case=RecoveryCaseSnapshot(

@@ -1,17 +1,148 @@
 # ReclaimRail Master Execution Plan
 
+> **Audit reset — 31 October 2026:** The status ledger and execution order in the
+> audit-reset section below supersede older completion language in this file. Historical
+> specifications remain requirements unless explicitly replaced in `DECISIONS.md`.
+
 > **Authority:** This is the implementation source of truth for ReclaimRail
 > Phases 14–23. It converts the product roadmap into requirements that can be
 > implemented, tested and audited. A phase is not complete because code exists;
 > every mandatory requirement must have runtime evidence and verification evidence.
 
-- **Plan version:** 1.0
-- **Locked on:** 23 September 2026
+- **Plan version:** 2.0-audit-reset
+- **Locked on:** 31 October 2026
 - **Product:** Evidence-grounded, policy-bounded payment recovery control plane
-- **Current merged baseline:** `67c950c` (Phases 15 and 16 merged through PR #17)
-- **Current phase:** Phase 17 — Gemini Evidence Investigator
-- **Completed phases:** 1–16
-- **Pending phases:** 17–23
+- **Current merged baseline:** `1912645` (Phase 17 core runtime merged through PR #19)
+- **Current phase:** Gate 1 pending owner approval; implementation is not yet authorized
+- **Verified committed foundation:** Phases 1–5, 14–16 at repository level
+- **Partial historical product phases:** 6–13 and 17A
+- **Broken closure gate:** Phase 17B live investigator and current dependency security
+- **Not implemented against this plan:** Phases 18–23
+
+## 0. Audit-reset execution order
+
+No implementation phase begins until the owner approves this audit. Each phase below is
+independent and ends with a review decision. Do not combine phases to save time.
+
+### Gate 0 — Preserve and normalize the baseline
+
+**Objective:** preserve every staged, unstaged and untracked Phase 17B change, review the
+sanitized-out `.env.example` diff, and create a clean reviewable branch without changing
+runtime behavior.
+
+Acceptance:
+
+- all 26 changed paths are inventoried;
+- staged and unstaged versions are preserved before normalization;
+- no secret enters Git;
+- no user work is discarded;
+- owner identity is verified for author and committer;
+- the resulting branch has an explainable diff against `1912645`;
+- documentation-only changes and runtime changes are separable; and
+- full limitations are recorded in `WORK-LOG.md`.
+
+### Gate 1 — Reproduce the committed/runtime baseline
+
+**Objective:** establish a current Windows/Docker evidence baseline before feature work.
+
+Acceptance:
+
+- clean PostgreSQL and Redis start from the tracked PowerShell controller;
+- Alembic upgrades from base to the single head and `alembic check` passes;
+- backend suite has zero failures and every skip is explained;
+- frontend lint and production build pass;
+- one signed Test Mode webhook is stored and projected without duplication;
+- the frontend reads the same persisted case; and
+- no live Gemini corpus is run.
+
+### Gate 2 — Dependency and access-control stabilization
+
+**Objective:** remove current critical/high dependency findings and define the public-demo
+access boundary without mixing product features into the upgrade.
+
+Acceptance:
+
+- supported Next.js and transitive packages are locked;
+- Python runtime findings are upgraded, removed or explicitly risk-accepted by the owner;
+- npm and Python audits have no unaccepted critical/high findings;
+- all existing tests, migrations and builds pass;
+- server-side secrets remain server-only;
+- the owner decides which read APIs require protection for the chosen deployment mode;
+- browser evidence proves protected and denied paths; and
+- no recovery semantics change silently.
+
+### Gate 3 — Phase 17B live investigator closure
+
+**Objective:** close the existing investigator honestly, using one controlled benchmark
+after deterministic diagnostics.
+
+Acceptance:
+
+- supported model routes contain no deprecated duplicate masquerading as failover;
+- a cheap access/quota/schema preflight passes before the corpus;
+- the frozen corpus and thresholds are hashed and unchanged;
+- one approved live run records complete sanitized evidence;
+- truth compatibility and required-tool selection are each at least 80%;
+- citation validity is 100%;
+- abstention accuracy is at least 80%;
+- provider-failure and malformed-output rates are 0% for model selection;
+- no AI action can mutate truth, approval or Razorpay;
+- incomplete/fallback/abstained states are visible in the frontend; and
+- PostgreSQL, backend, frontend and security gates pass on the committed phase branch.
+
+If provider quota prevents a complete run, record the phase as `PARTIAL` with an explicit
+external blocker; do not weaken thresholds or repeat the corpus until the external condition
+and budget are reviewed.
+
+### Gate 4 — Phase 18: evidence validation and action ranking
+
+Implement the existing P18 specification in this document. In addition to its detailed
+requirements, completion requires frontend proof of supported and rejected claims,
+case-owned citations, feasible alternatives, ranking inputs and the final coordinate-free
+intent. Semantic validation cannot be represented by the Phase 17 citation-presence check.
+
+### Gate 5 — Phase 19: policy and state-bound approval
+
+Implement the existing P19 specification. Older approval code is reusable only after it
+proves binding to case version, truth version, evidence digest, exact action, backend-resolved
+amount, approver and expiry. New evidence must atomically invalidate stale authorization.
+
+### Gate 6 — Phase 20: durable provider execution
+
+Implement the existing P20 specification. Older executor code is reusable only after it
+passes durable-intent-before-mutation, deterministic idempotency, concurrency, ambiguity,
+reconciliation-before-retry and restart/recovery gates. Every attempt must be visible.
+
+### Gate 7 — Phase 21: security, resilience and receipts
+
+Implement the existing P21 specification plus the approved deployment/access decision.
+Completion includes dependency security, ownership/tenant enforcement, rate/abuse controls,
+redaction, restart drills and a tamper-evident receipt binding truth through outcome.
+
+### Gate 8 — Phase 22: Investigation Room
+
+Implement the existing P22 specification as the single judge-facing evidence workflow. It
+must expose objective, deterministic truth, bounded tools, hypotheses, validated claims,
+alternatives, policy, approval, execution and outcome without private chain-of-thought.
+
+Completion requires automated browser behavior, keyboard/contrast checks, approved
+1024/1440/1920 evidence and truthful empty/error/fallback/abstention states.
+
+### Gate 9 — Phase 23: measured evaluation and submission
+
+Implement the existing P23 specification and Razorpay Track 3 bar.
+
+Acceptance additionally requires:
+
+- a reproducible cohort with a meaningful baseline/control rather than a zero placeholder;
+- denominators, exception list, pending outcomes and confidence/uncertainty;
+- separate synthetic, replay and Razorpay Test Mode results;
+- no production-revenue language for Test Mode money;
+- clean-clone Windows setup proof;
+- a five-minute unlisted/public demo video;
+- README links, architecture, limitations and failure-recovery story;
+- a final evidence bundle containing commands, reports and frontend proof; and
+- owner review before any application is submitted.
 
 ## 1. Why this document exists
 
@@ -196,7 +327,7 @@ animation may visualize the workflow but may not create a stage or timestamp.
 | 14 | Safety invariants and contracts | **Complete** | PR #15 lineage; typed contracts, ADRs and invariant tests |
 | 15 | Versioned Payment Truth Resolver | **Complete** | PR #16 plus Phase 16 corrective completion |
 | 16 | Reliable events and reconciliation | **Complete** | PR #17, merge `67c950c`; 669 passed/1 skipped; migrations, lint, build and audit passed |
-| 17 | Gemini Evidence Investigator | **In verification** | Runtime, tests and trace implemented; PostgreSQL/CI/merge evidence pending |
+| 17 | Gemini Evidence Investigator | **Corrective closure** | Core runtime merged in PR #19; live frozen-corpus report pending |
 | 18 | Evidence validation and action ranking | Pending | — |
 | 19 | Policy and state-bound approval | Pending | — |
 | 20 | Durable provider execution | Pending | — |
@@ -887,6 +1018,27 @@ Append entries; never rewrite old results to look cleaner.
   were not runnable because the workspace had no configured PostgreSQL service.
 - Phase 17 remains in verification until the PostgreSQL, full CI, authorship and merge gates pass.
 
+### 26 September 2026 — Phase 17 core merge and corrective audit
+
+- Phase 17 core runtime merged through PR #19, merge `1912645`, feature `fac8309`.
+- PostgreSQL backend: 686 passed, 1 skipped; Alembic upgrade/check passed at `e7a1c2d3f417`.
+- Ruff, strict mypy, frontend audit/lint/build and four GitHub CI checks passed.
+- Author and committer: `Dhanush R S <dhanushrs981@gmail.com>`.
+- Audit found the original live-model comparison had not been executed, the similar-outcomes tool
+  was unavailable, and policy summary values were static.
+- Corrective closure adds case-backed policy data, privacy-bounded account-scoped outcome aggregates,
+  a ten-scenario corpus and a real Gemini benchmark runner.
+- The runner separates provider failure from malformed model output, records fail-safe frequency and
+  tool efficiency, and refuses to select a model below the locked safety thresholds. Monetary cost is
+  labelled unavailable until model pricing is pinned rather than estimated from mutable pricing.
+- Phase 17 remains open until the generated real-model report is reviewed and recorded.
+- The first live `gemini-3.5-flash` diagnostic returned a sanitized `503 UNAVAILABLE`. Provider
+  guidance requires exponential backoff with jitter, so Phase 17B now adds classified transient
+  retry, ordered model failover, a hard provider-route time budget and per-attempt benchmark trace.
+- Invalid requests, permission failures, malformed turns, citation violations and unsafe tool
+  requests are not transport-retried. Exhausting the route produces one labelled fallback; the
+  outer investigator does not repeat the whole cascade.
+
 ## 21. Priority and scope control
 
 ### Mandatory selection-critical path
@@ -939,16 +1091,12 @@ reduce stretch scope, not payment-safety proof.
 
 Only the following work is authorized next:
 
-1. update stale Phase 15/16 document statuses to the verified merged state;
-2. create `phase-17/gemini-evidence-investigator` from clean synchronized `main`;
-3. write the Phase 17 contracts and persistence design;
-4. implement the read-only tool registry and case/temporal guards;
-5. persist investigation sessions, steps and hypotheses;
-6. implement the bounded Gemini loop in shadow mode;
-7. add failure, injection, race and abstention tests;
-8. expose reviewer-safe trace data;
-9. benchmark eligible models on the frozen scenario corpus; and
-10. run the complete Phase 17 exit gate before starting Phase 18.
+1. merge the corrective Phase 17 tool-depth and benchmark harness changes;
+2. run the ten-scenario corpus with the locally configured real Gemini adapter;
+3. inspect failures rather than weakening expected safety properties;
+4. record the model, latency, token, citation, tool-selection and abstention results;
+5. mark Phase 17 complete only after the real report and final repository gates pass; and
+6. create Phase 18 from that verified baseline.
 
 Phase 18 must not begin while any P17 requirement is pending, silently deferred or
 supported only by a screenshot.

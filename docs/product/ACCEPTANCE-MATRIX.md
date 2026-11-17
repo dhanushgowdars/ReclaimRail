@@ -8,9 +8,9 @@ design history but cannot override these statuses.
 | Phase | Scope | Current status | Exit evidence still required |
 | --- | --- | --- | --- |
 | 1 | Architecture and bounded-agent thesis | VERIFIED | keep diagrams/contracts aligned with runtime |
-| 2 | Foundation, PostgreSQL, Redis, CI | VERIFIED | committed baseline is verified; fresh current-branch PostgreSQL and CI gate still required |
-| 3 | Signed webhook ingestion | VERIFIED | current DB integration rerun |
-| 4 | Payment state machine | VERIFIED | current DB integration rerun |
+| 2 | Foundation, PostgreSQL, Redis, CI | VERIFIED | fresh Windows/Docker migration, backend and frontend gates passed in Gate 1 |
+| 3 | Signed webhook ingestion | VERIFIED | controlled locally signed acceptance/idempotency passed; provider-emitted Test Mode evidence remains required |
+| 4 | Payment state machine | VERIFIED | fresh signed failure projected once from `unknown` to `failed` |
 | 5 | Incident detection | VERIFIED | current DB integration rerun |
 | 6 | Bounded recovery agent | PARTIAL | current provider-backed acceptance bundle and AI/fallback labeling |
 | 7 | Outcome reconciliation | PARTIAL | current live Test Mode recovery/pending/reversal evidence |
@@ -22,7 +22,7 @@ design history but cannot override these statuses.
 | 13 | Operations navigation/Recovery Brain | PARTIAL | commit local trace UI; E2E evidence for every judge-relevant state |
 | 14 | Safety invariants and contracts | VERIFIED | reconcile obsolete contract text |
 | 15 | Versioned payment truth | VERIFIED | committed baseline is verified; fresh migration/integration gate required on the approved branch |
-| 16 | Reliable events/reconciliation | VERIFIED | committed baseline is verified; fresh migration/integration gate required on the approved branch |
+| 16 | Reliable events/reconciliation | BROKEN | `G1-P0-001`: unavailable provider reads loop across polls and amplify evidence/truth versions |
 | 17A | Gemini investigator core in shadow mode | PARTIAL | current local work must be preserved and rerun against PostgreSQL |
 | 17B | Live investigator closure | BROKEN | locked benchmark thresholds and final repository gates |
 | 18 | Claim validation and action ranking | NOT IMPLEMENTED | all P18 gates |
@@ -38,14 +38,51 @@ design history but cannot override these statuses.
 | --- | --- | --- | --- |
 | BASE-01 | Preserve Phase 17B staged/unstaged/untracked work | VERIFIED | separate staged/unstaged/combined patches, exact file copies and Git bundle exist; original worktree is frozen; approved clean continuation branch has zero application changes |
 | BASE-02 | Review sanitized-out `.env.example` change | VERIFIED | six investigator settings passed local type/range/order checks; secret-pattern count was zero; no value was exposed |
-| BASE-03 | Current PostgreSQL migration chain | PARTIAL | `alembic upgrade head` and `alembic check` pass on a clean database |
-| BASE-04 | Current complete backend suite | PARTIAL | zero failures; skips individually explained |
+| BASE-03 | Current PostgreSQL migration chain | VERIFIED | clean Gate 1 database upgraded base-to-`e7a1c2d3f417`; `current`, `heads` and `check` passed |
+| BASE-04 | Current complete backend suite | VERIFIED | `686 passed, 1 skipped`; skip is individually recorded and no test failed |
 | BASE-05 | Frontend compile/lint | VERIFIED | already passed on snapshot; rerun after any dependency change |
 | BASE-06 | Frontend security audit | BROKEN | zero unaccepted critical/high findings |
 | BASE-07 | Backend security audit | BROKEN | zero unaccepted known runtime findings |
 | BASE-08 | Browser behavior and accessibility | NOT IMPLEMENTED | approved E2E plus 1024/1440/1920, keyboard and contrast evidence |
 | BASE-09 | Documentation consistency | BROKEN | README/contracts/statuses match current code and evidence |
 | BASE-10 | Owner-only default-branch identity | VERIFIED | future commits repeat the same verification |
+| BASE-11 | Full local controller health | VERIFIED | API ready, 11 processes started and 8/8 workers initially healthy |
+| BASE-12 | Signed webhook idempotency/projection | VERIFIED | `202 accepted`, `200 duplicate`, one canonical event, one applied failed transition |
+| BASE-13 | Provider-truthful persisted case visible in frontend | BROKEN | synthetic identifiers triggered provider unavailability; case creation refused and no case page could be proven |
+| BASE-14 | Bounded provider-read reconciliation | BROKEN | 453/453 batches unavailable; cross-batch cooldown/circuit/evidence idempotency gate failed |
+
+## Gate 1 baseline reproduction
+
+| ID | Requirement | Current status | Evidence / remaining gate |
+| --- | --- | --- | --- |
+| G1-01 | Clean isolated Windows/Docker runtime | VERIFIED | isolated Compose project; healthy PostgreSQL/Redis; original project resources preserved |
+| G1-02 | Base-to-head migrations and schema drift check | VERIFIED | head `e7a1c2d3f417`; no new upgrade operations detected |
+| G1-03 | Backend deterministic quality gate | VERIFIED | format, lint, strict mypy and `686 passed, 1 skipped` |
+| G1-04 | Frontend compile gate | VERIFIED | ESLint and production build passed |
+| G1-05 | Full controller startup | VERIFIED | ready API/web and 8/8 healthy workers |
+| G1-06 | Signed webhook stored/projected exactly once | VERIFIED | one canonical event, delivery count two, one applied transition |
+| G1-07 | Provider-emitted Test Mode provenance | PARTIAL | tested payload was controlled synthetic and locally signed |
+| G1-08 | Bounded reconciliation under provider unavailability | BROKEN | `G1-P0-001`; 453 unavailable batches and unbounded new evidence |
+| G1-09 | Same persisted recovery case visible in frontend | BROKEN | deterministic truth gate correctly refused an ineligible case |
+| G1-10 | No live Gemini corpus | VERIFIED | Gemini shadow disabled; no live call |
+| G1-11 | No provider mutation or money movement | VERIFIED | no case/action/approval/outcome; only repeated read verification occurred |
+| G1-12 | Repository remains unchanged by reproduction | VERIFIED | tracked worktree remained clean; no application file changed |
+
+Gate 1 decision: `BROKEN`. Gate 2 and feature implementation remain blocked until the
+owner approves and closes the dedicated `G1-P0-001` remediation gate below.
+
+## Gate 1A P0 remediation acceptance
+
+| ID | Required fix behavior | Status | Acceptance gate |
+| --- | --- | --- | --- |
+| G1A-01 | Enforce cooldown/backoff for unavailable and manual-investigation states | NOT IMPLEMENTED | repeated polls inside the cooldown make zero provider calls |
+| G1A-02 | Make equivalent provider-unavailable evidence idempotent within its retry window | NOT IMPLEMENTED | repeated identical failure produces no additional evidence row or truth version |
+| G1A-03 | Persist a retry budget/circuit state across worker batches | NOT IMPLEMENTED | budget survives loop iterations/restart and opens visibly at the configured threshold |
+| G1A-04 | Keep deterministic fail-safe truth behavior | NOT IMPLEMENTED | unavailable evidence still produces manual investigation without enabling recovery |
+| G1A-05 | Separate controlled synthetic inputs from live provider adapters | NOT IMPLEMENTED | synthetic IDs cannot reach Razorpay; tests use a deterministic provider stub |
+| G1A-06 | Prove recovery after provider availability returns | NOT IMPLEMENTED | fresh matching provider evidence resolves truth without stale unavailable evidence dominating |
+| G1A-07 | Add negative/race/regression coverage | NOT IMPLEMENTED | focused tests cover polling, concurrent workers, restart and evidence uniqueness |
+| G1A-08 | Re-run complete Gate 1 on a fresh database | NOT IMPLEMENTED | all G1 gates pass, including same-case frontend evidence |
 
 ## Phase 17B acceptance
 

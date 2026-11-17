@@ -9,11 +9,12 @@
 > implemented, tested and audited. A phase is not complete because code exists;
 > every mandatory requirement must have runtime evidence and verification evidence.
 
-- **Plan version:** 2.0-audit-reset
+- **Plan version:** 2.1-gate1-closure
 - **Locked on:** 31 October 2026
+- **Evidence refreshed:** 17 November 2026 from the 8 November Gate 1 run
 - **Product:** Evidence-grounded, policy-bounded payment recovery control plane
 - **Current merged baseline:** `1912645` (Phase 17 core runtime merged through PR #19)
-- **Current phase:** Gate 1 pending owner approval; implementation is not yet authorized
+- **Current phase:** Gate 1 reproduced and classified `BROKEN`; Gate 1A remediation awaits owner approval
 - **Verified committed foundation:** Phases 1–5, 14–16 at repository level
 - **Partial historical product phases:** 6–13 and 17A
 - **Broken closure gate:** Phase 17B live investigator and current dependency security
@@ -41,6 +42,11 @@ Acceptance:
 - documentation-only changes and runtime changes are separable; and
 - full limitations are recorded in `WORK-LOG.md`.
 
+**Result:** completed by local documentation-only commit
+`8dc1655cfae5ac3507e82d766e81b463cdf617dd`. Six approved documentation paths changed,
+zero application paths changed, required author/committer identity was preserved, the
+worktree was clean and no push occurred.
+
 ### Gate 1 — Reproduce the committed/runtime baseline
 
 **Objective:** establish a current Windows/Docker evidence baseline before feature work.
@@ -54,6 +60,44 @@ Acceptance:
 - one signed Test Mode webhook is stored and projected without duplication;
 - the frontend reads the same persisted case; and
 - no live Gemini corpus is run.
+
+**Result:** `BROKEN`. Infrastructure, migrations, backend quality, frontend compilation,
+controller startup, signed intake, duplicate handling and payment projection passed. The
+tested payload was locally signed controlled synthetic evidence, not provider-emitted Test
+Mode evidence. The Payment Lab recovery worker then produced 453 consecutive unavailable
+provider-read batches, timestamp-unique equivalent evidence and repeated truth versions.
+The deterministic truth gate moved the payment to `manual_investigation_required`, case
+creation correctly returned `recovery_not_eligible`, and same-case frontend proof could
+not be completed. No application code was changed and no live Gemini corpus ran.
+
+### Gate 1A — P0 bounded reconciliation remediation
+
+**Objective:** close `G1-P0-001` without weakening deterministic truth or hiding provider
+ambiguity. This gate must close before Gate 2 or any feature phase.
+
+Acceptance:
+
+- unavailable/manual-investigation candidates obey a persisted cooldown and bounded
+  exponential backoff rather than being selected on every poll;
+- equivalent provider-unavailable evidence is idempotent within the retry window and does
+  not create a new truth snapshot without new information;
+- retry/circuit state survives worker batches and restart, has an explicit maximum budget,
+  and is visible in health/operations evidence;
+- controlled synthetic identifiers cannot reach a live Razorpay adapter;
+- provider unavailability still fails safely to manual investigation and never authorizes
+  recovery;
+- fresh matching provider evidence can supersede expired unavailable evidence and restore
+  the correct deterministic truth;
+- focused tests cover repeated polling, two concurrent workers, restart, provider recovery,
+  stale evidence and evidence uniqueness;
+- no live Gemini request is made;
+- one bounded Razorpay Test Mode verification is attempted only after deterministic tests
+  pass and the owner approves that provider-read evidence;
+- complete Gate 1 is rerun on a fresh isolated database; and
+- the same persisted eligible case is rendered and understandable in the frontend.
+
+No Gate 1A application change is authorized until the owner approves its implementation
+scope and planned changed files.
 
 ### Gate 2 — Dependency and access-control stabilization
 
@@ -326,7 +370,7 @@ animation may visualize the workflow but may not create a stage or timestamp.
 | --- | --- | --- | --- |
 | 14 | Safety invariants and contracts | **Complete** | PR #15 lineage; typed contracts, ADRs and invariant tests |
 | 15 | Versioned Payment Truth Resolver | **Complete** | PR #16 plus Phase 16 corrective completion |
-| 16 | Reliable events and reconciliation | **Complete** | PR #17, merge `67c950c`; 669 passed/1 skipped; migrations, lint, build and audit passed |
+| 16 | Reliable events and reconciliation | **Broken at runtime** | historical merge gates passed, but Gate 1 exposed `G1-P0-001` provider-unavailable amplification |
 | 17 | Gemini Evidence Investigator | **Corrective closure** | Core runtime merged in PR #19; live frozen-corpus report pending |
 | 18 | Evidence validation and action ranking | Pending | — |
 | 19 | Policy and state-bound approval | Pending | — |
@@ -949,6 +993,9 @@ incomplete install as source-code defects.
 - late authorization during execution;
 - provider acceptance/application crash window;
 - retry budget, DLQ and controlled replay;
+- repeated provider unavailability across worker polls, cooldown windows and restart;
+- idempotent unavailable evidence and no truth-version amplification without new facts;
+- synthetic provider identifiers blocked from live provider adapters;
 - tampered receipt; and
 - refresh/restart restoration without invented state.
 
@@ -1075,6 +1122,7 @@ actual measured work and failures.
 
 | Remaining phase | Expected effort |
 | --- | ---: |
+| Gate 1A — reconciliation containment and Gate 1 rerun | 10–16 hours |
 | 17 — investigator | 24–30 hours |
 | 18 — validation/ranking | 16–20 hours |
 | 19 — policy/approval | 12–16 hours |
@@ -1082,21 +1130,27 @@ actual measured work and failures.
 | 21 — security/receipts | 14–18 hours |
 | 22 — Investigation Room | 18–24 hours |
 | 23 — evaluation/submission | 24–32 hours |
-| **Remaining total** | **122–158 hours** |
+| **Remaining total** | **132–174 hours** |
 
 Quality gates determine completion, not elapsed time. If time becomes constrained,
 reduce stretch scope, not payment-safety proof.
 
 ## 23. Next work order
 
-Only the following work is authorized next:
+Only documentation closure is currently authorized. After owner review, the recommended
+next authorization is Gate 1A only:
 
-1. merge the corrective Phase 17 tool-depth and benchmark harness changes;
-2. run the ten-scenario corpus with the locally configured real Gemini adapter;
-3. inspect failures rather than weakening expected safety properties;
-4. record the model, latency, token, citation, tool-selection and abstention results;
-5. mark Phase 17 complete only after the real report and final repository gates pass; and
-6. create Phase 18 from that verified baseline.
+1. inspect the reconciliation candidate query, failure-evidence identity, retry state and
+   worker scheduling as one bounded defect scope;
+2. write focused failing tests that reproduce the 453-batch amplification without a live
+   provider;
+3. implement persisted cooldown/backoff, evidence idempotency and a cross-batch request
+   budget/circuit without weakening manual-investigation truth;
+4. prove synthetic identifiers cannot use the live adapter;
+5. run focused tests, then the full backend/migration/frontend gates;
+6. with separate owner approval, run at most one bounded Test Mode provider-read check;
+7. rerun Gate 1 from a fresh isolated database and capture same-case frontend evidence;
+8. update all six audit documents and stop for owner review.
 
-Phase 18 must not begin while any P17 requirement is pending, silently deferred or
-supported only by a screenshot.
+Gate 2 and Phase 17B must not resume while `G1-P0-001` is open. Phase 18 must not begin
+while any P17 requirement is pending, silently deferred or supported only by a screenshot.

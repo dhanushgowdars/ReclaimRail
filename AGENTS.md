@@ -44,11 +44,18 @@ a mocked happy path, a screenshot, an old CI run or an earlier chat statement.
 5. Run focused deterministic tests before any live-provider test.
 6. Do not repeatedly run the Gemini frozen corpus. A live run requires a documented
    reason, fixed corpus, model list, request budget and output path.
-7. All judge-relevant backend behavior must have a truthful, understandable frontend
+7. Every provider-read loop requires a persisted retry budget, cooldown/backoff and a
+   terminal or operator-visible state. A timestamp must not make identical failure
+   evidence unique on every poll. Stop the runtime if provider calls, evidence rows or
+   truth versions amplify without new external information.
+8. Controlled synthetic provider identifiers must not be sent to a live provider adapter.
+   Synthetic, replay and provider-emitted Test Mode evidence must remain separately
+   labelled in commands, logs, persistence and completion claims.
+9. All judge-relevant backend behavior must have a truthful, understandable frontend
    representation using persisted backend evidence.
-8. Append the commands and results to `docs/product/WORK-LOG.md`.
-9. Update the acceptance matrix and current-state document in the same phase.
-10. Stop for owner review before beginning another phase.
+10. Append the commands and results to `docs/product/WORK-LOG.md`.
+11. Update the acceptance matrix and current-state document in the same phase.
+12. Stop for owner review before beginning another phase.
 
 ## Completion claim contract
 
@@ -74,6 +81,9 @@ reason, supported only by ignored local artifacts, or invisible in the frontend.
   provider payloads.
 - Use integer minor units plus explicit currency for money.
 - Keep Test Mode, replay, controlled synthetic and production evidence visibly separate.
+- Do not claim that no provider call occurred merely because the initiating command did
+  not call the provider; account for every enabled background worker before making that
+  claim.
 - A created Payment Link is not recovered revenue. Only verified provider evidence may
   change the Outcome Ledger to recovered.
 - Provider ambiguity requires reconciliation before retry.

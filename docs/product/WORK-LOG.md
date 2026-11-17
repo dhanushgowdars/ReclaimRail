@@ -182,3 +182,192 @@ Required identity is `Dhanush R S <dhanushrs981@gmail.com>` for both author and 
 The commit must contain zero application paths, leave a clean worktree and remain local;
 push is not authorized. A successful commit satisfying those checks is the Gate 0
 completion artifact. Gate 1 remains unauthorized pending a separate owner decision.
+
+## 8 November 2026 — Gate 1 committed/runtime baseline reproduction
+
+### Authorization and scope
+
+The owner authorized Gate 1 baseline reproduction only. Application behavior changes,
+feature implementation, commit, push, reset and deletion were not authorized. Work ran in:
+
+- worktree: `D:\NEW VOLUME\INTERNSHIP PREP\RAZORPAY\ReclaimRail-Audit-Reset`;
+- branch: `audit/current-state-reset`;
+- head: `8dc1655cfae5ac3507e82d766e81b463cdf617dd`;
+- author/committer identity: `Dhanush R S <dhanushrs981@gmail.com>`;
+- isolated Compose project: `reclaimrail_gate1`.
+
+The tracked worktree remained clean. Ignored local environment/dependency/runtime files were
+created as required for reproduction. No environment value or credential was printed.
+
+### Environment and dependency reproduction
+
+Read-only preflight recorded Git, uv, Python, Node, npm and Docker versions; Docker was
+running; required ports and existing original-project containers/volumes were inventoried;
+no service, dependency or database was changed during preflight.
+
+Three ignored environment files were prepared with fresh local credentials. Gemini shadow
+runtime was disabled. Locked installs completed:
+
+- backend: `uv sync --locked --group dev`, Python 3.11.8;
+- frontend: CI-pinned npm 11.13.0 through `npx`, Next.js 16.3.5;
+- `uv.lock` SHA-256:
+  `00c9d2d556bcfc22d8b85b48f38565a112a97a67608b11f472222624f6b9e639`;
+- `package-lock.json` SHA-256:
+  `c96187c2a25c02927315727f6cd950ad55f46411ba5b5846a52ea98922794563`;
+- both lockfiles unchanged.
+
+The npm install reported 13 known findings across all installed dependencies: 8 moderate,
+4 high and 1 critical. No `npm audit fix` or forced upgrade was run because Gate 1 did not
+authorize dependency changes.
+
+### Isolated infrastructure and migration evidence
+
+PostgreSQL `17.11-alpine` started healthy at `127.0.0.1:55432`. Redis initially failed to
+bind `56379`; Windows excluded the `56300-56399` range. An early diagnostic script also
+failed because it rejected an empty line, and its replacement failed due an invalid Docker
+format template. Those script failures are retained as evidence.
+
+The port conflict was diagnosed directly with Windows port-exclusion output. Only ignored
+environment values were changed to `16379`, and only the failed Gate 1 Redis container was
+recreated. Redis then became healthy. Original `reclaimrail` containers and volumes were
+not changed.
+
+Fresh Alembic migration from base to the single head completed through
+`e7a1c2d3f417`. A PowerShell 5.1 output-capture wrapper incorrectly raised
+`NativeCommandError` on Alembic INFO output written to stderr. Direct commands then proved:
+
+- `alembic current`: `e7a1c2d3f417 (head)`, exit 0;
+- `alembic heads`: `e7a1c2d3f417 (head)`, exit 0;
+- `alembic check`: `No new upgrade operations detected.`, exit 0;
+- PostgreSQL connectivity: passed;
+- Redis connectivity: passed.
+
+The wrapper failure was tooling noise, not a migration failure. Future Windows commands
+must not combine `$ErrorActionPreference = "Stop"` with redirected native stderr when the
+tool legitimately logs INFO output there.
+
+### Backend and frontend quality gates
+
+| Gate | Result |
+| --- | --- |
+| Ruff format | passed; 249 files already formatted |
+| Ruff lint | passed |
+| strict mypy | passed; 119 source files |
+| pytest | `686 passed, 1 skipped in 16.81s`; exit 0 |
+| frontend ESLint | passed; exit 0 |
+| Next.js production build | passed; exit 0 |
+
+The one skip was
+`tests\test_recovery_action_executor_integration.py:57`: known persisted execution-counter
+integration race; provider idempotency is covered separately. This remains a recorded
+limitation, not an unexplained skip.
+
+The frontend build compiled `/`, `/cases`, `/cases/[caseId]`, `/evaluations`,
+`/intelligence`, `/outcomes`, `/payment-lab`, `/reviews`, `/safety-controls` and its two
+current API routes. There is no frontend unit or E2E test suite.
+
+### Full controller startup and browser evidence
+
+The first full startup timed out after 120 seconds. Logs showed four provider-facing
+workers required a Razorpay key ID and secret. A value-free check proved the frozen original
+worktree contained a Test Mode-looking key ID, key secret and webhook secret. The isolated
+database still had zero recovery cases, actions, outcomes and approvals.
+
+Only the existing Razorpay Test Mode key ID/secret were copied into the ignored Gate 1
+backend environment without printing values. The isolated generated webhook secret was
+retained. The tracked controller then reported:
+
+- `ReclaimRail is ready`;
+- API readiness: ready;
+- 11/11 processes running;
+- 8/8 workers healthy with zero consecutive failures;
+- controller start exit 0;
+- controller status exit 0.
+
+Browser evidence showed the Payment Lab rendered at
+`http://127.0.0.1:3000/payment-lab`. This proves a live compiled page and navigation shell,
+not the required same-case recovery acceptance.
+
+### Signed webhook and projection evidence
+
+A locally signed controlled synthetic `payment.failed` payload was submitted to the local
+webhook service with unique synthetic provider event, payment and order identifiers.
+
+Results:
+
+- first receipt: HTTP 202, `accepted`;
+- exact replay: HTTP 200, `duplicate`;
+- both receipts returned the same canonical event ID;
+- canonical webhook count: one;
+- delivery count: two;
+- processing status: `processed`;
+- payment transition: `unknown -> failed`, `applied`, reason `initialized`;
+- transition evidence source: `verified_webhook`.
+
+The evidence proves signature verification, durable idempotency and projection. It does
+not prove a provider-emitted Razorpay Test Mode webhook. The payload provenance is
+controlled synthetic and must remain labelled that way.
+
+### Failed case gate and P0 reconciliation defect
+
+The repository's existing case service was invoked only after projection. It correctly
+refused to create a recovery case with `recovery_not_eligible`. A read-only diagnosis found:
+
+- payment state `failed`, state version 1;
+- recovery eligibility false;
+- no recovery stop timestamp/reason;
+- latest truth `manual_investigation_required`;
+- diagnostic sample truth version 127;
+- diagnostic sample evidence count 128;
+- first two evidence rows: verified webhook failure and merchant-database failure;
+- remaining sampled rows: authoritative reconciliation
+  `provider.available=false` evidence.
+
+Repository code and logs established `G1-P0-001`:
+
+1. the Payment Lab recovery worker calls `reconcile_payment_truth_batch` whenever the
+   Razorpay order provider is configured;
+2. manual-investigation candidates are immediately selectable on every poll;
+3. unavailable evidence uses a timestamp in `source_reference`, defeating idempotent
+   insertion for equivalent failures;
+4. every row reruns truth resolution and can append a new snapshot; and
+5. the circuit counter is scoped to one batch, so a single repeatedly failing candidate
+   never opens a durable circuit across batches.
+
+Final log evidence contained 453 reconciliation batch lines and all 453 reported:
+
+```text
+checked=1 projected=0 unavailable=1 persistence_failures=0 circuit_opened=False
+```
+
+The typical interval was approximately 1.3 seconds. The earlier webhook command printed
+`RazorpayApiCalled=False` because that command itself did not call Razorpay; that statement
+was incomplete at system level. The enabled background worker made repeated Test Mode
+provider-read attempts. This correction is intentionally retained.
+
+No recovery case, action, approval, outcome, Payment Link or money-moving provider
+execution occurred. Gemini shadow remained disabled and no live Gemini call/corpus ran.
+
+### Containment and final state
+
+The full tracked controller was stopped immediately after the amplification was confirmed.
+All 11 application processes stopped successfully. PostgreSQL and Redis were left preserved
+for audit evidence. Runtime status then reported no ReclaimRail process state, API readiness
+unavailable and worker diagnostics unavailable. Git status remained clean.
+
+### Gate 1 decision
+
+Gate 1 is `BROKEN` because mandatory bounded reconciliation and same persisted-case frontend
+proof failed. Passed sub-gates remain individually `VERIFIED`; they are not discarded.
+
+No application code, tracked runtime configuration, branch, commit or Git reference was
+changed. No commit or push was performed. The recommended next phase is the separately
+approved Gate 1A remediation defined in the master plan and acceptance matrix.
+
+## 17 November 2026 — Gate 1 documentation closure preparation
+
+The six audit documents were refreshed from the owner's uploaded documentation-only ZIP.
+This preparation records the 8 November evidence and creates the Gate 1A specification.
+It does not authorize or implement Gate 1A, change application code, restart services,
+alter the preserved database, commit or push. Owner review of the complete six-path diff is
+required before applying or committing the documentation refresh.

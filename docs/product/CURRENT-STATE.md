@@ -1,6 +1,8 @@
 # ReclaimRail current state
 
 - Audit date: 31 October 2026
+- Gate 1 evidence date: 8 November 2026
+- Status refresh date: 17 November 2026
 - Audit source: sanitized local snapshot `ReclaimRail-Audit-20261031-220531.zip`
 - Public repository: `https://github.com/dhanushgowdars/ReclaimRail`
 - Remote `main`: `19126456b37d21d1ead659762c5f92916f3a64e1`
@@ -16,11 +18,76 @@ Its committed baseline contains real FastAPI services, PostgreSQL models and mig
 Redis-backed workers, Razorpay Test Mode adapters, deterministic payment truth and policy,
 provider reconciliation, a Next.js operations console and a large automated test suite.
 
-It is not currently submission-ready. The local checkout is a mixed Phase 17B worktree,
-the stored live Gemini benchmark fails its selection gate, current dependency audits find
-known vulnerabilities, the current full PostgreSQL gate was not reproduced in this audit,
-and the promised Track 3 measured-recovery evaluation remains synthetic rather than a
-comparative outcome study.
+It is not currently submission-ready. Gate 1 reproduced the clean committed baseline on
+Windows/Docker and verified migrations, backend quality, frontend compilation, full-stack
+startup, signed webhook intake, idempotency and payment projection. It also exposed a P0
+runtime defect: the Payment Lab recovery worker performed an unbounded provider-read loop
+after provider unavailability, appended equivalent timestamp-unique evidence and advanced
+payment-truth versions without new external information. The tested payment was moved to
+`manual_investigation_required`, so the required persisted recovery case and same-case
+frontend proof could not be completed.
+
+The stored live Gemini benchmark still fails its selection gate, dependency audits retain
+known vulnerabilities, and the promised Track 3 measured-recovery evaluation remains
+synthetic rather than a comparative outcome study.
+
+## Gate 1 baseline reproduction result
+
+Gate 1 is `BROKEN`, not complete. Most foundation gates passed, but a mandatory runtime
+path failed and the frontend could not read the required persisted case. No application
+code was changed to work around the failure.
+
+| Gate 1 item | Result | Classification |
+| --- | --- | --- |
+| Clean audit branch | `audit/current-state-reset` at `8dc1655cfae5ac3507e82d766e81b463cdf617dd`; worktree clean before and after reproduction | VERIFIED |
+| Git identity | `Dhanush R S <dhanushrs981@gmail.com>` | VERIFIED |
+| Locked dependencies | `uv sync --locked --group dev` and CI-pinned npm install passed; lockfile hashes unchanged | VERIFIED |
+| Isolated infrastructure | PostgreSQL 17.11 on `127.0.0.1:55432`; Redis 8.10.1 on `127.0.0.1:16379`; both healthy | VERIFIED |
+| Redis port recovery | Windows excluded `56300-56399`; only ignored local environment values were changed from `56379` to `16379` | VERIFIED |
+| Alembic | base-to-`e7a1c2d3f417` upgrade passed; `current`, `heads` and `check` passed; no new operations detected | VERIFIED |
+| Backend quality | Ruff format/lint passed; strict mypy passed for 119 source files; pytest `686 passed, 1 skipped` | VERIFIED |
+| Explained skip | known persisted execution-counter integration race; provider idempotency is covered separately | PARTIAL |
+| Frontend quality | ESLint and Next.js 16.3.5 production build passed; all expected routes compiled | VERIFIED |
+| Frontend automated behavior | no frontend unit/E2E suite exists | NOT IMPLEMENTED |
+| Full controller startup | 11 processes started; API ready; 8/8 workers initially healthy | VERIFIED |
+| Browser smoke evidence | Payment Lab rendered at `http://127.0.0.1:3000/payment-lab` | VERIFIED |
+| Signed webhook receipt | first delivery `202 accepted`; replay `200 duplicate`; same canonical event | VERIFIED |
+| Webhook persistence | one canonical event, delivery count two, processing status `processed` | VERIFIED |
+| Payment projection | one `unknown -> failed` applied transition from verified webhook evidence | VERIFIED |
+| Evidence provenance | payload was locally signed controlled synthetic evidence, not a provider-emitted Razorpay Test Mode webhook | PARTIAL |
+| Provider-read containment | 453/453 logged reconciliation batches reported `unavailable=1`; no durable cross-batch circuit opened | BROKEN |
+| Evidence/truth boundedness | diagnostic sample reached 128 evidence records and truth version 127 while the loop was running | BROKEN |
+| Recovery eligibility | changed to false after truth became `manual_investigation_required` | BROKEN |
+| Persisted recovery case | case service correctly refused creation with `recovery_not_eligible` | BROKEN |
+| Same-case frontend proof | impossible because no eligible case was created | BROKEN |
+| Provider mutation/money movement | no recovery case, action, approval, outcome or money-moving provider execution occurred | VERIFIED |
+| Provider reads | repeated Razorpay Test Mode read attempts occurred in the background worker; the earlier command-only `RazorpayApiCalled=False` line was incomplete system-level evidence | BROKEN |
+| Gemini | shadow disabled; no live Gemini corpus or request was run | VERIFIED |
+
+### P0 defect: unbounded provider-unavailable reconciliation
+
+**ID:** `G1-P0-001`
+
+The reproducible chain is:
+
+1. a locally signed controlled synthetic `payment.failed` event is accepted once and its
+   duplicate is recognized;
+2. payment state projects to `failed` and initial evidence resolves the failure;
+3. after reconciliation becomes eligible, the live Razorpay order adapter cannot verify
+   the synthetic order/payment identifiers;
+4. `payment_truth_reconciliation._record_unavailable` writes authoritative
+   `provider.available=false` evidence whose source reference contains the observation
+   timestamp;
+5. truth becomes `manual_investigation_required`;
+6. the candidate query immediately reselects that state on every worker poll, independent
+   of `RECONCILE_AFTER`;
+7. every poll creates another unique evidence row and truth snapshot; and
+8. the per-batch circuit breaker never opens across batches when only one candidate fails.
+
+Observed runtime evidence: 453 reconciliation log lines, 453 batches with provider
+unavailable, `projected=0`, `persistence_failures=0`, and `circuit_opened=False`. The final
+controller stop terminated all 11 application processes. PostgreSQL and Redis were left
+preserved for audit evidence.
 
 ## Repository and Git evidence
 
@@ -84,6 +151,7 @@ baseline, not the uncommitted Phase 17B state.
 | Gemini structured recovery planner | PARTIAL | schema-constrained planner with deterministic fallback exists; live quality is not established |
 | Gemini Evidence Investigator core | PARTIAL | merged shadow-mode core, durable transcript and 11 read-only tools exist |
 | Phase 17B live investigator | BROKEN | latest report selected no model and failed locked quality thresholds |
+| Provider-unavailable reconciliation loop | BROKEN | `G1-P0-001`: provider reads, evidence rows and truth versions amplify without new information |
 | Evidence-claim semantic validator | NOT IMPLEMENTED | explicitly deferred to Phase 18 |
 | Comparative action ranking | NOT IMPLEMENTED | Phase 18 |
 | State-bound approval redesign | NOT IMPLEMENTED | Phase 19 acceptance contract |
@@ -154,9 +222,12 @@ Limitations:
 
 ## Immediate blockers before feature implementation
 
-1. Owner approval to begin Gate 1 baseline reproduction; implementation remains
-   unauthorized until that separate decision.
-2. Reproduce PostgreSQL migrations and the full backend suite on Windows/Docker.
-3. Remediate and re-audit backend/frontend dependencies in a dedicated phase.
-4. Decide the Phase 17B model, quota and benchmark strategy before one controlled rerun.
-5. Resolve remaining documentation contradictions and create a committed evidence bundle.
+1. Owner review of this Gate 1 closure and explicit authorization for a dedicated
+   `G1-P0-001` remediation phase. No application fix is authorized by this document.
+2. Bound provider reconciliation across polls, deduplicate equivalent unavailable
+   evidence and prove a durable request budget/cooldown before restarting the full worker.
+3. Re-run Gate 1 from a fresh isolated database and complete a provider-truthful persisted
+   case plus same-case frontend proof.
+4. Remediate and re-audit backend/frontend dependencies in a dedicated phase.
+5. Decide the Phase 17B model, quota and benchmark strategy before one controlled rerun.
+6. Resolve remaining documentation contradictions and create a committed evidence bundle.

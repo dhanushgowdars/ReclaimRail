@@ -9,18 +9,25 @@
 > implemented, tested and audited. A phase is not complete because code exists;
 > every mandatory requirement must have runtime evidence and verification evidence.
 
-- **Plan version:** 2.1-gate1-closure
+- **Plan version:** 2.4-unified-roadmap-locked
 - **Locked on:** 31 October 2026
-- **Evidence refreshed:** 17 November 2026 from the 8 November Gate 1 run
+- **Evidence refreshed:** 18 November 2026 from Gate 1A deterministic, full-controller and visually inspected runtime evidence
+- **Unified roadmap status:** owner-approved and locked on 18 November 2026
 - **Product:** Evidence-grounded, policy-bounded payment recovery control plane
 - **Current merged baseline:** `1912645` (Phase 17 core runtime merged through PR #19)
-- **Current phase:** Gate 1 reproduced and classified `BROKEN`; Gate 1A remediation awaits owner approval
+- **Current phase:** Gate 1A is `VERIFIED` and closed by the owner-authorized local 23-path commit; Gate 2 is the next work order and has not begun.
 - **Verified committed foundation:** Phases 1–5, 14–16 at repository level
 - **Partial historical product phases:** 6–13 and 17A
 - **Broken closure gate:** Phase 17B live investigator and current dependency security
 - **Not implemented against this plan:** Phases 18–23
 
 ## 0. Audit-reset execution order
+
+`UNIFIED-MASTER-ROADMAP.md` consolidates product scope, submission priority and the F-01 to
+F-50 catalogue. It does not replace this gate sequence or the historical P14–P23 work
+orders. Its M0–M8 milestones are crosswalk views only. If the documents conflict, this
+execution plan, `CURRENT-STATE.md`, `DECISIONS.md` and `ACCEPTANCE-MATRIX.md` control until
+the owner approves a documented replacement.
 
 No implementation phase begins until the owner approves this audit. Each phase below is
 independent and ends with a review decision. Do not combine phases to save time.
@@ -96,8 +103,29 @@ Acceptance:
 - complete Gate 1 is rerun on a fresh isolated database; and
 - the same persisted eligible case is rendered and understandable in the frontend.
 
-No Gate 1A application change is authorized until the owner approves its implementation
-scope and planned changed files.
+**Historical authorization condition — satisfied 17 November 2026:** no Gate 1A
+application change was authorized until the owner approved its implementation scope and
+planned changed files.
+
+**Current result:** `VERIFIED`. The owner authorized Gate 1A and its local closure commit
+passes migration, static quality, focused and complete
+backend tests, frontend lint/build, controlled restart, complete-controller and inspected
+responsive frontend gates. Requirements G1A-01 through G1A-08 are `VERIFIED`.
+
+The controlled runtime used a fresh database, isolated Redis logical DB 15, the API, web
+and target recovery worker. It proved zero calls inside cooldown/open circuit, stable
+evidence/truth counts, durable state across restart, synthetic blocking, safe manual
+investigation, provider-stub recovery and frontend worker metrics. A separate fresh full
+controller run started all 11 processes with API ready and 8/8 workers healthy. Final
+screenshots were manually inspected at 1024/1440/1920 plus the populated case. Final
+evidence archive SHA-256:
+`4af876f59b72da82aa330a0848ac9d29ab8c5175b9325802ca6d09ea92987f71`.
+
+Provider-emitted Razorpay Test Mode proof was not authorized and is explicitly retained as
+a later provider-backed journey requirement; controlled evidence is not relabelled as live.
+The exact staged paths, diff checks and required identity were verified before the local
+23-path closure commit. No push was authorized or performed. Gate 2 is now the next work
+order.
 
 ### Gate 2 — Dependency and access-control stabilization
 
@@ -370,7 +398,7 @@ animation may visualize the workflow but may not create a stage or timestamp.
 | --- | --- | --- | --- |
 | 14 | Safety invariants and contracts | **Complete** | PR #15 lineage; typed contracts, ADRs and invariant tests |
 | 15 | Versioned Payment Truth Resolver | **Complete** | PR #16 plus Phase 16 corrective completion |
-| 16 | Reliable events and reconciliation | **Broken at runtime** | historical merge gates passed, but Gate 1 exposed `G1-P0-001` provider-unavailable amplification |
+| 16 | Reliable events and reconciliation | **Complete at Gate 1A scope** | committed bounded reconciliation, deterministic/full-controller/browser evidence; provider-backed provenance remains a later separate gate |
 | 17 | Gemini Evidence Investigator | **Corrective closure** | Core runtime merged in PR #19; live frozen-corpus report pending |
 | 18 | Evidence validation and action ranking | Pending | — |
 | 19 | Policy and state-bound approval | Pending | — |
@@ -476,6 +504,7 @@ truth or create duplicate recovery.
 | P16-14 | Worker supervision/heartbeat | Complete | existing supervised workers and health tests |
 | P16-15 | Truth change invalidates in-flight stale recovery work | Complete | integration tests |
 | P16-16 | Reviewer sees event provenance and reliability | Complete | API/UI fields, lint and build |
+| P16-17 | Provider-read retry state is durable across polls/restart and visible to operators | Complete | committed Gate 1A migration, service/worker tests, controlled restart and Safety Controls metrics pass |
 
 ### Closed verification record
 
@@ -1122,7 +1151,9 @@ actual measured work and failures.
 
 | Remaining phase | Expected effort |
 | --- | ---: |
-| Gate 1A — reconciliation containment and Gate 1 rerun | 10–16 hours |
+| Gate 1A — documentation review and local commit closure | Complete |
+| Gate 2 — dependency/access-control stabilization | re-estimate after package inventory |
+| Phase 17B — investigator closure | included in Phase 17 range below |
 | 17 — investigator | 24–30 hours |
 | 18 — validation/ranking | 16–20 hours |
 | 19 — policy/approval | 12–16 hours |
@@ -1130,27 +1161,20 @@ actual measured work and failures.
 | 21 — security/receipts | 14–18 hours |
 | 22 — Investigation Room | 18–24 hours |
 | 23 — evaluation/submission | 24–32 hours |
-| **Remaining total** | **132–174 hours** |
+| **Remaining total** | **124–163 hours** |
 
 Quality gates determine completion, not elapsed time. If time becomes constrained,
 reduce stretch scope, not payment-safety proof.
 
 ## 23. Next work order
 
-Only documentation closure is currently authorized. After owner review, the recommended
-next authorization is Gate 1A only:
+Gate 1A is complete. Gate 2 is the next and only active work order:
 
-1. inspect the reconciliation candidate query, failure-evidence identity, retry state and
-   worker scheduling as one bounded defect scope;
-2. write focused failing tests that reproduce the 453-batch amplification without a live
-   provider;
-3. implement persisted cooldown/backoff, evidence idempotency and a cross-batch request
-   budget/circuit without weakening manual-investigation truth;
-4. prove synthetic identifiers cannot use the live adapter;
-5. run focused tests, then the full backend/migration/frontend gates;
-6. with separate owner approval, run at most one bounded Test Mode provider-read check;
-7. rerun Gate 1 from a fresh isolated database and capture same-case frontend evidence;
-8. update all six audit documents and stop for owner review.
+1. inventory current npm/Python security findings without broad automatic upgrades;
+2. define the controlled public-demo authentication/authorization boundary;
+3. make only the approved dependency/access-control corrections;
+4. rerun migrations, backend tests, security audits and frontend lint/build;
+5. update the authority documents and stop for owner review before any commit.
 
-Gate 2 and Phase 17B must not resume while `G1-P0-001` is open. Phase 18 must not begin
+Phase 17B must not resume until Gate 2 is reviewed and accepted. Phase 18 must not begin
 while any P17 requirement is pending, silently deferred or supported only by a screenshot.

@@ -1,7 +1,14 @@
 # ReclaimRail acceptance matrix
 
+The complete F-01–F-50 catalogue and established Gate 1A → Gate 2 → Phase 17B →
+Phases 18–23 order were owner-approved and locked on 18 November 2026. Status rows still
+change only from repository evidence; roadmap approval is not feature-completion evidence.
+
 This matrix is the only current completion ledger. Older phase documents remain useful
 design history but cannot override these statuses.
+
+`NEEDS INSPECTION` is permitted when current evidence is insufficient to choose another
+classification safely. It is temporary and never means complete.
 
 ## Phase status
 
@@ -22,7 +29,7 @@ design history but cannot override these statuses.
 | 13 | Operations navigation/Recovery Brain | PARTIAL | commit local trace UI; E2E evidence for every judge-relevant state |
 | 14 | Safety invariants and contracts | VERIFIED | reconcile obsolete contract text |
 | 15 | Versioned payment truth | VERIFIED | committed baseline is verified; fresh migration/integration gate required on the approved branch |
-| 16 | Reliable events/reconciliation | BROKEN | `G1-P0-001`: unavailable provider reads loop across polls and amplify evidence/truth versions |
+| 16 | Reliable events/reconciliation | VERIFIED | Gate 1A closes `G1-P0-001` with deterministic, full-controller, responsive and committed evidence; later provider-backed provenance remains mapped separately |
 | 17A | Gemini investigator core in shadow mode | PARTIAL | current local work must be preserved and rerun against PostgreSQL |
 | 17B | Live investigator closure | BROKEN | locked benchmark thresholds and final repository gates |
 | 18 | Claim validation and action ranking | NOT IMPLEMENTED | all P18 gates |
@@ -43,13 +50,13 @@ design history but cannot override these statuses.
 | BASE-05 | Frontend compile/lint | VERIFIED | already passed on snapshot; rerun after any dependency change |
 | BASE-06 | Frontend security audit | BROKEN | zero unaccepted critical/high findings |
 | BASE-07 | Backend security audit | BROKEN | zero unaccepted known runtime findings |
-| BASE-08 | Browser behavior and accessibility | NOT IMPLEMENTED | approved E2E plus 1024/1440/1920, keyboard and contrast evidence |
+| BASE-08 | Browser behavior and accessibility | PARTIAL | inspected 1024/1440/1920 Gate 1A views are legible; keyboard, contrast and automated E2E proof remain later gates |
 | BASE-09 | Documentation consistency | BROKEN | README/contracts/statuses match current code and evidence |
 | BASE-10 | Owner-only default-branch identity | VERIFIED | future commits repeat the same verification |
 | BASE-11 | Full local controller health | VERIFIED | API ready, 11 processes started and 8/8 workers initially healthy |
 | BASE-12 | Signed webhook idempotency/projection | VERIFIED | `202 accepted`, `200 duplicate`, one canonical event, one applied failed transition |
-| BASE-13 | Provider-truthful persisted case visible in frontend | BROKEN | synthetic identifiers triggered provider unavailability; case creation refused and no case page could be proven |
-| BASE-14 | Bounded provider-read reconciliation | BROKEN | 453/453 batches unavailable; cross-batch cooldown/circuit/evidence idempotency gate failed |
+| BASE-13 | Provider-truthful persisted case visible in frontend | PARTIAL | controlled deterministic provider-stub case is fully legible; provider-emitted Test Mode provenance remains a separate provider-journey gate |
+| BASE-14 | Bounded provider-read reconciliation | VERIFIED | durable cooldown, budget/circuit, restart containment, evidence idempotency and visible worker metrics passed |
 
 ## Gate 1 baseline reproduction
 
@@ -62,27 +69,33 @@ design history but cannot override these statuses.
 | G1-05 | Full controller startup | VERIFIED | ready API/web and 8/8 healthy workers |
 | G1-06 | Signed webhook stored/projected exactly once | VERIFIED | one canonical event, delivery count two, one applied transition |
 | G1-07 | Provider-emitted Test Mode provenance | PARTIAL | tested payload was controlled synthetic and locally signed |
-| G1-08 | Bounded reconciliation under provider unavailability | BROKEN | `G1-P0-001`; 453 unavailable batches and unbounded new evidence |
-| G1-09 | Same persisted recovery case visible in frontend | BROKEN | deterministic truth gate correctly refused an ineligible case |
+| G1-08 | Bounded reconciliation under provider unavailability | VERIFIED | Gate 1A persisted controls prevent repeat calls/evidence growth and survive restart |
+| G1-09 | Same persisted recovery case visible in frontend | PARTIAL | controlled provider-stub case legibly renders failed/eligible truth; provider-emitted provenance remains absent |
 | G1-10 | No live Gemini corpus | VERIFIED | Gemini shadow disabled; no live call |
 | G1-11 | No provider mutation or money movement | VERIFIED | no case/action/approval/outcome; only repeated read verification occurred |
 | G1-12 | Repository remains unchanged by reproduction | VERIFIED | tracked worktree remained clean; no application file changed |
 
-Gate 1 decision: `BROKEN`. Gate 2 and feature implementation remain blocked until the
-owner approves and closes the dedicated `G1-P0-001` remediation gate below.
+Gate 1 decision after Gate 1A: `VERIFIED` for the bounded-reconciliation acceptance scope.
+`G1-P0-001`, full-controller reproduction, responsive frontend proof and the local closure
+commit pass. Provider-emitted Test Mode provenance remains a separate provider-journey
+requirement and is not falsely promoted by this decision.
 
 ## Gate 1A P0 remediation acceptance
 
 | ID | Required fix behavior | Status | Acceptance gate |
 | --- | --- | --- | --- |
-| G1A-01 | Enforce cooldown/backoff for unavailable and manual-investigation states | NOT IMPLEMENTED | repeated polls inside the cooldown make zero provider calls |
-| G1A-02 | Make equivalent provider-unavailable evidence idempotent within its retry window | NOT IMPLEMENTED | repeated identical failure produces no additional evidence row or truth version |
-| G1A-03 | Persist a retry budget/circuit state across worker batches | NOT IMPLEMENTED | budget survives loop iterations/restart and opens visibly at the configured threshold |
-| G1A-04 | Keep deterministic fail-safe truth behavior | NOT IMPLEMENTED | unavailable evidence still produces manual investigation without enabling recovery |
-| G1A-05 | Separate controlled synthetic inputs from live provider adapters | NOT IMPLEMENTED | synthetic IDs cannot reach Razorpay; tests use a deterministic provider stub |
-| G1A-06 | Prove recovery after provider availability returns | NOT IMPLEMENTED | fresh matching provider evidence resolves truth without stale unavailable evidence dominating |
-| G1A-07 | Add negative/race/regression coverage | NOT IMPLEMENTED | focused tests cover polling, concurrent workers, restart and evidence uniqueness |
-| G1A-08 | Re-run complete Gate 1 on a fresh database | NOT IMPLEMENTED | all G1 gates pass, including same-case frontend evidence |
+| G1A-01 | Enforce cooldown/backoff for unavailable and manual-investigation states | VERIFIED | repeated polls inside cooldown made zero provider calls |
+| G1A-02 | Make equivalent provider-unavailable evidence idempotent within its retry window | VERIFIED | blocked repeat left evidence/truth counts unchanged at 3/3 |
+| G1A-03 | Persist a retry budget/circuit state across worker batches | VERIFIED | three scheduled reads opened the circuit; restart made zero unexpected calls; UI/health exposed state |
+| G1A-04 | Keep deterministic fail-safe truth behavior | VERIFIED | unavailable evidence produced manual investigation without recovery eligibility |
+| G1A-05 | Separate controlled synthetic inputs from live provider adapters | VERIFIED | synthetic control recorded one block and zero provider calls |
+| G1A-06 | Prove recovery after provider availability returns | VERIFIED | expired unavailable evidence was superseded by fresh provider-stub failed truth; eligibility restored |
+| G1A-07 | Add negative/race/regression coverage | VERIFIED | focused suite `22 passed`; complete backend suite `698 passed, 1 skipped` |
+| G1A-08 | Re-run complete Gate 1 on a fresh database | VERIFIED | fresh migration, focused/full tests, lint/build/diff validation, complete 11-process controller with 8/8 workers, restart containment, and manually inspected 1024/1440/1920 plus populated-case evidence passed on the exact 22-path tree; provider-emitted provenance remains separate |
+
+Gate 1A decision: `VERIFIED`. G1A-01 through G1A-08 pass and the owner-authorized local
+23-path closure commit records the implementation and evidence. No push is part of this
+decision.
 
 ## Phase 17B acceptance
 
@@ -116,6 +129,65 @@ reviewer-visible outcomes that may not be removed.
 | 21 | remediate dependencies and access control; validate tenant/case ownership; redact secrets/PII; add abuse/rate limits; generate tamper-evident receipt binding truth through outcome; prove restart/recovery behavior |
 | 22 | one reviewer workflow for objective, truth, tool transcript, hypotheses, claims, alternatives, policy, approval, execution and outcome; truthful empty/error/fallback/abstention states; keyboard and viewport gates |
 | 23 | reproducible cohort with treatment/control or paired baseline, denominators, exception list and confidence; separate synthetic/Test Mode/production; five-minute demo, public README/video, clean clone setup and final evidence bundle |
+
+## Unified F-01 to F-50 feature catalogue
+
+These rows map the proposed feature catalogue to existing implementation and tests. They
+do not create 50 phases and do not override the active Gate 2 work order. `SC` means
+submission/selection-critical; `P1` is important after the safe core; `P2` is optional.
+
+| ID | Requirement / existing mapping | Priority | Status | Repository evidence and tests | Remaining acceptance gate |
+| --- | --- | --- | --- | --- | --- |
+| F-01 | Signed webhook intake and dedupe; P16-01/02 | SC | VERIFIED | `webhooks.py`, `webhook_ingestion.py`, `webhook.py`; webhook/ingress tests; Gate 1 accepted+duplicate receipt | Provider-emitted Test Mode provenance remains separate under F-38 |
+| F-02 | Transactional outbox and workers; P16-09/11/14 | SC | VERIFIED | outbox model/dispatcher/worker, stream consumer, supervision service; outbox/consumer/health tests | Retain Redis interruption and replay regression coverage |
+| F-03 | Monotonic payment projection; P15/P16 | SC | VERIFIED | payment projector/state machine/reliability modules and projection/state tests | Keep delayed/reordered/captured-stop cases in final regression |
+| F-04 | Evidence-based versioned truth; P15-01–12 | SC | VERIFIED | payment truth models/domain/service, migration chain and truth tests | Provider-backed journey must reuse this resolver, not browser state |
+| F-05 | Durable bounded reconciliation; G1A/P16-17 | SC | VERIFIED | committed Gate 1A migration, reconciliation service/worker, 22 focused passes, full controller and controlled restart evidence | Provider-emitted Test Mode provenance remains separate under F-38 |
+| F-06 | Ghost failure and late-authorization stop | SC | PARTIAL | state machine, compensation/reconciliation services and late-authorization integration tests exist | Current provider-backed cancellation/duplicate-payment race bundle absent |
+| F-07 | Versioned provider failure taxonomy | SC-lite | PARTIAL | Razorpay order error kinds and P16 provider taxonomy tests exist | Confirm mapping/versioning against currently observed provider codes; preserve unknown |
+| F-08 | Revenue-risk register and actionable queue | SC | PARTIAL | recovery queue/dashboard services, routes and UI; queue/dashboard tests | Prove totals, priority inputs, empty/error states and no fabricated rows |
+| F-09 | Rail health radar and incident hold | P1 | PARTIAL | incident detector/persistence/feed plus intelligence UI and tests exist | Fresh DB/runtime evidence and real-vs-drill provenance remain |
+| F-10 | Failure-cohort diagnosis | P1 | PARTIAL | evaluation service and similar-outcomes/investigation paths are precursors | Reproducible sufficient-data comparison and current runtime proof required |
+| F-11 | Case-scoped read-only evidence tools; P17-01/02/12 | SC | PARTIAL | merged investigator tool registry/service and focused tool tests | Current PostgreSQL/runtime and provider-ledger proof for every tool remain |
+| F-12 | Multi-step bounded investigator; P17-03–05 | SC | PARTIAL | durable investigation model/service and three-path deterministic tests | Phase 17B live selection gate is still broken |
+| F-13 | Structured evidence-linked AI claims; P17-06/15 | SC | PARTIAL | Gemini adapter, investigation contracts, API trace and tests exist | Current live citation quality is 30%; reviewer proof remains incomplete |
+| F-14 | Deterministic semantic claim verifier; P18-01–04 | SC | NOT IMPLEMENTED | citation presence/ownership checks are not the Phase 18 semantic validator | Implement same-case, cutoff, fact/value, freshness and contradiction validation |
+| F-15 | Correct abstention/escalation; P17-08/09 | SC | PARTIAL | deterministic abstention/fallback tests exist and fail-safe rate was recorded | Live abstention accuracy was 0%; Phase 17B threshold remains unmet |
+| F-16 | Consent-safe customer message drafter | P1 | PARTIAL | message batch/executor, Resend integration and tests exist | Lock facts, consent, preview, provenance and provider-delivery truth in UI |
+| F-17 | Evidence-grounded explanations | P1 | PARTIAL | case detail and AI trace expose hypotheses/citations/fallback labels | Phase 18 validation and Phase 22 why/why-not/change-my-mind proof remain |
+| F-18 | Allowed coordinate-free action generator; P18-07–09 | SC | NOT IMPLEMENTED | existing planner/policy is reusable input but not proof of the new capability filter | Generate only feasible intents; backend resolves all trusted coordinates |
+| F-19 | Expected-net-recovery ranker; P18-10–12 | P1 | NOT IMPLEMENTED | no accepted calibrated or explicitly `NOT_CALIBRATED` comparative ranker | Store score components, alternatives, exclusions and versioned provenance |
+| F-20 | Deterministic policy engine; P19-01/02 | SC | VERIFIED | bounded policy domain/service and broad policy tests exist | Phase 19 must bind it to current truth/action and state-bound approval without weakening hard stops |
+| F-21 | Versioned safety controls | SC | PARTIAL | config, policy receipts and Safety Controls UI exist | Persist authorized changes, version them, audit them and prove kill switches |
+| F-22 | State-bound approval and invalidation; P19-03–08 | SC | NOT IMPLEMENTED | older token-gated approval is PARTIAL and does not prove the new binding contract | Bind case/truth/evidence/action/amount/expiry; revalidate immediately before execution |
+| F-23 | Escalation queue | SC-lite | PARTIAL | case/review queues and approval UI exist | Uncertain/blocked reasons, ownership and end-to-end operator action need proof |
+| F-24 | Durable provider intent; P20-01–03 | SC | PARTIAL | recovery action persistence/executor/worker are reusable | Prove commit-before-call, deterministic idempotency and lease ownership under concurrency |
+| F-25 | Standard Payment Link lifecycle | SC | PARTIAL | Razorpay link adapter, notifications, recovery action and retrieval tests exist | Verify current Test Mode create/read/cancel/expiry capability and one provider-backed lifecycle |
+| F-26 | Crash-window reconciliation; P20-04–06 | SC | NOT IMPLEMENTED | older retry/idempotency tests do not prove provider-success/application-crash recovery | Required lost-persistence test must discover one accepted action without duplication |
+| F-27 | Provider-backed Outcome Ledger; P20-09/10 | SC | PARTIAL | outcome models/services/reconciler/UI and tests exist | One current provider-confirmed attributed Test Mode outcome and no double count required |
+| F-28 | Tamper-evident Recovery Receipt; P21-07/08 | core SC | NOT IMPLEMENTED | current recovery audit chain is a precursor, not the complete truth-to-outcome receipt | Canonical hash chain, verifier API/UI and tamper detection required |
+| F-29 | Explicit stopping rules | SC | PARTIAL | policy, truth invalidation and compensation paths record several stops | Prove already-paid, stale, consent, quota, expired and incident stops across races |
+| F-30 | Versioned isolated Scenario Lab; P23-01/08 | SC | PARTIAL | controlled evaluation persistence/service/UI and 48-case lab exist | Freeze seeds/cutoffs/ground truth and keep it isolated from provider-backed accounting |
+| F-31 | Comparable strategy/baseline harness; P23-03 | SC | BROKEN | current lab has a zero control baseline and cannot prove incremental recovery | Same frozen evidence/constraints across meaningful arms with case-level export |
+| F-32 | “Race” comparison screen | P2 | NOT IMPLEMENTED | no accepted implementation evidence | Optional only after honest comparable metrics pass |
+| F-33 | Non-overlapping money waterfall; P23-05 | SC-lite | PARTIAL | outcomes/evaluation UI exists | Define one exact denominator partition and prove bucket reconciliation |
+| F-34 | Property-based invariant fuzzing | P1 | NOT IMPLEMENTED | deterministic negative tests exist but no accepted stateful randomized harness | Fuzz event order/concurrency while preserving financial invariants |
+| F-35 | Controlled chaos panel | P2 | NOT IMPLEMENTED | failure tests exist; no isolated operator-facing chaos control | Must never touch provider-backed proof or real accounting |
+| F-36 | AI quality/adversarial evaluation | SC | BROKEN | live report selected no model: 20% truth/tool, 30% citations, 0% abstention | Deterministic diagnostics then one approved frozen live run meeting locked thresholds |
+| F-37 | Reproducible results report | SC | PARTIAL | evaluation/benchmark runners and stored reports exist | One-command versioned report with denominators, failures, limits and case exports |
+| F-38 | Guided real Razorpay Test Mode Live Run | SC | PARTIAL | Payment Lab route/services/UI and provider verification code exist | Complete genuine failure→case→action→paid link→attributed outcome path absent |
+| F-39 | Merchant Command Center | SC | PARTIAL | dashboard service/API and command-center UI compile and render | Current live-data, empty/error, responsive and protected-action evidence required |
+| F-40 | Investigation Room | SC | PARTIAL | deep case page/evidence tabs are a substantial precursor | Phase 22 alternatives, validation, receipt, stale-state and accessibility gates remain |
+| F-41 | Rail Radar UI | P1 | PARTIAL | intelligence route/panel and incident feed exist | Show only observed/drill-labelled signals with fresh runtime proof |
+| F-42 | Safety Controls UI | SC | PARTIAL | rulebook and Gate 1A worker counters are visible | Responsive/keyboard proof plus authorized persisted/audited edits remain |
+| F-43 | Outcomes and waterfall UI | SC | PARTIAL | Outcome Ledger and evaluation dashboards exist | Correct attribution, denominator partition and drilldown proof remain |
+| F-44 | Receipt verification UI | P1 | NOT IMPLEMENTED | no accepted receipt-verifier surface | Read-only redacted valid/broken/unavailable result and isolated tamper demo required |
+| F-45 | Verified provider-backed run replay | SC | NOT IMPLEMENTED | no accepted genuine completed-run replay evidence | Replay must be read-only, labelled and produce no new actions/metrics |
+| F-46 | Protected lab/operator access | SC | PARTIAL | mutation routes use shared demo/operator tokens | Decide deployment boundary; add scoped auth/rate/amount caps and protect read APIs as required |
+| F-47 | Health, queues, correlation and redacted observability | SC | PARTIAL | ready/workers/queues endpoints, supervised workers and Gate 1A metrics pass | End-to-end correlation, redaction, abuse signals and hosted operations evidence remain |
+| F-48 | Clean-clone reproducibility | SC | PARTIAL | locked installs, controller and migration scripts reproduced locally | One-command empty-provider vs seeded-lab bootstrap from a fresh clone remains |
+| F-49 | Protected hosted demo | P1 | NOT IMPLEMENTED | repository is local PowerShell processes plus Compose data services | Deployment/access decision, HTTPS webhook and protected operations required |
+| F-50 | Submission documentation and video | SC | NOT IMPLEMENTED | audit docs exist, but README/video/evidence package are incomplete | Final README, architecture, evaluation, limitations, five-minute video and release gate |
 
 ## Required phase completion record
 

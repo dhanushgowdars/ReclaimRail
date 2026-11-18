@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.domain.recovery import RecoveryPlannerPolicy
+from app.services.payment_lab_provider_verification import ProviderVerificationResult
 from app.services.payment_lab_recovery_batch import PaymentLabRecoveryBatchResult
+from app.services.payment_truth_reconciliation import PaymentTruthReconciliationResult
 from app.workers import payment_lab_recovery_worker
 from app.workers.payment_lab_recovery_worker import (
     parse_run_once,
@@ -22,6 +24,11 @@ def create_settings() -> SimpleNamespace:
         payment_lab_recovery_batch_size=25,
         payment_lab_recovery_poll_interval_seconds=1.0,
         payment_lab_recovery_claim_timeout_seconds=60,
+        payment_truth_reconciliation_retry_base_seconds=15.0,
+        payment_truth_reconciliation_retry_max_seconds=300.0,
+        payment_truth_reconciliation_max_attempts=5,
+        payment_truth_reconciliation_circuit_failure_threshold=3,
+        payment_truth_reconciliation_circuit_open_seconds=300.0,
         recovery_approval_threshold_minor=300_000,
         recovery_approval_ttl_seconds=900,
         recovery_incident_recheck_delay_seconds=900,
@@ -133,6 +140,107 @@ async def test_run_once_executes_batch_and_closes_database(
         ),
     )
     close_database.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_settings_and_persisted_control_counts_reach_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = create_settings()
+    order_provider = MagicMock(name="order_provider")
+    session_factory = MagicMock(name="session_factory")
+    reconciliation = AsyncMock(
+        return_value=PaymentTruthReconciliationResult(
+            checked=1,
+            projected=0,
+            unchanged=0,
+            unavailable=1,
+            persistence_failures=0,
+            circuit_opened=True,
+            provider_calls=1,
+            cooling_down_controls=1,
+            open_circuit_controls=1,
+            exhausted_controls=2,
+            synthetic_blocked_controls=1,
+        ),
+    )
+    heartbeat = MagicMock()
+    heartbeat.start = AsyncMock()
+    heartbeat.stop = AsyncMock()
+    heartbeat.record_success = AsyncMock()
+    heartbeat.record_failure = AsyncMock()
+
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "get_settings",
+        MagicMock(return_value=settings),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "create_gemini_recovery_plan_provider",
+        MagicMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "create_gemini_evidence_investigator",
+        MagicMock(return_value=None),
+    )
+    stub_order_provider(monkeypatch, order_provider)
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "get_session_factory",
+        MagicMock(return_value=session_factory),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "create_worker_heartbeat_reporter",
+        MagicMock(return_value=heartbeat),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "reconcile_payment_truth_batch",
+        reconciliation,
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "verify_payment_lab_provider_evidence_batch",
+        AsyncMock(
+            return_value=ProviderVerificationResult(
+                checked=0,
+                projected=0,
+                no_payment_yet=0,
+                failures=0,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        payment_lab_recovery_worker,
+        "run_payment_lab_recovery_batch",
+        AsyncMock(return_value=create_batch_result()),
+    )
+    monkeypatch.setattr(payment_lab_recovery_worker, "utc_now", MagicMock(return_value=NOW))
+    monkeypatch.setattr(payment_lab_recovery_worker, "close_database", AsyncMock())
+    monkeypatch.setattr(payment_lab_recovery_worker, "close_redis", AsyncMock())
+
+    await run_payment_lab_recovery_worker(run_once=True)
+
+    reconciliation.assert_awaited_once_with(
+        session_factory,
+        provider=order_provider,
+        reference_time=NOW,
+        batch_size=25,
+        retry_base_delay=timedelta(seconds=15),
+        retry_maximum_delay=timedelta(seconds=300),
+        max_attempts=5,
+        circuit_failure_threshold=3,
+        circuit_open_duration=timedelta(seconds=300),
+    )
+    metrics = heartbeat.record_success.await_args.args[0]
+    assert metrics["truth_reconciliation_provider_calls"] == 1
+    assert metrics["truth_reconciliation_cooling_controls"] == 1
+    assert metrics["truth_reconciliation_open_circuit_controls"] == 1
+    assert metrics["truth_reconciliation_exhausted_controls"] == 2
+    assert metrics["truth_reconciliation_synthetic_blocked_controls"] == 1
 
 
 @pytest.mark.asyncio

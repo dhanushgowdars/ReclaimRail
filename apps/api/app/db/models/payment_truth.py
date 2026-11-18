@@ -119,6 +119,113 @@ class PaymentEvidenceRecord(Base):
     )
 
 
+class PaymentTruthReconciliationState(Base):
+    """Durable provider-read budget and cooldown for one payment state version."""
+
+    __tablename__ = "payment_truth_reconciliation_state"
+    __table_args__ = (
+        CheckConstraint(
+            "payment_state_version >= 0",
+            name="ck_truth_reconciliation_payment_state_version",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_truth_reconciliation_attempt_count",
+        ),
+        CheckConstraint(
+            "consecutive_failures >= 0",
+            name="ck_truth_reconciliation_consecutive_failures",
+        ),
+        CheckConstraint(
+            "observation_sequence >= 0",
+            name="ck_truth_reconciliation_observation_sequence",
+        ),
+        CheckConstraint(
+            (
+                "blocked_reason IS NULL OR "
+                "blocked_reason IN ('controlled_synthetic', 'retry_budget_exhausted')"
+            ),
+            name="ck_truth_reconciliation_blocked_reason",
+        ),
+        Index(
+            "ix_truth_reconciliation_retry",
+            "next_retry_at",
+            "circuit_open_until",
+        ),
+    )
+
+    payment_attempt_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("payment_attempts.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    payment_state_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    observation_sequence: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    circuit_open_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    exhausted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    blocked_reason: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_failure_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_success_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_failure_fingerprint: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class PaymentTruthSnapshotRecord(Base):
     """Append-only, versioned result produced from payment evidence."""
 

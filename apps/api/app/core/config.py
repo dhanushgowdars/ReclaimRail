@@ -243,6 +243,31 @@ class Settings(BaseSettings):
         ge=10,
         le=3600,
     )
+    payment_truth_reconciliation_retry_base_seconds: float = Field(
+        default=15.0,
+        ge=1.0,
+        le=300.0,
+    )
+    payment_truth_reconciliation_retry_max_seconds: float = Field(
+        default=300.0,
+        ge=1.0,
+        le=3600.0,
+    )
+    payment_truth_reconciliation_max_attempts: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+    )
+    payment_truth_reconciliation_circuit_failure_threshold: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+    )
+    payment_truth_reconciliation_circuit_open_seconds: float = Field(
+        default=300.0,
+        ge=1.0,
+        le=3600.0,
+    )
 
     worker_heartbeat_interval_seconds: float = Field(
         default=5.0,
@@ -274,6 +299,20 @@ class Settings(BaseSettings):
         if self.worker_delayed_after_seconds >= self.worker_heartbeat_ttl_seconds:
             raise ValueError(
                 "Worker delayed threshold must be lower than heartbeat TTL",
+            )
+        if (
+            self.payment_truth_reconciliation_retry_max_seconds
+            < self.payment_truth_reconciliation_retry_base_seconds
+        ):
+            raise ValueError(
+                "Payment truth reconciliation retry maximum must not be lower than base",
+            )
+        if (
+            self.payment_truth_reconciliation_circuit_failure_threshold
+            > self.payment_truth_reconciliation_max_attempts
+        ):
+            raise ValueError(
+                "Payment truth reconciliation circuit threshold must fit the retry budget",
             )
         return self
 

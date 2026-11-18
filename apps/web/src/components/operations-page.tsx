@@ -7,7 +7,7 @@ import { CaseExplorer } from "@/components/case-explorer";
 import { OutcomeLedger } from "@/components/outcome-ledger";
 import { RailIntelligencePanel } from "@/components/rail-intelligence-panel";
 import { SafetyControlsPanel } from "@/components/safety-controls-panel";
-import { type RecoveryCaseQueueItem, type RecoveryDashboardSummary, type RecoveryIncident, type RecoveryOutcome } from "@/lib/recovery-api";
+import { type RecoveryCaseQueueItem, type RecoveryDashboardSummary, type RecoveryIncident, type RecoveryOutcome, type WorkerFleetHealth } from "@/lib/recovery-api";
 import { formatMoney, formatTimestamp, shortId, titleCase } from "@/lib/presentation";
 
 type Section = "queue" | "reviews" | "outcomes" | "controls" | "intelligence";
@@ -30,14 +30,14 @@ function CaseRows({ items, currency }: { items: RecoveryCaseQueueItem[]; currenc
   return <div className="operations-list">{items.map((item) => <Link key={item.recovery_case_id} href={`/cases/${item.recovery_case_id}`} className="operations-list__row"><div><strong>CASE-{shortId(item.recovery_case_id)}</strong><span>{item.payment_method === null ? "Payment rail pending" : titleCase(item.payment_method)} · opened {formatTimestamp(item.opened_at)}</span></div><div><Badge value={item.latest_action_policy_outcome ?? item.status} /><span>{item.latest_action_type === null ? "Awaiting plan" : titleCase(item.latest_action_type)}</span></div><strong>{formatMoney(item.amount_minor, currency)}</strong><ArrowRight size={18} /></Link>)}</div>;
 }
 
-export function OperationsPage({ section, summary, cases, outcomes, incidents }: { section: Section; summary: RecoveryDashboardSummary; cases: RecoveryCaseQueueItem[]; outcomes: RecoveryOutcome[]; incidents: RecoveryIncident[] }) {
+export function OperationsPage({ section, summary, cases, outcomes, incidents, workerHealth = null }: { section: Section; summary: RecoveryDashboardSummary; cases: RecoveryCaseQueueItem[]; outcomes: RecoveryOutcome[]; incidents: RecoveryIncident[]; workerHealth?: WorkerFleetHealth | null }) {
   const content = copy[section];
   const escalated = cases.filter((item) => item.latest_action_policy_outcome === "escalate" || item.status === "escalated");
   return <div className="app-shell"><RecoveryNavigation active={section} /><DashboardLiveRefresh /><main className="workspace operations-page"><header className="operations-page__hero"><p className="kicker">{content.eyebrow}</p><h1>{content.title}</h1><p>{content.description}</p></header>
     {section === "queue" && <section className="panel"><div className="panel-heading"><div><p className="kicker">Persisted recovery evidence</p><h2>{cases.length} recovery records</h2><p>{summary.active_case_count} currently open · completed and rejected cases remain visible as durable evidence.</p></div><Link href="/payment-lab">Start a provider run <ExternalLink size={16} /></Link></div><CaseExplorer cases={cases} currency={summary.currency} /></section>}
     {section === "reviews" && <section className="panel"><div className="panel-heading"><div><p className="kicker">Approval boundary</p><h2>Decisions requiring human control</h2></div><ShieldCheck size={25} /></div><p className="operations-page__note">Only cases that policy escalates appear here. Every decision has the proposed action, guardrails, and case evidence behind it.</p><CaseRows items={escalated} currency={summary.currency} /></section>}
     {section === "outcomes" && <section className="panel"><div className="panel-heading"><div><p className="kicker">Financial outcome state</p><h2>Recovery outcomes by payment status</h2></div><CircleDollarSign size={25} /></div><OutcomeLedger outcomes={outcomes} currency={summary.currency} /></section>}
-    {section === "controls" && <SafetyControlsPanel summary={summary} cases={cases} />}
+    {section === "controls" && <SafetyControlsPanel summary={summary} cases={cases} workerHealth={workerHealth} />}
     {section === "intelligence" && <section className="panel"><div className="panel-heading"><div><p className="kicker">Degradation detection</p><h2>Signals that influence recovery</h2></div><Clock3 size={25} /></div><RailIntelligencePanel incidents={incidents} currency={summary.currency} /></section>}
   </main></div>;
 }

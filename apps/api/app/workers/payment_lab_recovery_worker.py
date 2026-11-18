@@ -102,6 +102,7 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
     await heartbeat.start()
     try:
         while True:
+            reconciliation = None
             try:
                 if order_provider is not None:
                     reconciliation = await reconcile_payment_truth_batch(
@@ -109,16 +110,41 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
                         provider=order_provider,
                         reference_time=utc_now(),
                         batch_size=settings.payment_lab_recovery_batch_size,
+                        retry_base_delay=timedelta(
+                            seconds=(settings.payment_truth_reconciliation_retry_base_seconds),
+                        ),
+                        retry_maximum_delay=timedelta(
+                            seconds=(settings.payment_truth_reconciliation_retry_max_seconds),
+                        ),
+                        max_attempts=settings.payment_truth_reconciliation_max_attempts,
+                        circuit_failure_threshold=(
+                            settings.payment_truth_reconciliation_circuit_failure_threshold
+                        ),
+                        circuit_open_duration=timedelta(
+                            seconds=(settings.payment_truth_reconciliation_circuit_open_seconds),
+                        ),
                     )
                     if reconciliation.checked > 0:
                         LOGGER.info(
                             (
                                 "Payment truth reconciliation checked=%d projected=%d "
-                                "unavailable=%d persistence_failures=%d circuit_opened=%s"
+                                "provider_calls=%d unavailable=%d deferred=%d exhausted=%d "
+                                "synthetic_blocked=%d cooling_controls=%d "
+                                "open_circuit_controls=%d exhausted_controls=%d "
+                                "synthetic_blocked_controls=%d persistence_failures=%d "
+                                "circuit_opened=%s"
                             ),
                             reconciliation.checked,
                             reconciliation.projected,
+                            reconciliation.provider_calls,
                             reconciliation.unavailable,
+                            reconciliation.deferred,
+                            reconciliation.exhausted,
+                            reconciliation.synthetic_blocked,
+                            reconciliation.cooling_down_controls,
+                            reconciliation.open_circuit_controls,
+                            reconciliation.exhausted_controls,
+                            reconciliation.synthetic_blocked_controls,
                             reconciliation.persistence_failures,
                             reconciliation.circuit_opened,
                         )
@@ -168,6 +194,41 @@ async def run_payment_lab_recovery_worker(*, run_once: bool = False) -> None:
                     "started": result.started,
                     "retryable_failures": result.retryable_failures,
                     "truth_reconciliation_enabled": order_provider is not None,
+                    "truth_reconciliation_checked": (
+                        reconciliation.checked if reconciliation is not None else 0
+                    ),
+                    "truth_reconciliation_provider_calls": (
+                        reconciliation.provider_calls if reconciliation is not None else 0
+                    ),
+                    "truth_reconciliation_unavailable": (
+                        reconciliation.unavailable if reconciliation is not None else 0
+                    ),
+                    "truth_reconciliation_deferred": (
+                        reconciliation.deferred if reconciliation is not None else 0
+                    ),
+                    "truth_reconciliation_exhausted": (
+                        reconciliation.exhausted if reconciliation is not None else 0
+                    ),
+                    "truth_reconciliation_synthetic_blocked": (
+                        reconciliation.synthetic_blocked if reconciliation is not None else 0
+                    ),
+                    "truth_reconciliation_circuit_opened": (
+                        reconciliation.circuit_opened if reconciliation is not None else False
+                    ),
+                    "truth_reconciliation_cooling_controls": (
+                        reconciliation.cooling_down_controls if reconciliation is not None else 0
+                    ),
+                    "truth_reconciliation_open_circuit_controls": (
+                        reconciliation.open_circuit_controls if reconciliation is not None else 0
+                    ),
+                    "truth_reconciliation_exhausted_controls": (
+                        reconciliation.exhausted_controls if reconciliation is not None else 0
+                    ),
+                    "truth_reconciliation_synthetic_blocked_controls": (
+                        reconciliation.synthetic_blocked_controls
+                        if reconciliation is not None
+                        else 0
+                    ),
                 },
             )
 

@@ -371,3 +371,325 @@ This preparation records the 8 November evidence and creates the Gate 1A specifi
 It does not authorize or implement Gate 1A, change application code, restart services,
 alter the preserved database, commit or push. Owner review of the complete six-path diff is
 required before applying or committing the documentation refresh.
+
+## 17 November 2026 — Gate 1A bounded reconciliation candidate
+
+### Authorization and repository state
+
+The owner authorized Gate 1A only after the Gate 1 documentation commit. The worktree was:
+
+- `D:\NEW VOLUME\INTERNSHIP PREP\RAZORPAY\ReclaimRail-Audit-Reset`;
+- branch `audit/current-state-reset`;
+- parent `8703bfbd9a3b36dcf4a1af74a1bb04ea76311f5d`;
+- identity `Dhanush R S <dhanushrs981@gmail.com>`;
+- 15 changed application/test/frontend paths;
+- zero staged files, commits or pushes.
+
+No live Gemini call, live Razorpay verification, provider mutation or money movement was
+authorized or performed.
+
+### Changed application/test/frontend paths
+
+1. `apps/api/.env.example`
+2. `apps/api/app/core/config.py`
+3. `apps/api/app/db/models/__init__.py`
+4. `apps/api/app/db/models/payment_truth.py`
+5. `apps/api/app/services/payment_truth_reconciliation.py`
+6. `apps/api/app/workers/payment_lab_recovery_worker.py`
+7. `apps/api/migrations/versions/f8c1b2d3e4a5_add_truth_reconciliation_control.py`
+8. `apps/api/tests/test_payment_lab_recovery_worker.py`
+9. `apps/api/tests/test_payment_truth_reconciliation.py`
+10. `apps/api/tests/test_payment_truth_reconciliation_control_integration.py`
+11. `apps/api/tests/test_worker_supervision_config.py`
+12. `apps/web/src/app/safety-controls/page.tsx`
+13. `apps/web/src/components/operations-page.tsx`
+14. `apps/web/src/components/safety-controls-panel.tsx`
+15. `apps/web/src/lib/recovery-api.ts`
+
+The candidate adds durable per-attempt reconciliation state, persisted cooldown/backoff,
+retry budget, circuit/exhaustion state, stable unavailable-evidence identity, synthetic
+provider blocking, restart-safe worker metrics and a Safety Controls representation.
+
+### Deterministic commands and results
+
+The guarded Windows validation ran these commands from `apps/api` or `apps/web` as
+applicable:
+
+| Command | Result |
+| --- | --- |
+| `uv run --frozen alembic upgrade head` | passed |
+| `uv run --frozen alembic current` | `f8c1b2d3e4a5 (head)` |
+| `uv run --frozen alembic heads` | `f8c1b2d3e4a5 (head)` |
+| `uv run --frozen alembic check` | passed; no new upgrade operations |
+| `uv run --frozen ruff format --check .` | passed; 251 files already formatted |
+| `uv run --frozen ruff check .` | passed |
+| `uv run --frozen mypy app` | passed; 119 source files |
+| focused Gate 1A pytest selection | `22 passed in 2.55s` |
+| `uv run --frozen pytest -q` | `698 passed, 1 skipped in 13.69s` |
+| `npm run lint` | passed |
+| `npm run build` | passed; Next.js 16.3.5 routes compiled |
+
+The one skip remains the known persisted execution-counter integration race recorded in
+Gate 1. No new skip was introduced by Gate 1A.
+
+An earlier focused run produced `21 passed, 1 failed`: the provider-recovery test projected
+fresh failed truth but did not restore `recovery_eligible`. The correction added the
+provider event entity expected by canonical processing and required the reconciliation
+path to confirm processor disposition before reporting projection. The next focused and
+complete runs passed. The failed run remains part of the audit trail.
+
+### Controlled runtime evidence
+
+The owner ran:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File "$env:USERPROFILE\Downloads\ReclaimRail-Gate1A-Runtime-Evidence-20261117\Run-ReclaimRail-Gate1A-Runtime-Evidence.ps1"
+```
+
+The final run used a fresh database
+`reclaimrail_gate1a_runtime_20261117153137`, isolated Redis logical DB 15, and migrated from
+base through `f8c1b2d3e4a5`. It started only the API, web and target Payment Lab recovery
+worker. Results:
+
+- API ready and target worker healthy;
+- repeated attempt inside the open circuit made zero provider calls;
+- circuit scenario evidence/truth counts remained 3/3 before and after the blocked repeat;
+- three scheduled unavailable calls opened the persisted circuit;
+- worker restart made zero unexpected provider calls;
+- synthetic path recorded one block and zero provider calls;
+- expired unavailable evidence was superseded by fresh deterministic provider-stub failed
+  evidence, restoring `recovery_eligible=true`;
+- worker metrics exposed calls, unavailable results, two cooling controls, one open circuit,
+  one exhausted control and one synthetic block;
+- temporary processes stopped; runtime changed zero application files.
+
+Controlled case `a809f8fc-7b5a-43b4-943f-f6addeb8cc21` rendered ₹3,499 INR, failed state,
+open recovery eligibility and no active link. Stored truth was ordered newest first:
+version 2 `payment_failed` after version 1 `manual_investigation_required`. The audit chain
+was valid.
+
+The first runtime wrapper failed before startup with `ModuleNotFoundError: app` because its
+external harness did not set the API import path. After that wrapper was corrected, a
+second run failed its evidence assertion because the verifier selected the oldest truth
+record instead of the newest. Neither was an application failure; both wrapper failures
+and their preserved logs remain recorded. The third run passed.
+
+Final shareable evidence archive:
+
+- file: `ReclaimRail-Gate1A-Runtime-Evidence-20261117-153137-shareable.zip`;
+- SHA-256: `1cd41edd8e5929df24f51e211f560ad0703bc2c5a852fe1b39bc80b1f2830027`;
+- screenshot commands: `CAPTURE_SAFETY-1024X1400`, `CAPTURE_SAFETY-1440X1800`,
+  `CAPTURE_SAFETY-1920X2200`, `CAPTURE_CASE-1440X2200`; all exited 0.
+
+### Frontend evidence review
+
+The Safety Controls page visibly documents that provider reconciliation is bounded and
+shows live worker values. Automated browser assertions found all six Gate 1A metrics in the
+DOM. Manual inspection found limitations that keep the browser gate `PARTIAL`:
+
+- at 1024px the navigation and right-side policy-table content are clipped;
+- at 1920px the first reconciliation columns are legible, while open-circuit, exhausted
+  and synthetic-block columns require horizontal scrolling and are not in the static image;
+- the 1440px case header clearly shows the same failed ₹3,499 case, but lower evidence cards
+  are washed out in the capture;
+- no keyboard, focus-order, contrast or automated frontend behavior test was run.
+
+### Decision and remaining limitations
+
+Requirements G1A-01 through G1A-07 are `VERIFIED`. G1A-08 and Gate 1A overall are
+`PARTIAL` because the full tracked 11-process controller, clean responsive browser proof
+and provider-emitted Test Mode provenance remain absent. No live provider call is required
+to prove the already-closed amplification defect; any bounded read-only verification needs
+separate owner approval.
+
+The next allowed work is Gate 1A closure only: owner review, responsive evidence correction,
+full-controller rerun, exact staged-diff verification and one owner-authorized local commit.
+Gate 2, Phase 17B and new feature work remain unauthorized.
+
+## 18 November 2026 — unified roadmap reconciliation draft
+
+### Authorization and scope
+
+The owner supplied `ReclaimRail_Unified_Master_Roadmap_2026-11-17.md` and authorized a
+documentation reconciliation without losing existing work or beginning Gate 2, Phase 18
+or unrelated implementation. The six audit documents remain authoritative for repository
+state. No application behavior, database contents, Git index, commit, branch, remote or
+provider state is changed by this reconciliation draft.
+
+### Preflight stop and preservation
+
+The Gate 1A closure runner stopped at its first changed-path guard:
+
+```text
+Initial changed-path verification failed. Expected 21, found 22.
+```
+
+The runner stopped before installing its two frontend corrections or starting validation.
+The guard was not weakened. The additional path remains preserved and is classified
+`NEEDS INSPECTION` until exact `git status --short` output identifies it. A read-only
+branch/HEAD/identity/status command was requested; no environment value is printed.
+
+### Roadmap conflicts resolved in the draft
+
+1. The proposal's `19 passed, 2 failed` snapshot is superseded by the append-only Gate 1A
+   record: intermediate `21 passed, 1 failed`, then focused `22 passed`, full backend
+   `698 passed, 1 skipped`.
+2. M0–M8 are retained as priority/crosswalk views only. They do not replace the established
+   Gate 1A → Gate 2 → Phase 17B → Phases 18–23 order.
+3. The F-01 to F-50 catalogue is mapped to existing phases, code/tests and current evidence;
+   appearance in the catalogue is not proof that a feature is missing or complete.
+4. Stale-approval prevention and durable provider intent/reconciliation remain mandatory
+   selection-critical safety requirements.
+5. Provider-backed Test Mode, replay and controlled synthetic cohorts remain separate.
+6. Account-specific Razorpay capability verification is moved early, but no provider call
+   or mutation is authorized by the roadmap integration itself.
+7. Submission-critical safety, one provider-backed journey, honest AI evidence and
+   reproducibility take priority over optional P1/P2 polish.
+
+### Documentation draft
+
+- adds `docs/product/UNIFIED-MASTER-ROADMAP.md` as `DRAFT — RECONCILED, NOT LOCKED`;
+- updates `AGENTS.md` with document authority, read order and `NEEDS INSPECTION`;
+- references the unified blueprint from `MASTER-EXECUTION-PLAN.md` without replacing its
+  historical requirements or active work order;
+- adds the evidence-mapped F-01 to F-50 ledger to `ACCEPTANCE-MATRIX.md`;
+- records the stale test snapshot, 22-path blocker and exact Gate 1A remainder in
+  `CURRENT-STATE.md`;
+- records proposed roadmap decisions separately from locked decisions in `DECISIONS.md`;
+- appends this entry without rewriting earlier failures.
+
+The draft is not installed, staged, committed, pushed or locked. Final hashes and an
+installation package must wait until the unexpected local path is identified and the
+draft is checked against the exact current repository documents.
+
+## 18 November 2026 — exact 22-path inventory and frontend revalidation
+
+The owner supplied the complete read-only Git status for branch
+`audit/current-state-reset` at `8703bfbd9a3b36dcf4a1af74a1bb04ea76311f5d`.
+The previously unexpected twenty-second path is
+`apps/web/src/app/globals.css`. Its diff contains a bounded responsive Safety Controls
+containment grid, responsive navigation changes and disabled case-tab entrance animation;
+`git diff --check` passed. The worktree contains 16 application/test/frontend paths and
+six audit documents, with zero staged paths.
+
+Fresh frontend validation on the exact 22-path worktree reported:
+
+- ESLint exit `0`;
+- Next.js 16.3.5 production build exit `0`;
+- TypeScript and all recorded application routes compiled;
+- Git diff check exit `0`;
+- staged count `0`; and
+- changed-path count `22`.
+
+This resolves the changed-path identity and frontend compilation questions. Gate 1A
+remains `PARTIAL` pending inspected responsive evidence, full tracked-controller evidence,
+authority-document finalization and owner-reviewed commit closure. No application file,
+Git index entry, commit or remote reference was changed by this documentation update.
+
+### Fresh full-controller reproduction
+
+The owner then created fresh database
+`reclaimrail_gate1a_controller_20261118152748`, isolated Redis logical database 14 and
+applied every migration from base through `f8c1b2d3e4a5 (head)`. The tracked local
+controller started the API, webhook receiver, eight workers and web application: all 11
+processes reported running, API readiness was `ready`, and workers reported `8/8 healthy`
+with zero consecutive failures. The worktree remained at 22 changed paths with zero staged
+files. Live Gemini and Razorpay mutation were not authorized. Gate 1A now remains partial
+only for sustained/bounded log confirmation, inspected responsive browser proof,
+authority-document finalization and owner-reviewed commit closure.
+
+### Responsive archive inspection
+
+The owner supplied `ReclaimRail-Gate1A-Responsive-Evidence-20261118-153152-shareable.zip`
+with SHA-256 `d6437133b1604432f67aaa5cc96bdc9928c2ab1395eb70347ffaf46bea8bebac`.
+It contains six valid PNGs at the declared 1024×1400, 1440×1800 and 1920×2200 sizes.
+Visual inspection established:
+
+- the new 1024 navigation grid no longer clips the Evidence Lab item;
+- Safety Controls renders cleanly at 1440 and 1920;
+- Cases empty state is readable without horizontal clipping at all three widths;
+- the 1024 Safety Controls policy-rulebook table still clips the rightmost column; and
+- the fresh controller database contains zero cases, so these screenshots do not prove
+  the populated case-detail washout is fixed.
+
+The earlier controlled-runtime archive was independently rechecked at SHA-256
+`1cd41edd8e5929df24f51e211f560ad0703bc2c5a852fe1b39bc80b1f2830027`.
+Its deterministic case JSON proves `payment_failed`, recovery eligibility, stable evidence
+counts and zero provider calls after restart, but its populated case screenshot visibly
+washes out the lower evidence panels. Gate 1A remains `PARTIAL`; no responsive completion
+or commit claim is authorized from these archives.
+
+## 18 November 2026 — final Gate 1A runtime and visual evidence
+
+The owner supplied
+`ReclaimRail-Gate1A-Runtime-Evidence-20261118-155209-shareable.zip`, SHA-256
+`4af876f59b72da82aa330a0848ac9d29ab8c5175b9325802ca6d09ea92987f71`.
+The archive contains 27 shareable files: API/worker JSON, the controlled-runtime report,
+provider-truthful case JSON, logs and four screenshots. Independent inspection confirmed:
+
+- fresh database `reclaimrail_gate1a_runtime_20261118155209` migrated through
+  `f8c1b2d3e4a5`;
+- API ready and `payment_lab_recovery` healthy;
+- evidence and truth counts remained `3/3` across the blocked repeat;
+- repeat inside the open circuit made zero provider calls;
+- restart made zero unexpected provider calls;
+- persisted cooling count `2`, open circuits `1`, exhausted count `1` and synthetic
+  blocks `1` were visible;
+- synthetic input made zero provider calls;
+- expired unavailable evidence was superseded by deterministic provider `payment_failed`
+  truth with recovery eligibility restored;
+- case `e3aefb14-8df5-4d93-a803-5750f78429e5` exposed failed/eligible truth and cited
+  evidence in the frontend;
+- screenshots are valid at Safety Controls 1024×1400, 1440×1800, 1920×2200 and populated
+  case 1440×2200;
+- manual visual review found the 1024 navigation and rulebook columns readable and the
+  populated case evidence fully legible without the earlier animation washout;
+- no traceback, critical, unhandled or worker-failed finding appeared in the archive;
+- no live Razorpay call, provider mutation or live Gemini call occurred; and
+- the runtime changed zero application files, staged zero files, created no commit and
+  performed no push.
+
+Together with the previously recorded focused `22 passed`, complete backend `698 passed,
+1 skipped`, Ruff/mypy, frontend lint/build, migration/autogenerate checks and fresh full
+11-process controller with 8/8 healthy workers, G1A-01 through G1A-08 are `VERIFIED`.
+Gate 1A remains administratively `PARTIAL` only until authority-document review and one
+owner-authorized local commit. Provider-emitted Test Mode provenance is not deleted: it is
+deferred explicitly to the bounded provider-backed journey and remains `PARTIAL` under
+Gate 1/F-38.
+
+## 18 November 2026 — unified roadmap approved and documentation installed
+
+The owner approved the reconciled roadmap and authorized documentation-only installation,
+with explicit instructions not to stage, commit or push. The guarded installer verified:
+
+- branch `audit/current-state-reset` at
+  `8703bfbd9a3b36dcf4a1af74a1bb04ea76311f5d`;
+- Git identity `Dhanush R S <dhanushrs981@gmail.com>`;
+- all 16 Gate 1A application/test/frontend paths preserved;
+- six existing audit documents updated;
+- `docs/product/UNIFIED-MASTER-ROADMAP.md` created;
+- zero staged files, commits or pushes; and
+- no application-code change by the installer.
+
+The resulting worktree has 23 changed paths: 16 application/test/frontend paths and seven
+documentation paths. The roadmap is now formally locked through DEC-021–DEC-027. This lock
+does not claim that F-01–F-50 are complete; their evidence classifications remain governed
+by the acceptance matrix. Gate 1A remains administratively open until the exact staged diff
+and required identity are shown and the owner separately authorizes one local commit.
+
+## 18 November 2026 — Gate 1A local commit authorized
+
+The owner explicitly authorized staging and committing exactly the 23 reviewed Gate 1A
+paths as one local commit, required identity
+`Dhanush R S <dhanushrs981@gmail.com>`, no push, and a mandatory stop after commit
+verification. The approved commit message is:
+
+`fix(reconciliation): persist bounded payment truth retries`
+
+The commit contains 16 application/test/frontend paths and seven documentation paths.
+Successful pre-commit checks require the parent
+`8703bfbd9a3b36dcf4a1af74a1bb04ea76311f5d`, exact file hashes, exact staged paths,
+`git diff --cached --check`, required author/committer identity and zero unstaged/untracked
+remainder. The resulting commit hash is recorded by Git and the post-commit terminal
+evidence rather than embedded in the commit itself. No push is authorized.

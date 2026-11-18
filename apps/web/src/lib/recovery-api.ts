@@ -11,6 +11,24 @@
   generated_at: string;
 };
 
+export type WorkerHealth = {
+  name: string;
+  status: string;
+  instance_id: string | null;
+  heartbeat_age_seconds: number | null;
+  consecutive_failures: number;
+  last_error_type: string | null;
+  metrics: Record<string, number | string | boolean | null>;
+};
+
+export type WorkerFleetHealth = {
+  status: "healthy" | "degraded" | "unavailable";
+  healthy_count: number;
+  expected_count: number;
+  generated_at: string;
+  workers: WorkerHealth[];
+};
+
 export type RecoveryIncident = {
   incident_id: string;
   status: string;
@@ -386,6 +404,10 @@ export async function loadRecoveryDashboard(caseLimit = 8, outcomeLimit = 6): Pr
   ]);
 
   return { summary, incidents, cases, outcomes };
+}
+
+export async function loadWorkerFleetHealth(): Promise<WorkerFleetHealth> {
+  return getRecoveryApiJson<WorkerFleetHealth>("/health/workers");
 }
 
 const OUTCOME_HISTORY_PAGE_SIZE = 100;

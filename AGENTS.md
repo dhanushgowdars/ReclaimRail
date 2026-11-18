@@ -27,9 +27,34 @@ Use exactly these labels in status documents:
 - `OBSOLETE`: retained material has been superseded or no longer describes the current
   product/runtime.
 - `NOT IMPLEMENTED`: no acceptable runtime path exists for the requirement.
+- `NEEDS INSPECTION`: current repository/runtime evidence is insufficient to classify the
+  requirement safely. This is a temporary audit state, not a completion claim.
 
 Never convert `PARTIAL`, `BROKEN` or `NOT IMPLEMENTED` to `VERIFIED` from file presence,
 a mocked happy path, a screenshot, an old CI run or an earlier chat statement.
+
+## Document authority and navigation
+
+The six audit documents remain authoritative for current state and implementation control.
+`docs/product/UNIFIED-MASTER-ROADMAP.md` is the owner-approved consolidated product
+blueprint and complete feature catalogue. It was locked on 18 November 2026 and remains
+subordinate to current repository evidence for status claims.
+
+Read in this order:
+
+1. `AGENTS.md`;
+2. `docs/product/CURRENT-STATE.md`;
+3. `docs/product/MASTER-EXECUTION-PLAN.md`;
+4. active rows in `docs/product/ACCEPTANCE-MATRIX.md`;
+5. `docs/product/DECISIONS.md`;
+6. latest entries in `docs/product/WORK-LOG.md`; and
+7. `docs/product/UNIFIED-MASTER-ROADMAP.md` for consolidated scope and priorities.
+
+The unified roadmap's M0–M8 milestones do not renumber or reorder the established gates.
+Gate 1A is closed by the owner-authorized 23-path local commit recorded in Git history.
+Gate 2 is the next and only active work order. Do not rerun Gate 1A evidence unless new
+repository evidence invalidates the recorded result, and do not begin Phase 17B before
+Gate 2 is reviewed and accepted.
 
 ## Required workflow
 
@@ -56,6 +81,10 @@ a mocked happy path, a screenshot, an old CI run or an earlier chat statement.
 10. Append the commands and results to `docs/product/WORK-LOG.md`.
 11. Update the acceptance matrix and current-state document in the same phase.
 12. Stop for owner review before beginning another phase.
+13. Browser evidence must be inspected visually after capture. Record clipped navigation,
+    horizontal-scroll-only columns, loading/animation washout and any state that is present
+    in JSON or the DOM but not legible in the screenshot; do not promote it to clean visual
+    proof from an automated assertion alone.
 
 ## Completion claim contract
 
@@ -72,6 +101,9 @@ Every phase completion claim must state:
 
 A phase is not complete while a mandatory check is failing, skipped without an approved
 reason, supported only by ignored local artifacts, or invisible in the frontend.
+An uncommitted candidate may satisfy individual acceptance rows, but the phase remains
+`PARTIAL` until its required end-to-end rerun, documentation and owner-reviewed commit gate
+are complete.
 
 ## Safety and repository hygiene
 

@@ -1,9 +1,12 @@
 import { OperationsPage } from "@/components/operations-page";
-import { loadRecoveryDashboard } from "@/lib/recovery-api";
+import { loadRecoveryDashboard, loadWorkerFleetHealth } from "@/lib/recovery-api";
 
 export const dynamic = "force-dynamic";
 
 export default async function SafetyControlsPage() {
-  const data = await loadRecoveryDashboard(100);
-  return <OperationsPage section="controls" summary={data.summary} cases={data.cases.items} outcomes={data.outcomes.items} incidents={data.incidents} />;
+  const [data, workerHealth] = await Promise.all([
+    loadRecoveryDashboard(100),
+    loadWorkerFleetHealth().catch(() => null),
+  ]);
+  return <OperationsPage section="controls" summary={data.summary} cases={data.cases.items} outcomes={data.outcomes.items} incidents={data.incidents} workerHealth={workerHealth} />;
 }

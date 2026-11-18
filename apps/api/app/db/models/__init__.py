@@ -28,6 +28,7 @@ from app.db.models.payment_lab import (
 )
 from app.db.models.payment_truth import (
     PaymentEvidenceRecord,
+    PaymentTruthReconciliationState,
     PaymentTruthSnapshotRecord,
 )
 from app.db.models.recovery import (
@@ -70,6 +71,7 @@ __all__ = [
     "PaymentLabRunProvenance",
     "PaymentLabRunStatus",
     "PaymentStateTransition",
+    "PaymentTruthReconciliationState",
     "PaymentTruthSnapshotRecord",
     "RecoveryAction",
     "RecoveryActionStatus",

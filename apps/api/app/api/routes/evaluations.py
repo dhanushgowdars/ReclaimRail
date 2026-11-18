@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.reviewer_access import require_reviewer_access
 from app.core.database import get_database_session
 from app.db.models.evaluation import EvaluationRun, EvaluationScenario
 from app.services.evaluation_service import (
@@ -18,7 +19,11 @@ from app.services.evaluation_service import (
 )
 
 DatabaseSessionDependency = Annotated[AsyncSession, Depends(get_database_session)]
-router = APIRouter(prefix="/recovery/evaluations", tags=["recovery-evaluations"])
+router = APIRouter(
+    prefix="/recovery/evaluations",
+    tags=["recovery-evaluations"],
+    dependencies=[Depends(require_reviewer_access)],
+)
 
 
 class EvaluationMetricsResponse(BaseModel):

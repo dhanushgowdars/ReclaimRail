@@ -22,6 +22,8 @@ from app.services.worker_supervision_service import (
     WorkerHealthStatus,
 )
 
+REVIEWER_HEADERS = {"X-ReclaimRail-Reviewer-Token": "reviewer-secret"}
+
 
 def test_live_health_returns_service_metadata() -> None:
     with TestClient(app) as client:
@@ -111,7 +113,7 @@ def test_worker_health_exposes_degraded_fleet(
     )
 
     with TestClient(app) as client:
-        response = client.get("/health/workers")
+        response = client.get("/health/workers", headers=REVIEWER_HEADERS)
 
     assert response.status_code == 200
     body = response.json()
@@ -131,7 +133,7 @@ def test_worker_health_hides_redis_failure(
     )
 
     with TestClient(app) as client:
-        response = client.get("/health/workers")
+        response = client.get("/health/workers", headers=REVIEWER_HEADERS)
 
     assert response.status_code == 503
     assert response.json()["status"] == "unavailable"
@@ -171,7 +173,7 @@ def test_queue_health_exposes_pending_and_dead_letter_counts(
     app.dependency_overrides[get_database_session] = override_database_session
     try:
         with TestClient(app) as client:
-            response = client.get("/health/queues")
+            response = client.get("/health/queues", headers=REVIEWER_HEADERS)
     finally:
         app.dependency_overrides.pop(get_database_session, None)
 

@@ -15,6 +15,8 @@ from app.services.recovery_case_queue_service import (
     RecoveryCaseQueuePage,
 )
 
+REVIEWER_HEADERS = {"X-ReclaimRail-Reviewer-Token": "reviewer-secret"}
+
 CASE_ID = UUID("10000000-0000-0000-0000-000000000001")
 INCIDENT_ID = UUID("20000000-0000-0000-0000-000000000001")
 NOW = datetime(2026, 8, 26, 5, 0, tzinfo=UTC)
@@ -79,7 +81,7 @@ def test_lists_pii_safe_recovery_cases_from_real_queue_service(
     )
 
     with TestClient(app) as client:
-        response = client.get("/recovery/dashboard/cases")
+        response = client.get("/recovery/dashboard/cases", headers=REVIEWER_HEADERS)
 
     assert response.status_code == 200
 
@@ -131,6 +133,7 @@ def test_lists_filtered_paginated_recovery_cases(
     with TestClient(app) as client:
         response = client.get(
             "/recovery/dashboard/cases",
+            headers=REVIEWER_HEADERS,
             params=[
                 ("currency", "usd"),
                 ("status", "ready"),
@@ -164,6 +167,7 @@ def test_rejects_invalid_recovery_case_status_before_querying(
     with TestClient(app) as client:
         response = client.get(
             "/recovery/dashboard/cases",
+            headers=REVIEWER_HEADERS,
             params={"status": "unknown"},
         )
 
@@ -185,6 +189,7 @@ def test_rejects_out_of_bounds_queue_limit_before_querying(
     with TestClient(app) as client:
         response = client.get(
             "/recovery/dashboard/cases",
+            headers=REVIEWER_HEADERS,
             params={"limit": "101"},
         )
 

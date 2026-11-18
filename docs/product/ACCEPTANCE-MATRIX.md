@@ -18,17 +18,17 @@ classification safely. It is temporary and never means complete.
 | 2 | Foundation, PostgreSQL, Redis, CI | VERIFIED | fresh Windows/Docker migration, backend and frontend gates passed in Gate 1 |
 | 3 | Signed webhook ingestion | VERIFIED | controlled locally signed acceptance/idempotency passed; provider-emitted Test Mode evidence remains required |
 | 4 | Payment state machine | VERIFIED | fresh signed failure projected once from `unknown` to `failed` |
-| 5 | Incident detection | VERIFIED | current DB integration rerun |
+| 5 | Incident detection | VERIFIED | Gate 2 Windows/PostgreSQL integration rerun passed |
 | 6 | Bounded recovery agent | PARTIAL | current provider-backed acceptance bundle and AI/fallback labeling |
 | 7 | Outcome reconciliation | PARTIAL | current live Test Mode recovery/pending/reversal evidence |
 | 8 | Merchant command center | PARTIAL | browser/empty/error/live-state evidence |
 | 9 | Frontend redesign and Payment Lab | PARTIAL | visual, accessibility and E2E gates |
 | 10 | Judge experience rebuild | PARTIAL | five-minute recorded path and truthful failure demonstration |
-| 11 | Control-plane hardening | BROKEN | dependency vulnerabilities and public read API access must be resolved for deployment |
+| 11 | Control-plane hardening | PARTIAL | Gate 2 technical acceptance passes; production tenant identity, durable/distributed abuse control and hosted security evidence remain later gates |
 | 12 | Evidence-first guided/continuous live command | PARTIAL | current end-to-end provider replay and browser evidence |
 | 13 | Operations navigation/Recovery Brain | PARTIAL | commit local trace UI; E2E evidence for every judge-relevant state |
 | 14 | Safety invariants and contracts | VERIFIED | reconcile obsolete contract text |
-| 15 | Versioned payment truth | VERIFIED | committed baseline is verified; fresh migration/integration gate required on the approved branch |
+| 15 | Versioned payment truth | VERIFIED | committed baseline plus Gate 2 fresh migration/integration gate passed |
 | 16 | Reliable events/reconciliation | VERIFIED | Gate 1A closes `G1-P0-001` with deterministic, full-controller, responsive and committed evidence; later provider-backed provenance remains mapped separately |
 | 17A | Gemini investigator core in shadow mode | PARTIAL | current local work must be preserved and rerun against PostgreSQL |
 | 17B | Live investigator closure | BROKEN | locked benchmark thresholds and final repository gates |
@@ -46,10 +46,10 @@ classification safely. It is temporary and never means complete.
 | BASE-01 | Preserve Phase 17B staged/unstaged/untracked work | VERIFIED | separate staged/unstaged/combined patches, exact file copies and Git bundle exist; original worktree is frozen; approved clean continuation branch has zero application changes |
 | BASE-02 | Review sanitized-out `.env.example` change | VERIFIED | six investigator settings passed local type/range/order checks; secret-pattern count was zero; no value was exposed |
 | BASE-03 | Current PostgreSQL migration chain | VERIFIED | clean Gate 1 database upgraded base-to-`e7a1c2d3f417`; `current`, `heads` and `check` passed |
-| BASE-04 | Current complete backend suite | VERIFIED | `686 passed, 1 skipped`; skip is individually recorded and no test failed |
-| BASE-05 | Frontend compile/lint | VERIFIED | already passed on snapshot; rerun after any dependency change |
-| BASE-06 | Frontend security audit | BROKEN | zero unaccepted critical/high findings |
-| BASE-07 | Backend security audit | BROKEN | zero unaccepted known runtime findings |
+| BASE-04 | Current complete backend suite | VERIFIED | Gate 2 exact candidate: `721 passed, 1 skipped`; skip is retained and no test failed |
+| BASE-05 | Frontend compile/lint | VERIFIED | Gate 2 Next.js 16.4.6 candidate passes ESLint and production build |
+| BASE-06 | Frontend security audit | VERIFIED | npm production audit is zero; `DEC-029` conditionally accepts the single dev-only `picomatch` advisory chain until a compatible upstream fix and requires reassessment before hosted/public deployment or Phase 21 closure |
+| BASE-07 | Backend security audit | VERIFIED | `pip-audit` reports zero known findings for runtime and complete locked Python dependency sets |
 | BASE-08 | Browser behavior and accessibility | PARTIAL | inspected 1024/1440/1920 Gate 1A views are legible; keyboard, contrast and automated E2E proof remain later gates |
 | BASE-09 | Documentation consistency | BROKEN | README/contracts/statuses match current code and evidence |
 | BASE-10 | Owner-only default-branch identity | VERIFIED | future commits repeat the same verification |
@@ -96,6 +96,27 @@ requirement and is not falsely promoted by this decision.
 Gate 1A decision: `VERIFIED`. G1A-01 through G1A-08 pass and the owner-authorized local
 23-path closure commit records the implementation and evidence. No push is part of this
 decision.
+
+## Gate 2 dependency and access-control acceptance
+
+| ID | Requirement | Status | Evidence / remaining gate |
+| --- | --- | --- | --- |
+| G2-01 | Supported locked runtime dependencies | VERIFIED | Next.js/eslint-config-next 16.4.6, sharp 0.35.5, source-map-js 1.2.2 and patched Python transitive versions are locked; clean installs, lint and build pass |
+| G2-02 | Zero known Python runtime findings | VERIFIED | runtime and complete locked exports each pass `pip-audit` with zero known vulnerabilities |
+| G2-03 | Zero known npm production findings | VERIFIED | `npm audit --omit=dev --audit-level=high` reports zero vulnerabilities |
+| G2-04 | Complete npm audit disposition | VERIFIED | `DEC-029` records bounded acceptance of the single lint/build-only `picomatch` advisory chain; npm production is clean, no forced breaking downgrade was used, and reassessment is mandatory before hosted/public deployment or Phase 21 closure |
+| G2-05 | Protected operational backend reads | VERIFIED | 10 dashboard/case/incident/outcome/evaluation/worker/queue routes fail closed behind a constant-time server token; 52 focused tests pass |
+| G2-06 | Public probe boundary | VERIFIED | `/health/live` and `/health/ready` remain public; worker and queue details require reviewer access |
+| G2-07 | Browser reviewer session | VERIFIED | code exchanged once for signed expiring HttpOnly/SameSite=Strict cookie; code removed from browser storage and request headers; denied/authenticated/logout HTTP and inspected browser paths pass |
+| G2-08 | Mutation defense in depth | VERIFIED | Payment Lab and approval proxies require signed session plus same-origin; existing lab/operator backend tokens remain server-only |
+| G2-09 | Abuse and secret controls | VERIFIED | the approved controlled single-merchant scope has bounded per-client/global login throttles, request-size cap, server-only secrets and secret-shaped scan; durable/distributed throttle and hosted-proxy validation remain explicitly mapped to deployment/Phase 21, not hidden Gate 2 claims |
+| G2-10 | Complete regression and Windows runtime | VERIFIED | Windows validation passed three PostgreSQL integration tests, `721 passed, 1 skipped`, backend quality, frontend lint/build, base-to-head migration, fresh empty runtime DB, 11-process controller readiness, 8/8 worker health and clean shutdown |
+
+Gate 2 technical decision: `VERIFIED`. G2-01 through G2-10 pass for the approved controlled
+reviewer-demo scope. The exact 46-path branch/work order remains `PARTIAL` only until the
+owner reviews this documentation diff and separately authorizes the local commit. The
+final evidence archive SHA-256 is
+`fea6daa02efa9cb202a5906b9f463e002caab4d1353b26d698a100b0462227e7`.
 
 ## Phase 17B acceptance
 
@@ -183,8 +204,8 @@ submission/selection-critical; `P1` is important after the safe core; `P2` is op
 | F-43 | Outcomes and waterfall UI | SC | PARTIAL | Outcome Ledger and evaluation dashboards exist | Correct attribution, denominator partition and drilldown proof remain |
 | F-44 | Receipt verification UI | P1 | NOT IMPLEMENTED | no accepted receipt-verifier surface | Read-only redacted valid/broken/unavailable result and isolated tamper demo required |
 | F-45 | Verified provider-backed run replay | SC | NOT IMPLEMENTED | no accepted genuine completed-run replay evidence | Replay must be read-only, labelled and produce no new actions/metrics |
-| F-46 | Protected lab/operator access | SC | PARTIAL | mutation routes use shared demo/operator tokens | Decide deployment boundary; add scoped auth/rate/amount caps and protect read APIs as required |
-| F-47 | Health, queues, correlation and redacted observability | SC | PARTIAL | ready/workers/queues endpoints, supervised workers and Gate 1A metrics pass | End-to-end correlation, redaction, abuse signals and hosted operations evidence remain |
+| F-46 | Protected lab/operator access | SC | PARTIAL | Gate 2 candidate adds signed reviewer sessions, same-origin checks, bounded login attempts and protected reads while retaining specialized mutation tokens | Hosted proxy validation, durable/distributed abuse control and production identity/tenant model remain |
+| F-47 | Health, queues, correlation and redacted observability | SC | PARTIAL | public live/ready and protected workers/queues, supervised workers and Gate 1A metrics pass | End-to-end correlation, redaction, abuse signals and hosted operations evidence remain |
 | F-48 | Clean-clone reproducibility | SC | PARTIAL | locked installs, controller and migration scripts reproduced locally | One-command empty-provider vs seeded-lab bootstrap from a fresh clone remains |
 | F-49 | Protected hosted demo | P1 | NOT IMPLEMENTED | repository is local PowerShell processes plus Compose data services | Deployment/access decision, HTTPS webhook and protected operations required |
 | F-50 | Submission documentation and video | SC | NOT IMPLEMENTED | audit docs exist, but README/video/evidence package are incomplete | Final README, architecture, evaluation, limitations, five-minute video and release gate |

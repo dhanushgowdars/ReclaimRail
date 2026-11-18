@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import { ReviewerLogoutButton } from "@/components/reviewer-logout-button";
+
 const navigation = [
   { id: "lab", href: "/payment-lab", label: "Live demo", icon: Play, live: true },
   { id: "overview", href: "/", label: "Command center", icon: LayoutDashboard },
@@ -49,6 +51,7 @@ export function RecoveryNavigation({ active = "overview" }: { active?: (typeof n
           );
         })}
       </nav>
+      <ReviewerLogoutButton />
       <div className="sidebar__footer">
         <strong><i aria-hidden="true" /> Razorpay Test Mode</strong>
         <span>Provider evidence only</span>

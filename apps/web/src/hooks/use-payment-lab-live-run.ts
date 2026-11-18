@@ -153,7 +153,6 @@ export type PaymentLabLiveRun = {
 
 type UsePaymentLabLiveRunOptions = {
   paymentLabRunId: string | null;
-  reviewerCode: string;
 };
 
 const DEFAULT_POLL_DELAY_MILLISECONDS = 1000;
@@ -168,7 +167,6 @@ function boundedPollDelay(delay: number | null): number {
 
 export function usePaymentLabLiveRun({
   paymentLabRunId,
-  reviewerCode,
 }: UsePaymentLabLiveRunOptions): {
   liveRun: PaymentLabLiveRun | null;
   visibleSteps: PaymentLabLiveRun["steps"];
@@ -194,7 +192,6 @@ export function usePaymentLabLiveRun({
   const pollError = currentPollFailure?.message ?? null;
   const polling = Boolean(
     paymentLabRunId &&
-      reviewerCode &&
       !liveRun?.terminal &&
       currentPollFailure?.retrying !== false,
   );
@@ -203,7 +200,7 @@ export function usePaymentLabLiveRun({
   const visibleSteps = liveRun?.steps ?? [];
 
   useEffect(() => {
-    if (!paymentLabRunId || !reviewerCode) {
+    if (!paymentLabRunId) {
       return;
     }
 
@@ -224,7 +221,6 @@ export function usePaymentLabLiveRun({
           signal: activeRequest.signal,
           headers: {
             Accept: "application/json",
-            "X-ReclaimRail-Reviewer-Code": reviewerCode,
           },
         });
         const responseBody = (await response.json()) as
@@ -295,7 +291,7 @@ export function usePaymentLabLiveRun({
         clearTimeout(timer);
       }
     };
-  }, [paymentLabRunId, reviewerCode]);
+  }, [paymentLabRunId]);
 
   return { liveRun, visibleSteps, polling, pollError };
 }

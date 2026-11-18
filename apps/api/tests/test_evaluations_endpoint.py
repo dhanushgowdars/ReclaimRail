@@ -13,6 +13,8 @@ from app.db.models.evaluation import EvaluationRun
 from app.main import app
 from app.services.evaluation_service import EvaluationMetrics
 
+REVIEWER_HEADERS = {"X-ReclaimRail-Reviewer-Token": "reviewer-secret"}
+
 
 async def override_database_session() -> AsyncIterator[AsyncSession]:
     yield MagicMock(spec=AsyncSession)
@@ -67,7 +69,7 @@ def test_create_controlled_batch_labels_synthetic_data(monkeypatch: pytest.Monke
     )
 
     with TestClient(app) as client:
-        response = client.post("/recovery/evaluations/controlled-batch")
+        response = client.post("/recovery/evaluations/controlled-batch", headers=REVIEWER_HEADERS)
 
     assert response.status_code == 201
     body = response.json()

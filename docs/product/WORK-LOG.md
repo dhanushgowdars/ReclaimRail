@@ -693,3 +693,156 @@ Successful pre-commit checks require the parent
 `git diff --cached --check`, required author/committer identity and zero unstaged/untracked
 remainder. The resulting commit hash is recorded by Git and the post-commit terminal
 evidence rather than embedded in the commit itself. No push is authorized.
+
+## 18 November 2026 — Gate 2 dependency/access-control candidate
+
+The owner authorized Gate 2 implementation on separate branch
+`gate2/dependency-access-control` from commit
+`1b26642258ed9e5d3c3b4249d8dc2004050276c9`, targeting controlled reviewer-demo access.
+The authorization prohibited staging, committing, pushing, merging, deployment and live
+Gemini/Razorpay calls. Those prohibitions were preserved.
+
+Implemented scope:
+
+- upgraded and locked the vulnerable Python transitive packages and supported Next.js
+  patch line without broad force-upgrades;
+- added a fail-closed reviewer token to 10 operational backend reads while retaining
+  public liveness/readiness and existing webhook/lab/operator controls;
+- added a signed, expiring, HttpOnly, SameSite=Strict reviewer browser session;
+- removed reviewer code storage/forwarding from browser state;
+- required same-origin requests for Payment Lab and approval mutations;
+- added bounded request size and per-client/global in-memory login throttles;
+- added the visible access gate and reviewer logout control; and
+- updated the local PowerShell controller to authenticate worker diagnostics without
+  printing the token.
+
+Validation performed on the exact uncommitted candidate:
+
+| Check | Result |
+| --- | --- |
+| Backend Ruff format/lint | passed; 227 application/test files formatted and all checks clean |
+| Backend strict mypy | passed; 120 source files |
+| Reviewer/access focused tests | `52 passed` |
+| Non-PostgreSQL backend regression | `703 passed, 16 skipped` |
+| PostgreSQL integration | not run in this Linux environment; Docker command unavailable; three integration files remain for Windows |
+| Alembic graph | one head, `f8c1b2d3e4a5` |
+| Frontend lint | passed |
+| Frontend production build | passed on Next.js 16.4.6; access/session routes and Proxy compiled |
+| Python runtime audit | zero known vulnerabilities |
+| Python complete audit | zero known vulnerabilities |
+| npm production audit | zero vulnerabilities |
+| npm complete audit | 14 high findings, all one unpatched dev-only `picomatch` advisory chain; no non-breaking fix available |
+| HTTP denial/session proof | unauthenticated page `307` to `/access`; unauthenticated API `401`; missing origin `403`; wrong code `401`; valid code `200`; HttpOnly/Strict cookie; authenticated page `200`; mutation without origin `403`; logout `200` |
+| Manual browser proof | protected Payment Lab opened only after access; logout visible at 1050px and returned to `/access` |
+| Git safety | parent unchanged, zero staged files, zero commits/pushes/merges/deployments |
+| Provider use | no Gemini or Razorpay request or mutation |
+
+The complete npm finding is not silently accepted. npm recommends
+`npm audit fix --force`, which would install a breaking `eslint-config-next@14.2.35`
+downgrade; that command was not run. Gate 2 remains `PARTIAL` pending owner disposition of
+the dev-only advisory and an exact Windows/PostgreSQL integration, migration/controller
+smoke and final audit rerun. No Phase 17B work began.
+
+## 18 November 2026 — Gate 2 final Windows/PostgreSQL validation
+
+### Authorization and preserved boundary
+
+The owner authorized final Gate 2 Windows/PostgreSQL validation only. Staging, committing,
+pushing, merging, deployment, Phase 17B and live Gemini/Razorpay calls remained prohibited.
+The exact branch was `gate2/dependency-access-control` at parent
+`1b26642258ed9e5d3c3b4249d8dc2004050276c9`, with required identity
+`Dhanush R S <dhanushrs981@gmail.com>`, 46 approved changed paths and zero staged files.
+
+### Deterministic and security results
+
+The first complete Windows run validated the expensive gates before its controller wrapper
+was interrupted:
+
+| Check | Final result |
+| --- | --- |
+| PostgreSQL-focused integration | `3 passed` |
+| Complete backend suite | `721 passed, 1 skipped` |
+| Ruff format/lint | passed |
+| Strict mypy | passed for 120 source files |
+| Frontend lint/build | passed; Next.js access/session routes and Proxy compiled |
+| Python runtime audit | zero known vulnerabilities |
+| Python complete audit | zero known vulnerabilities |
+| npm production audit | zero vulnerabilities |
+| npm complete audit | one unpatched dev-only `picomatch` advisory represented as 14 transitive high findings |
+
+The owner approved the recommended bounded disposition in `DEC-029`: accept the advisory
+only for the lint/build development chain while production/runtime audits remain clean; do
+not run the breaking `npm audit fix --force`; reassess when a compatible upstream fix is
+available and before hosted/public deployment or Phase 21 closure.
+
+### Validation-harness failures retained honestly
+
+The application did not cause the interrupted validation attempts:
+
+1. the initial wrapper used Windows `Start-Process -Wait`, which waited on the long-running
+   controller process tree after successful startup;
+2. the first continuation removed process-tree waiting but redirected output through pipes
+   inherited by the long-running children, so the output reader did not complete;
+3. the next attempt correctly returned from the controller command but detected tracked
+   processes left by the interrupted continuation and failed closed rather than starting
+   duplicates; and
+4. after an explicit controller stop, the corrected continuation inherited console output,
+   reused the already validated expensive evidence and completed the runtime gate.
+
+Each interrupted attempt restored environment files. Tracked application paths, the Git
+index, commits and remotes were unchanged. These were harness defects and are not counted
+as passing application evidence.
+
+### Final controlled runtime evidence
+
+The successful continuation used fresh database
+`reclaimrail_gate2_runtime_resume_20261118191824` and isolated Redis logical database 11.
+Base-to-`f8c1b2d3e4a5` migration passed. The database contained zero payment-attempt,
+recovery-case or recovery-action provider-work candidates before controller start.
+
+The complete local controller then started the API, webhook server, web application and all
+eight supervised workers. API readiness passed and workers were 8/8 healthy. Runtime HTTP
+assertions passed for:
+
+- public `/health/live` and `/health/ready`;
+- unauthenticated denial and authenticated access for worker diagnostics;
+- unauthenticated Payment Lab redirect to the access gate;
+- unauthenticated frontend API denial;
+- reviewer-code exchange for a signed `HttpOnly`, `SameSite=Strict` session;
+- authenticated Payment Lab access; and
+- reviewer logout.
+
+Recent runtime logs contained zero `api.razorpay.com` or Gemini provider-network findings
+and zero traceback/critical/unhandled/worker-failed findings. No Razorpay mutation, live
+Razorpay request or live Gemini request was made. The controller stopped all 11 processes.
+Environment values were not printed.
+
+Final evidence archive:
+
+- path:
+  `D:\NEW VOLUME\INTERNSHIP PREP\RAZORPAY\ReclaimRail-Gate2-Runtime-Continuation-20261118-191824-shareable.zip`;
+- SHA-256:
+  `fea6daa02efa9cb202a5906b9f463e002caab4d1353b26d698a100b0462227e7`.
+
+### Gate decision and next permitted action
+
+G2-01 through G2-10 are technically `VERIFIED` for the controlled single-merchant reviewer
+scope. Hosted identity/tenant enforcement, durable distributed abuse controls and public
+proxy validation remain later deployment/Phase 21 requirements and were not silently
+claimed or removed.
+
+The 46-path candidate remains uncommitted and the overall work order remains `PARTIAL`
+until the owner reviews this documentation reconciliation and separately authorizes the
+exact local commit. Zero files were staged; zero commits, pushes, merges or deployments
+were performed. Phase 17B did not begin.
+
+## 18 November 2026 — Gate 2 closure documentation reconciliation
+
+The owner authorized documentation reconciliation only after reviewing the final validation
+output and shareable archive. This update records `DEC-029` and `DEC-030`, refreshes Gate 2
+acceptance rows and preserves the distinction between technical verification and an
+uncommitted branch. It modifies only the six authority documents already present in the
+46-path candidate. It does not stage, commit, push, merge, deploy or begin Phase 17B.
+
+Next action: present the exact six-document diff and full 46-path status for owner review.
+Only a later explicit authorization may stage and commit Gate 2.

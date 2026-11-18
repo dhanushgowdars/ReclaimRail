@@ -1,4 +1,10 @@
-import { timingSafeEqual } from "node:crypto";
+import { cookies } from "next/headers";
+
+import {
+  reviewerSessionCookieName,
+  verifyReviewerSessionToken,
+} from "@/lib/reviewer-session";
+import { requestHasSameOrigin } from "@/lib/same-origin";
 
 const MAX_REQUEST_BYTES = 4096;
 const UUID_PATTERN =
@@ -11,32 +17,20 @@ function apiBaseUrl(): string {
   );
 }
 
-function safeEqual(left: string, right: string): boolean {
-  const leftBytes = Buffer.from(left);
-  const rightBytes = Buffer.from(right);
-  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
-}
-
-function requireDemoReviewer(request: Request): Response | null {
-  const configuredReviewerCode =
-    process.env.RECLAIMRAIL_PAYMENT_LAB_REVIEWER_CODE?.trim();
-  const reviewerCode = request.headers.get("X-ReclaimRail-Reviewer-Code")?.trim();
-
-  if (!configuredReviewerCode) {
-    return Response.json({ detail: "Payment Lab reviewer access is not configured" }, { status: 503 });
-  }
-  if (!reviewerCode || !safeEqual(reviewerCode, configuredReviewerCode)) {
-    return Response.json({ detail: "Reviewer access denied" }, { status: 401 });
-  }
-  return null;
-}
-
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ approvalId: string }> },
 ): Promise<Response> {
-  const denied = requireDemoReviewer(request);
-  if (denied) return denied;
+  if (!requestHasSameOrigin(request)) {
+    return Response.json({ detail: "Reviewer access denied" }, { status: 403 });
+  }
+  const cookieStore = await cookies();
+  const authenticated = await verifyReviewerSessionToken(
+    cookieStore.get(reviewerSessionCookieName())?.value,
+  );
+  if (!authenticated) {
+    return Response.json({ detail: "Reviewer access denied" }, { status: 401 });
+  }
 
   const operatorToken = process.env.RECLAIMRAIL_RECOVERY_OPERATOR_ACCESS_TOKEN?.trim();
   if (!operatorToken) {

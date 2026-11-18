@@ -1,4 +1,10 @@
-import { timingSafeEqual } from "node:crypto";
+import { cookies } from "next/headers";
+
+import {
+  reviewerSessionCookieName,
+  verifyReviewerSessionToken,
+} from "@/lib/reviewer-session";
+import { requestHasSameOrigin } from "@/lib/same-origin";
 
 const MAX_REQUEST_BYTES = 4096;
 const PAYMENT_LAB_RUN_ID_PATTERN =
@@ -11,25 +17,14 @@ function apiBaseUrl(): string {
   );
 }
 
-function safeEqual(left: string, right: string): boolean {
-  const leftBytes = Buffer.from(left);
-  const rightBytes = Buffer.from(right);
-
-  return (
-    leftBytes.length === rightBytes.length &&
-    timingSafeEqual(leftBytes, rightBytes)
-  );
-}
-
-function getPaymentLabAccess(request: Request):
+async function getPaymentLabAccess(): Promise<
   | { backendAccessToken: string }
-  | { response: Response } {
-  const configuredReviewerCode =
-    process.env.RECLAIMRAIL_PAYMENT_LAB_REVIEWER_CODE?.trim();
+  | { response: Response }
+> {
   const backendAccessToken =
     process.env.RECLAIMRAIL_PAYMENT_LAB_ACCESS_TOKEN?.trim();
 
-  if (!configuredReviewerCode || !backendAccessToken) {
+  if (!backendAccessToken) {
     return {
       response: Response.json(
         { detail: "Payment Lab access is not configured" },
@@ -38,11 +33,11 @@ function getPaymentLabAccess(request: Request):
     };
   }
 
-  const reviewerCode = request.headers
-    .get("X-ReclaimRail-Reviewer-Code")
-    ?.trim();
-
-  if (!reviewerCode || !safeEqual(reviewerCode, configuredReviewerCode)) {
+  const cookieStore = await cookies();
+  const authenticated = await verifyReviewerSessionToken(
+    cookieStore.get(reviewerSessionCookieName())?.value,
+  );
+  if (!authenticated) {
     return {
       response: Response.json(
         { detail: "Payment Lab access denied" },
@@ -66,7 +61,7 @@ function upstreamResponse(upstream: Response, body: string): Response {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  const access = getPaymentLabAccess(request);
+  const access = await getPaymentLabAccess();
 
   if ("response" in access) {
     return access.response;
@@ -116,7 +111,10 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const access = getPaymentLabAccess(request);
+  if (!requestHasSameOrigin(request)) {
+    return Response.json({ detail: "Payment Lab access denied" }, { status: 403 });
+  }
+  const access = await getPaymentLabAccess();
 
   if ("response" in access) {
     return access.response;

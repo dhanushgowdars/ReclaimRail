@@ -11,14 +11,14 @@
 
 - **Plan version:** 2.4-unified-roadmap-locked
 - **Locked on:** 31 October 2026
-- **Evidence refreshed:** 18 November 2026 from Gate 1A deterministic, full-controller and visually inspected runtime evidence
+- **Evidence refreshed:** 18 November 2026 from Gate 1A closure and final Gate 2 Windows/PostgreSQL validation
 - **Unified roadmap status:** owner-approved and locked on 18 November 2026
 - **Product:** Evidence-grounded, policy-bounded payment recovery control plane
 - **Current merged baseline:** `1912645` (Phase 17 core runtime merged through PR #19)
-- **Current phase:** Gate 1A is `VERIFIED` and closed by the owner-authorized local 23-path commit; Gate 2 is the next work order and has not begun.
+- **Current phase:** Gate 2 technical acceptance is `VERIFIED`; the uncommitted 46-path candidate remains `PARTIAL` only until documentation-diff review and an owner-authorized local commit.
 - **Verified committed foundation:** Phases 1–5, 14–16 at repository level
 - **Partial historical product phases:** 6–13 and 17A
-- **Broken closure gate:** Phase 17B live investigator and current dependency security
+- **Broken closure gate:** Phase 17B live investigator
 - **Not implemented against this plan:** Phases 18–23
 
 ## 0. Audit-reset execution order
@@ -142,6 +142,25 @@ Acceptance:
 - the owner decides which read APIs require protection for the chosen deployment mode;
 - browser evidence proves protected and denied paths; and
 - no recovery semantics change silently.
+
+Final technical result, 18 November 2026: `VERIFIED`. The controlled-reviewer boundary,
+server-only mutation tokens and browser session flow passed denial/authenticated/logout
+HTTP checks. The exact candidate passed the three PostgreSQL integration tests, complete
+backend suite (`721 passed, 1 skipped`), base-to-head migration, backend static quality,
+frontend lint/build, fresh 11-process controller startup and 8/8 worker health. Runtime and
+complete Python audits plus the npm production audit contain zero known vulnerabilities.
+
+The complete npm audit retains one unpatched lint/build-only `picomatch` advisory represented
+as 14 transitive high findings. Under `DEC-029`, the owner accepts that bounded dev-only
+risk until an upstream compatible fix exists; the acceptance expires before hosted/public
+deployment or Phase 21 closure and does not permit `npm audit fix --force`. Runtime logs
+contained zero Razorpay/Gemini network findings, and no provider/model call was authorized.
+Final evidence SHA-256:
+`fea6daa02efa9cb202a5906b9f463e002caab4d1353b26d698a100b0462227e7`.
+
+The work order remains administratively `PARTIAL` until the owner reviews this reconciled
+documentation diff and separately authorizes the exact 46-path local commit. No stage,
+commit, push, merge, deployment or Phase 17B work is authorized by this reconciliation.
 
 ### Gate 3 — Phase 17B live investigator closure
 
@@ -1152,7 +1171,7 @@ actual measured work and failures.
 | Remaining phase | Expected effort |
 | --- | ---: |
 | Gate 1A — documentation review and local commit closure | Complete |
-| Gate 2 — dependency/access-control stabilization | re-estimate after package inventory |
+| Gate 2 — dependency/access-control stabilization | technical acceptance complete; documentation review/local commit pending |
 | Phase 17B — investigator closure | included in Phase 17 range below |
 | 17 — investigator | 24–30 hours |
 | 18 — validation/ranking | 16–20 hours |
@@ -1168,13 +1187,14 @@ reduce stretch scope, not payment-safety proof.
 
 ## 23. Next work order
 
-Gate 1A is complete. Gate 2 is the next and only active work order:
+Gate 1A is complete. Gate 2 technical acceptance is complete, but its uncommitted work
+order remains the only active scope:
 
-1. inventory current npm/Python security findings without broad automatic upgrades;
-2. define the controlled public-demo authentication/authorization boundary;
-3. make only the approved dependency/access-control corrections;
-4. rerun migrations, backend tests, security audits and frontend lint/build;
-5. update the authority documents and stop for owner review before any commit.
+1. review the reconciled six-document diff and exact 46 changed paths;
+2. if accepted, separately authorize staging and one local Gate 2 commit under the required
+   Dhanush identity;
+3. verify the committed path set, author/committer identity and clean worktree; and
+4. stop before any push, merge, deployment or Phase 17B work unless separately authorized.
 
-Phase 17B must not resume until Gate 2 is reviewed and accepted. Phase 18 must not begin
+Phase 17B must not resume until the Gate 2 local commit is verified. Phase 18 must not begin
 while any P17 requirement is pending, silently deferred or supported only by a screenshot.

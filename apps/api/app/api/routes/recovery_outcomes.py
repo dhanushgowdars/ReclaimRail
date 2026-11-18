@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.reviewer_access import require_reviewer_access
 from app.core.config import Settings, get_settings
 from app.core.database import get_database_session
 from app.services.recovery_outcome_feed_service import (
@@ -51,6 +52,7 @@ OutcomeOffsetQuery = Annotated[
 router = APIRouter(
     prefix="/recovery/dashboard",
     tags=["recovery-dashboard"],
+    dependencies=[Depends(require_reviewer_access)],
 )
 
 

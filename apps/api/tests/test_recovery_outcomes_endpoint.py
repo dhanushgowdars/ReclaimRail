@@ -15,6 +15,8 @@ from app.services.recovery_outcome_feed_service import (
     RecoveryOutcomeFeedPage,
 )
 
+REVIEWER_HEADERS = {"X-ReclaimRail-Reviewer-Token": "reviewer-secret"}
+
 OUTCOME_ID = UUID("10000000-0000-0000-0000-000000000001")
 CASE_ID = UUID("20000000-0000-0000-0000-000000000001")
 ACTION_ID = UUID("30000000-0000-0000-0000-000000000001")
@@ -71,7 +73,7 @@ def test_lists_verified_pii_safe_recovery_outcomes(
     )
 
     with TestClient(app) as client:
-        response = client.get("/recovery/dashboard/outcomes")
+        response = client.get("/recovery/dashboard/outcomes", headers=REVIEWER_HEADERS)
 
     assert response.status_code == 200
     assert response.json() == {
@@ -122,6 +124,7 @@ def test_accepts_status_currency_and_pagination_filters(
     with TestClient(app) as client:
         response = client.get(
             "/recovery/dashboard/outcomes",
+            headers=REVIEWER_HEADERS,
             params=[
                 ("currency", "usd"),
                 ("status", "recovered"),
@@ -154,6 +157,7 @@ def test_rejects_invalid_outcome_status_before_querying(
     with TestClient(app) as client:
         response = client.get(
             "/recovery/dashboard/outcomes",
+            headers=REVIEWER_HEADERS,
             params={"status": "unknown"},
         )
 

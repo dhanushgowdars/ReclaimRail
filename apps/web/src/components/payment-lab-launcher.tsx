@@ -77,7 +77,6 @@ const ACTIVE_RUN_STORAGE_KEY = "reclaimrail.paymentLab.activeRun.v1";
 
 type PersistedActiveRun = {
   run: PaymentLabResponse;
-  reviewerCode: string;
   runState: RunState;
   isVerifiedReplay: boolean;
 };
@@ -114,13 +113,11 @@ export function PaymentLabLauncher() {
   const failureObservedRef = useRef(false);
   const [checkoutLoaded, setCheckoutLoaded] = useState(false);
   const [demoTrack, setDemoTrack] = useState<DemoTrack>("auto");
-  const [reviewerCode, setReviewerCode] = useState("");
   const [amountRupees, setAmountRupees] = useState("3499");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("netbanking");
   const [enableTestEmailNotification, setEnableTestEmailNotification] = useState(false);
   const [runState, setRunState] = useState<RunState>("idle");
   const [run, setRun] = useState<PaymentLabResponse | null>(null);
-  const [pollReviewerCode, setPollReviewerCode] = useState("");
   const [isVerifiedReplay, setIsVerifiedReplay] = useState(false);
   const [safeError, setSafeError] = useState<string | null>(null);
   const [webhookDelayWarning, setWebhookDelayWarning] = useState<string | null>(null);
@@ -129,7 +126,6 @@ export function PaymentLabLauncher() {
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const { liveRun, polling, pollError } = usePaymentLabLiveRun({
     paymentLabRunId: run?.payment_lab_run_id ?? null,
-    reviewerCode: pollReviewerCode,
   });
   const selectedAmountMinor = demoTrack === "auto" ? AUTO_AMOUNT_MINOR : Math.round(Number(amountRupees) * 100);
   const busy = runState === "creating_order" || runState === "opening_checkout";
@@ -145,13 +141,9 @@ export function PaymentLabLauncher() {
         const restored = JSON.parse(stored) as Partial<PersistedActiveRun>;
         if (
           restored.run?.payment_lab_run_id &&
-          restored.run.checkout &&
-          typeof restored.reviewerCode === "string" &&
-          restored.reviewerCode.length > 0
+          restored.run.checkout
         ) {
           setRun(restored.run);
-          setReviewerCode(restored.reviewerCode);
-          setPollReviewerCode(restored.reviewerCode);
           setRunState(restored.runState ?? "awaiting_webhook");
           setIsVerifiedReplay(Boolean(restored.isVerifiedReplay));
           setRunUrl(restored.run.payment_lab_run_id);
@@ -176,7 +168,6 @@ export function PaymentLabLauncher() {
     failureObservedRef.current = false;
     setRun(null);
     setRunState("idle");
-    setPollReviewerCode("");
     setIsVerifiedReplay(false);
     setSafeError(null);
     setWebhookDelayWarning(null);
@@ -203,7 +194,7 @@ export function PaymentLabLauncher() {
     optionalReason: string,
   ): Promise<void> {
     const approval = liveRun?.approval;
-    if (!approval || approval.status !== "pending" || !pollReviewerCode) return;
+    if (!approval || approval.status !== "pending") return;
 
     setApprovingApprovalId(approval.approval_id);
     setApprovalError(null);
@@ -220,7 +211,6 @@ export function PaymentLabLauncher() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-ReclaimRail-Reviewer-Code": pollReviewerCode,
           },
           body: JSON.stringify({
             decision,
@@ -253,13 +243,7 @@ export function PaymentLabLauncher() {
     setApprovalError(null);
     setApprovingApprovalId(null);
     setRun(null);
-    setPollReviewerCode("");
     setIsVerifiedReplay(false);
-    if (!reviewerCode.trim()) {
-      setRunState("error");
-      setSafeError("Enter the reviewer access code supplied with the demo.");
-      return;
-    }
     const RazorpayCheckout = window.Razorpay;
     if (!checkoutLoaded || typeof RazorpayCheckout !== "function") {
       setRunState("error");
@@ -277,18 +261,15 @@ export function PaymentLabLauncher() {
       ? { client_request_id: crypto.randomUUID(), mode, enable_test_email_recovery_notification: enableTestEmailNotification }
       : { client_request_id: crypto.randomUUID(), mode, amount_minor: selectedAmountMinor, payment_method: paymentMethod, enable_test_email_recovery_notification: enableTestEmailNotification };
     try {
-      const response = await fetch("/api/payment-lab/runs", { method: "POST", headers: { "Content-Type": "application/json", "X-ReclaimRail-Reviewer-Code": reviewerCode.trim() }, body: JSON.stringify(requestBody) });
+      const response = await fetch("/api/payment-lab/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestBody) });
       const responseBody = (await response.json()) as PaymentLabResponse | { detail?: string };
       if (!response.ok || !("checkout" in responseBody)) {
         throw new Error("detail" in responseBody && responseBody.detail ? responseBody.detail : "Payment Lab run creation failed");
       }
       setRun(responseBody);
-      const normalizedReviewerCode = reviewerCode.trim();
-      setPollReviewerCode(normalizedReviewerCode);
       setRunState("opening_checkout");
       persistActiveRun({
         run: responseBody,
-        reviewerCode: normalizedReviewerCode,
         runState: "awaiting_webhook",
         isVerifiedReplay: false,
       });
@@ -325,12 +306,8 @@ export function PaymentLabLauncher() {
   }
 
   async function openVerifiedReplay(): Promise<void> {
-    if (!reviewerCode.trim()) {
-      setSafeError("Enter the reviewer access code to open a recorded Test Mode replay.");
-      return;
-    }
     try {
-      const response = await fetch("/api/payment-lab/runs?verified_replay=latest", { cache: "no-store", headers: { "X-ReclaimRail-Reviewer-Code": reviewerCode.trim() } });
+      const response = await fetch("/api/payment-lab/runs?verified_replay=latest", { cache: "no-store" });
       const responseBody = (await response.json()) as PaymentLabLiveRun | { detail?: string };
       if (!response.ok || !("steps" in responseBody)) {
         throw new Error("detail" in responseBody && responseBody.detail ? responseBody.detail : "No completed Test Mode replay is available yet");
@@ -341,7 +318,6 @@ export function PaymentLabLauncher() {
         checkout_expires_at: responseBody.checkout_expires_at,
         checkout: { key_id: "", order_id: responseBody.provider_order_id ?? "Recorded Test Mode run", amount_minor: responseBody.amount_minor, currency: responseBody.currency, name: "Recorded Test Mode replay", description: "Verified provider-backed replay", timeout_seconds: 0, theme_color: "#2563eb", payment_method_hint: responseBody.payment_method as PaymentMethod, prefill_email: null },
       });
-      setPollReviewerCode(reviewerCode.trim());
       setIsVerifiedReplay(true);
       setWebhookDelayWarning(null);
       setSafeError(null);
@@ -353,7 +329,6 @@ export function PaymentLabLauncher() {
           checkout_expires_at: responseBody.checkout_expires_at,
           checkout: { key_id: "", order_id: responseBody.provider_order_id ?? "Recorded Test Mode run", amount_minor: responseBody.amount_minor, currency: responseBody.currency, name: "Recorded Test Mode replay", description: "Verified provider-backed replay", timeout_seconds: 0, theme_color: "#2563eb", payment_method_hint: responseBody.payment_method as PaymentMethod, prefill_email: null },
         },
-        reviewerCode: reviewerCode.trim(),
         runState: "idle",
         isVerifiedReplay: true,
       });
@@ -374,7 +349,7 @@ export function PaymentLabLauncher() {
         </div>
         <div className="lab-selection"><div><span className="lab-field-label">Recovery amount</span>{demoTrack === "auto" ? <strong>{formatMoney(selectedAmountMinor)}</strong> : <label className="lab-input lab-input--amount"><span>₹</span><input inputMode="decimal" min="1" type="number" value={amountRupees} onChange={(event) => setAmountRupees(event.target.value)} /></label>}{demoTrack === "review" ? <small>Any amount above the configured threshold will enter protected review.</small> : null}</div><div><label className="lab-field-label" htmlFor="payment-method">Payment rail</label>{demoTrack === "auto" ? <strong>Choose in Razorpay Checkout</strong> : <select id="payment-method" className="lab-input" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}><option value="netbanking">Netbanking</option><option value="upi">UPI</option><option value="card">Card</option><option value="wallet">Wallet</option></select>}</div></div>
         <label className="lab-notification-consent"><input checked={enableTestEmailNotification} type="checkbox" onChange={(event) => setEnableTestEmailNotification(event.target.checked)} /><span><strong>Send one controlled test-email notification if policy allows</strong><small>Uses only the configured consented, allowlisted demo inbox.</small></span></label>
-        <div className="lab-access"><label htmlFor="reviewer-code">Reviewer access code</label><input id="reviewer-code" autoComplete="off" placeholder="Provided with the demo" type="password" value={reviewerCode} onChange={(event) => setReviewerCode(event.target.value)} /><span>The code is sent only to ReclaimRail&apos;s server proxy.</span></div>
+        <div className="lab-access"><strong>Controlled reviewer session active</strong><span>Payment Lab requests use the signed HttpOnly session established at the access gate. No reviewer credential is stored in browser storage.</span></div>
         <button className="lab-primary-action" disabled={busy} type="button" onClick={() => void startRun()}>{busy ? <><LoaderCircle className="spin" size={18} /> Preparing secure checkout…</> : <><Play size={18} fill="currentColor" /> Start this provider-live demo <ArrowRight size={18} /></>}</button>
         <p className="lab-action-note">Razorpay Test Mode · no real money moves · no payment credentials are stored by ReclaimRail</p>
       </div> : <LiveRecoveryCommand run={run} liveRun={liveRun} polling={polling} title={copy.title} detail={copy.detail} safeError={safeError} pollError={pollError} webhookDelayWarning={webhookDelayWarning} isVerifiedReplay={isVerifiedReplay} copiedActionId={copiedActionId} onCopyRecoveryLink={() => void copyRecoveryLink()} onOpenVerifiedReplay={() => void openVerifiedReplay()} onOpenCheckout={() => openCheckout()} onStartAnotherRun={resetRun} approvingApprovalId={approvingApprovalId} approvalError={approvalError} onApprovalDecision={(decision, reason) => void decideApproval(decision, reason)} />}

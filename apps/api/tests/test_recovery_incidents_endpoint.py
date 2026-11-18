@@ -15,6 +15,8 @@ from app.domain.incidents import IncidentSeverity
 from app.main import app
 from app.services.recovery_incident_feed_service import RecoveryIncidentFeedItem
 
+REVIEWER_HEADERS = {"X-ReclaimRail-Reviewer-Token": "reviewer-secret"}
+
 INCIDENT_ID = UUID("10000000-0000-0000-0000-000000000001")
 NOW = datetime(2026, 8, 26, 7, 0, tzinfo=UTC)
 
@@ -72,7 +74,7 @@ def test_lists_pii_safe_active_incidents(
     )
 
     with TestClient(app) as client:
-        response = client.get("/recovery/dashboard/incidents")
+        response = client.get("/recovery/dashboard/incidents", headers=REVIEWER_HEADERS)
 
     assert response.status_code == 200
     assert response.json() == [
@@ -116,6 +118,7 @@ def test_accepts_currency_and_limit_filters(
     with TestClient(app) as client:
         response = client.get(
             "/recovery/dashboard/incidents",
+            headers=REVIEWER_HEADERS,
             params={"currency": "usd", "limit": "10"},
         )
 
@@ -140,6 +143,7 @@ def test_rejects_invalid_incident_limit_before_querying(
     with TestClient(app) as client:
         response = client.get(
             "/recovery/dashboard/incidents",
+            headers=REVIEWER_HEADERS,
             params={"limit": "26"},
         )
 

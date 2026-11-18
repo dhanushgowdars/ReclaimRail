@@ -29,6 +29,35 @@ function Read-RuntimeState {
     return @($State.processes)
 }
 
+function Get-ReviewerDiagnosticHeaders {
+    $EnvironmentPath = Join-Path $RepoRoot "apps\api\.env"
+    if (-not (Test-Path $EnvironmentPath)) {
+        return @{}
+    }
+
+    $Prefix = "RECLAIMRAIL_REVIEWER_ACCESS_TOKEN="
+    $Entry = Get-Content -LiteralPath $EnvironmentPath |
+        Where-Object { $_.TrimStart().StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Select-Object -Last 1
+    if ($null -eq $Entry) {
+        return @{}
+    }
+
+    $Value = $Entry.Substring($Entry.IndexOf("=") + 1).Trim()
+    if (
+        $Value.Length -ge 2 -and
+        (($Value.StartsWith('"') -and $Value.EndsWith('"')) -or
+         ($Value.StartsWith("'") -and $Value.EndsWith("'")))
+    ) {
+        $Value = $Value.Substring(1, $Value.Length - 2)
+    }
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return @{}
+    }
+
+    return @{ "X-ReclaimRail-Reviewer-Token" = $Value }
+}
+
 function Get-ProcessIdentity {
     param([int]$ProcessId)
     try {
@@ -84,6 +113,7 @@ function Stop-KnownProcesses {
 }
 
 function Show-ReclaimRailStatus {
+    $ReviewerHeaders = Get-ReviewerDiagnosticHeaders
     $Entries = @(Read-RuntimeState)
     if ($Entries.Count -eq 0) {
         Write-Host "No ReclaimRail runtime state was found." -ForegroundColor Yellow
@@ -105,7 +135,10 @@ function Show-ReclaimRailStatus {
     }
 
     try {
-        $Workers = Invoke-RestMethod "http://127.0.0.1:8000/health/workers" -TimeoutSec 3
+        $Workers = Invoke-RestMethod `
+            "http://127.0.0.1:8000/health/workers" `
+            -Headers $ReviewerHeaders `
+            -TimeoutSec 3
         Write-Host "Workers: $($Workers.healthy_count)/$($Workers.expected_count) healthy" -ForegroundColor Cyan
         $Workers.workers |
             Select-Object name, status, heartbeat_age_seconds, consecutive_failures |
@@ -147,6 +180,11 @@ foreach ($RequiredFile in @("apps\api\.env", "apps\web\.env.local")) {
     if (-not (Test-Path $RequiredPath)) {
         throw "Required environment file is missing: $RequiredPath"
     }
+}
+
+$ReviewerHeaders = Get-ReviewerDiagnosticHeaders
+if ($ReviewerHeaders.Count -ne 1) {
+    throw "RECLAIMRAIL_REVIEWER_ACCESS_TOKEN must be configured in apps\api\.env."
 }
 
 if (-not $SkipDocker) {
@@ -229,7 +267,10 @@ try {
         Start-Sleep -Milliseconds 500
         try {
             $Ready = Invoke-RestMethod "http://127.0.0.1:8000/health/ready" -TimeoutSec 2
-            $Workers = Invoke-RestMethod "http://127.0.0.1:8000/health/workers" -TimeoutSec 2
+            $Workers = Invoke-RestMethod `
+                "http://127.0.0.1:8000/health/workers" `
+                -Headers $ReviewerHeaders `
+                -TimeoutSec 2
             $Web = Invoke-WebRequest `
                 "http://127.0.0.1:3000/payment-lab" `
                 -TimeoutSec 2 `

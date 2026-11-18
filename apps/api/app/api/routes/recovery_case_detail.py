@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.reviewer_access import require_reviewer_access
 from app.core.database import get_database_session
 from app.services.recovery_case_detail_service import (
     RecoveryCaseDetailNotFoundError,
@@ -22,6 +23,7 @@ DatabaseSessionDependency = Annotated[
 router = APIRouter(
     prefix="/recovery/dashboard",
     tags=["recovery-dashboard"],
+    dependencies=[Depends(require_reviewer_access)],
 )
 
 

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.reviewer_access import require_reviewer_access
 from app.core.cache import check_redis, get_redis_client
 from app.core.config import Settings, get_settings
 from app.core.database import check_database, get_database_session
@@ -174,6 +175,7 @@ async def ready_health(response: Response) -> ReadinessHealthResponse:
     "/workers",
     response_model=WorkerFleetHealthResponse,
     summary="Inspect required recovery worker health",
+    dependencies=[Depends(require_reviewer_access)],
 )
 async def worker_health(
     response: Response,
@@ -209,6 +211,7 @@ async def worker_health(
     "/queues",
     response_model=OperationalQueueHealthResponse,
     summary="Inspect recovery queue depth and age",
+    dependencies=[Depends(require_reviewer_access)],
 )
 async def queue_health(
     response: Response,

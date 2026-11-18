@@ -10,6 +10,8 @@ from app.core.database import get_database_session
 from app.main import app
 from app.services.recovery_dashboard_service import RecoveryDashboardSummary
 
+REVIEWER_HEADERS = {"X-ReclaimRail-Reviewer-Token": "reviewer-secret"}
+
 
 async def override_database_session() -> AsyncIterator[AsyncSession]:
     yield MagicMock(spec=AsyncSession)
@@ -51,7 +53,7 @@ def test_dashboard_summary_returns_verified_business_metrics(
     )
 
     with TestClient(app) as client:
-        response = client.get("/recovery/dashboard/summary")
+        response = client.get("/recovery/dashboard/summary", headers=REVIEWER_HEADERS)
 
     assert response.status_code == 200
 
@@ -87,6 +89,7 @@ def test_dashboard_summary_accepts_explicit_currency(
     with TestClient(app) as client:
         response = client.get(
             "/recovery/dashboard/summary",
+            headers=REVIEWER_HEADERS,
             params={"currency": "usd"},
         )
 
@@ -103,6 +106,7 @@ def test_dashboard_summary_rejects_invalid_currency(currency: str) -> None:
     with TestClient(app) as client:
         response = client.get(
             "/recovery/dashboard/summary",
+            headers=REVIEWER_HEADERS,
             params={"currency": currency},
         )
 

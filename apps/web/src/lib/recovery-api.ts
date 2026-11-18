@@ -376,10 +376,15 @@ function getApiBaseUrl(): string {
 }
 
 async function getRecoveryApiJson<T>(path: string): Promise<T> {
+  const reviewerAccessToken = process.env.RECLAIMRAIL_REVIEWER_ACCESS_TOKEN?.trim();
+  if (!reviewerAccessToken) {
+    throw new Error("Reviewer API access is not configured");
+  }
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     cache: "no-store",
     headers: {
       Accept: "application/json",
+      "X-ReclaimRail-Reviewer-Token": reviewerAccessToken,
     },
   });
 

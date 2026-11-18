@@ -3,6 +3,7 @@
 - Audit date: 31 October 2026
 - Gate 1 evidence date: 8 November 2026
 - Gate 1A evidence dates: 17–18 November 2026
+- Gate 2 final validation evidence date: 18 November 2026
 - Status refresh date: 18 November 2026
 - Audit source: sanitized local snapshot `ReclaimRail-Audit-20261031-220531.zip`
 - Public repository: `https://github.com/dhanushgowdars/ReclaimRail`
@@ -34,9 +35,14 @@ populated case. The controlled case used a deterministic provider stub and synth
 no live Razorpay verification, provider mutation or live Gemini call was authorized.
 Provider-emitted Test Mode provenance remains a separate provider-journey requirement.
 
-The stored live Gemini benchmark still fails its selection gate, dependency audits retain
-known vulnerabilities, and the promised Track 3 measured-recovery evaluation remains
-synthetic rather than a comparative outcome study.
+The stored live Gemini benchmark still fails its selection gate. The exact Gate 2
+candidate clears all known Python and npm production findings, protects operational reads
+behind a controlled reviewer session and passes the final Windows/PostgreSQL/controller
+gate. npm still reports one unpatched dev-tool advisory as 14 transitive high findings;
+the owner accepted that lint/build-only risk for this local controlled-reviewer gate until
+an upstream compatible fix exists, with mandatory review before any hosted/public release
+or Phase 21 closure. The promised Track 3 measured-recovery evaluation remains synthetic
+rather than a comparative outcome study.
 
 ## 18 November roadmap reconciliation checkpoint
 
@@ -70,6 +76,56 @@ Gate 1A closure criteria:
 5. **satisfied:** finalize the six authority documents and unified-roadmap link; and
 6. **satisfied:** show the exact staged diff and required identity and create one
    owner-authorized local Gate 1A commit, with no push.
+
+## Gate 2 dependency and controlled-reviewer candidate
+
+Gate 2 implementation is present but uncommitted on branch
+`gate2/dependency-access-control` at parent
+`1b26642258ed9e5d3c3b4249d8dc2004050276c9`. The selected access model is a controlled,
+single-merchant reviewer demo. Public liveness/readiness remain public; workers, queues,
+dashboard, case, incident, outcome and evaluation reads now require a server-held reviewer
+token. The Next.js boundary exchanges the reviewer code once for a signed, expiring,
+`HttpOnly`, `SameSite=Strict` cookie. Browser storage no longer holds or forwards the code.
+Payment Lab and approval mutations retain their existing specialized backend tokens and
+also require a valid reviewer session and same-origin request.
+
+Dependency results on the candidate:
+
+- Python runtime and complete locked dependency audits: zero known vulnerabilities;
+- npm production audit: zero vulnerabilities;
+- Next.js and `eslint-config-next`: `16.4.6`; `sharp`: `0.35.5`; `source-map-js`: `1.2.2`;
+- complete npm audit: 14 high findings, all the same unpatched `picomatch` ReDoS advisory
+  through lint/build-only dependencies; npm proposes only a breaking forced downgrade to
+  `eslint-config-next@14.2.35`, which was not applied; and
+- no dependency was force-fixed and no product feature was removed.
+
+Final validation results on the exact 46-path candidate:
+
+- backend format/lint and strict mypy passed for 120 source files;
+- protected-route focused suite: `52 passed`;
+- Windows/PostgreSQL focused integration: `3 passed`;
+- complete backend suite: `721 passed, 1 skipped`;
+- base-to-`f8c1b2d3e4a5` migration and schema checks passed on fresh databases;
+- frontend lint and Next.js production build passed;
+- Python runtime and complete audits found zero known vulnerabilities; npm production
+  audit found zero vulnerabilities;
+- the complete npm audit's single dev-tool advisory was explicitly accepted under
+  `DEC-029`; no force-fix or breaking downgrade was used;
+- a fresh runtime database contained zero provider-work candidates;
+- all 11 controller processes started, API readiness passed and 8/8 workers were healthy;
+- runtime HTTP checks proved public liveness/readiness, protected worker denial/access,
+  unauthenticated Payment Lab redirect, protected frontend API denial, signed-cookie login,
+  authenticated Payment Lab access and logout;
+- runtime logs contained zero Razorpay/Gemini provider-network findings and zero fatal
+  findings; no provider mutation or live model request was made;
+- all application processes stopped, environment files were restored, and Git retained
+  exactly 46 changed paths with zero staged files; and
+- final shareable evidence SHA-256:
+  `fea6daa02efa9cb202a5906b9f463e002caab4d1353b26d698a100b0462227e7`.
+
+Gate 2 technical acceptance is `VERIFIED`. The branch/work-order status remains `PARTIAL`
+only because the exact documentation diff and 46-path local commit still require separate
+owner review and authorization. Phase 17B remains unauthorized.
 
 ## Historical Gate 1 baseline reproduction result
 
@@ -184,11 +240,11 @@ file until its diff is reviewed locally for correctness and absence of secrets.
 
 | Gate | Result | Classification |
 | --- | --- | --- |
-| Backend dependency lock install | `uv sync --locked --group dev` passed | VERIFIED |
+| Backend dependency lock install | Gate 2 `uv sync --locked --group dev` passed | VERIFIED |
 | Ruff formatting | 253 files already formatted | VERIFIED |
 | Ruff lint | all checks passed | VERIFIED |
 | Strict mypy | no issues in 120 source files | VERIFIED |
-| Backend tests without PostgreSQL | 738 passed, 12 skipped, 3 failed | PARTIAL |
+| Backend tests without PostgreSQL | historical audit result: 738 passed, 12 skipped, 3 failed | PARTIAL |
 | Reason for three failures | integration tests could not start because `RECLAIMRAIL_DATABASE_URL` was not configured | PARTIAL |
 | Alembic graph | one head: `e7a1c2d3f417` | VERIFIED |
 | Alembic upgrade/check | not run; no PostgreSQL service in the audit environment | PARTIAL |
@@ -279,8 +335,11 @@ truth, recovery eligibility, immutable cited evidence and provider-unavailable h
 
 Limitations:
 
-- most read-only recovery APIs have no authentication or merchant/user authorization;
-- protected mutations use shared static secrets intended for a controlled demo;
+- operational read APIs now require the controlled reviewer token/session, but this is a
+  single-merchant demo boundary rather than production tenant/user authorization;
+- protected mutations use specialized server-held static secrets plus reviewer-session and
+  same-origin checks; production identity, tenant ownership and distributed abuse control
+  remain later deployment/Phase 21 requirements;
 - there are no automated browser, accessibility or viewport tests;
 - Gate 1A has clean responsive screenshots; keyboard/accessibility automation and the
   five-minute judge-path recording remain later Phase 22/submission gates;
@@ -302,9 +361,10 @@ Limitations:
 
 ## Next bounded work before feature implementation
 
-1. Begin Gate 2 only as a separate documented work order.
-2. Remediate and re-audit backend/frontend dependencies and define the public-demo access
-   boundary without mixing feature work into Gate 2.
-3. Stop for owner review after Gate 2 evidence.
-4. Only then decide the Phase 17B model, quota and benchmark strategy before one controlled
-   live rerun.
+1. Review this Gate 2 documentation reconciliation and the exact 46-path diff; do not run
+   npm's breaking `--force` downgrade.
+2. If accepted, separately authorize staging and one local Gate 2 commit under
+   `Dhanush R S <dhanushrs981@gmail.com>`; verify the committed path set and clean worktree.
+3. Do not push, merge or deploy unless separately authorized.
+4. Only after the Gate 2 commit is verified may Phase 17B diagnosis be proposed; any live
+   Gemini run still requires a separate model/quota/corpus budget approval.

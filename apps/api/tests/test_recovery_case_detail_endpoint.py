@@ -32,6 +32,8 @@ from app.services.recovery_case_detail_service import (
     RecoveryOutcomeSummary,
 )
 
+REVIEWER_HEADERS = {"X-ReclaimRail-Reviewer-Token": "reviewer-secret"}
+
 CASE_ID = UUID("10000000-0000-0000-0000-000000000001")
 PAYMENT_ID = UUID("20000000-0000-0000-0000-000000000001")
 ACTION_ID = UUID("30000000-0000-0000-0000-000000000001")
@@ -293,7 +295,7 @@ def test_reads_pii_safe_recovery_case_detail(
     )
 
     with TestClient(app) as client:
-        response = client.get(f"/recovery/dashboard/cases/{CASE_ID}")
+        response = client.get(f"/recovery/dashboard/cases/{CASE_ID}", headers=REVIEWER_HEADERS)
 
     assert response.status_code == 200
 
@@ -340,7 +342,7 @@ def test_returns_not_found_for_unknown_recovery_case(
     )
 
     with TestClient(app) as client:
-        response = client.get(f"/recovery/dashboard/cases/{CASE_ID}")
+        response = client.get(f"/recovery/dashboard/cases/{CASE_ID}", headers=REVIEWER_HEADERS)
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Recovery case not found"}

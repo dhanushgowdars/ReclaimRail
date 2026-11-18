@@ -178,6 +178,9 @@ class Settings(BaseSettings):
         ge=60,
         le=86_400,
     )
+    # Server-to-server credential for reviewer-safe reads and diagnostics.
+    # This is separate from the stronger operator and Payment Lab mutation tokens.
+    reviewer_access_token: SecretStr | None = None
     recovery_operator_access_token: SecretStr | None = None
 
     recovery_outcome_batch_size: int = Field(

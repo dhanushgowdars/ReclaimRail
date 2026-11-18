@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.reviewer_access import require_reviewer_access
 from app.core.config import Settings, get_settings
 from app.core.database import get_database_session
 from app.domain.incidents import IncidentSeverity
@@ -105,6 +106,7 @@ def to_recovery_incident_feed_item_response(
     "/incidents",
     response_model=list[RecoveryIncidentFeedItemResponse],
     summary="List active payment-rail incidents affecting recovery decisions",
+    dependencies=[Depends(require_reviewer_access)],
 )
 async def list_active_recovery_incidents(
     session: DatabaseSessionDependency,

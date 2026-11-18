@@ -1916,3 +1916,21 @@ html, body { max-width: 100%; overflow-x: clip; }
 .command-center__evidence-links a { gap: 9px; min-height: 44px; padding: 10px 12px; font-size: 14px; font-weight: 800; }.command-center__evidence-links a:hover { background: rgb(255 255 255 / .2); }
 .case-state-guide { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 16px; padding: 14px 16px; border: 1px solid #cddff2; border-radius: 11px; background: #f6faff; color: #48637e; font-size: 13px; line-height: 1.45; }.case-state-guide > strong { width: 100%; color: #123a60; font-size: 15px; }.case-state-guide b { color: #163f65; }
 .case-row--attention { border-left-color: #8b6f47; background: linear-gradient(90deg, #fbf8f2, #fff 22%); }.case-row--attention .case-row__number, .case-status--attention, .case-explorer__legend .is-attention { background: #eee7dc; color: #6f4f26; }.case-row__time small { color: #71859a; font-size: 12px; font-weight: 650; }
+
+/* Gate 2 controlled reviewer access. */
+.reviewer-access-page { display: grid; min-height: 100vh; place-items: center; padding: 28px; background: radial-gradient(circle at top, #eef6ff, #f8fbff 48%, #edf3f9); }
+.reviewer-access-page > section { width: min(100%, 510px); padding: 38px; border: 1px solid #ceddeb; border-radius: 22px; background: #fff; box-shadow: 0 24px 70px rgb(21 58 89 / .12); }
+.reviewer-access-page .product-mark { margin-bottom: 28px; }
+.reviewer-access-page h1 { margin: 8px 0 12px; color: #102f4c; font-size: clamp(32px, 6vw, 48px); letter-spacing: -.04em; }
+.reviewer-access-page > section > p:not(.kicker) { margin: 0; color: #587086; font-size: 15px; line-height: 1.65; }
+.reviewer-access-page > section > small { display: block; margin-top: 20px; color: #6d8092; font-weight: 700; }
+.reviewer-access-form { display: grid; gap: 10px; margin-top: 28px; }
+.reviewer-access-form label { color: #193e60; font-size: 13px; font-weight: 850; }
+.reviewer-access-form input { min-height: 48px; padding: 0 14px; border: 1px solid #b9cada; border-radius: 10px; background: #fbfdff; color: #102f4c; font: inherit; }
+.reviewer-access-form input:focus { outline: 3px solid rgb(37 99 235 / .18); border-color: #2563eb; }
+.reviewer-access-form button { min-height: 48px; margin-top: 4px; border: 0; border-radius: 10px; background: #1769e0; color: #fff; font: inherit; font-weight: 850; cursor: pointer; }
+.reviewer-access-form button:disabled { cursor: wait; opacity: .62; }
+.reviewer-access-form p { margin: 4px 0 0; color: #b42318; font-size: 13px; font-weight: 750; }
+.reviewer-logout { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 0; border: 0; background: transparent; color: #557089; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+.reviewer-logout:hover { color: #174c7a; }
+@media (max-width: 560px) { .reviewer-access-page { padding: 16px; }.reviewer-access-page > section { padding: 28px 22px; } }

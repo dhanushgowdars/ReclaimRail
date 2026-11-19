@@ -846,3 +846,32 @@ uncommitted branch. It modifies only the six authority documents already present
 
 Next action: present the exact six-document diff and full 46-path status for owner review.
 Only a later explicit authorization may stage and commit Gate 2.
+
+## 19 November 2026 — Gate 2 commit and remote closure verified
+
+The owner separately authorized and completed the Gate 2 commit and push after the
+pre-commit documentation review. Repository evidence records:
+
+- authoritative branch: `gate2/dependency-access-control`;
+- verified closure commit:
+  `652e440495ff0d3a9b8c07baa65a24ae2ed2f023`;
+- parent: `1b26642258ed9e5d3c3b4249d8dc2004050276c9`;
+- commit message: `fix(security): add controlled reviewer demo access`;
+- author and committer: `Dhanush R S <dhanushrs981@gmail.com>`;
+- committed paths: exactly 46, comprising 40 application/test/configuration paths and the
+  six authority documents;
+- post-commit and post-push worktree: clean;
+- push: successful, without force;
+- remote verification: local and remote commit hashes matched, with the branch zero ahead
+  and zero behind;
+- upstream: tracking configured for `origin/gate2/dependency-access-control`;
+- pull request, merge and deployment: none; and
+- Phase 17B activity: none.
+
+Gate 2 is therefore `VERIFIED` and `CLOSED`. The bounded `picomatch` disposition in
+`DEC-029` remains in force and expires before hosted/public deployment or Phase 21 closure.
+This post-commit documentation closure changes only the six authority documents. It does
+not modify application behavior, rerun accepted Gate 2 evidence, call Gemini or Razorpay,
+or authorize Phase 17B. The next possible work order is Phase 17B read-only diagnosis, but
+it requires a separate owner decision after this exact documentation diff is reviewed,
+committed and pushed through separate approvals.

@@ -112,11 +112,14 @@ decision.
 | G2-09 | Abuse and secret controls | VERIFIED | the approved controlled single-merchant scope has bounded per-client/global login throttles, request-size cap, server-only secrets and secret-shaped scan; durable/distributed throttle and hosted-proxy validation remain explicitly mapped to deployment/Phase 21, not hidden Gate 2 claims |
 | G2-10 | Complete regression and Windows runtime | VERIFIED | Windows validation passed three PostgreSQL integration tests, `721 passed, 1 skipped`, backend quality, frontend lint/build, base-to-head migration, fresh empty runtime DB, 11-process controller readiness, 8/8 worker health and clean shutdown |
 
-Gate 2 technical decision: `VERIFIED`. G2-01 through G2-10 pass for the approved controlled
-reviewer-demo scope. The exact 46-path branch/work order remains `PARTIAL` only until the
-owner reviews this documentation diff and separately authorizes the local commit. The
+Gate 2 decision: `VERIFIED/CLOSED`. G2-01 through G2-10 pass for the approved controlled
+reviewer-demo scope. Commit `652e440495ff0d3a9b8c07baa65a24ae2ed2f023` records exactly
+46 paths with `Dhanush R S <dhanushrs981@gmail.com>` as author and committer. The worktree
+was clean, the branch push succeeded, local and remote hashes matched, and upstream
+tracking was configured. No force push, pull request, merge or deployment occurred. The
 final evidence archive SHA-256 is
 `fea6daa02efa9cb202a5906b9f463e002caab4d1353b26d698a100b0462227e7`.
+Phase 17B remains unauthorized until a separate owner decision.
 
 ## Phase 17B acceptance
 

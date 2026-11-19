@@ -52,14 +52,15 @@ Read in this order:
 
 The unified roadmap's M0–M8 milestones do not renumber or reorder the established gates.
 Gate 1A is closed by the owner-authorized 23-path local commit recorded in Git history.
-Gate 2 is the only active work order. Its uncommitted candidate lives on
-`gate2/dependency-access-control`. The owner accepted the bounded dev-only dependency risk,
-and the exact candidate passed Windows/PostgreSQL, complete regression, controller and
-reviewer-session validation on 18 November 2026. Its technical acceptance rows are
-`VERIFIED`, but the work order remains `PARTIAL` until the owner reviews the reconciled
-documentation diff and separately authorizes the exact local commit. Do not rerun Gate 1A
-or Gate 2 evidence unless new repository evidence invalidates the recorded results, and do
-not begin Phase 17B before the Gate 2 commit is authorized and verified.
+Gate 2 is `VERIFIED` and `CLOSED` by commit
+`652e440495ff0d3a9b8c07baa65a24ae2ed2f023` on
+`gate2/dependency-access-control`. The commit contains exactly 46 paths, uses the required
+`Dhanush R S <dhanushrs981@gmail.com>` identity for author and committer, left a clean
+worktree, was pushed without force, matches its tracked upstream branch, and created no
+pull request, merge or deployment.
+The bounded dev-only dependency risk remains governed by `DEC-029`. Do not rerun Gate 1A
+or Gate 2 evidence unless new repository evidence invalidates the recorded results.
+Phase 17B remains unauthorized until a separate owner decision.
 
 ## Required workflow
 

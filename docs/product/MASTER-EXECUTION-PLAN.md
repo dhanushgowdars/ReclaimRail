@@ -15,7 +15,8 @@
 - **Unified roadmap status:** owner-approved and locked on 18 November 2026
 - **Product:** Evidence-grounded, policy-bounded payment recovery control plane
 - **Current merged baseline:** `1912645` (Phase 17 core runtime merged through PR #19)
-- **Current phase:** Gate 2 technical acceptance is `VERIFIED`; the uncommitted 46-path candidate remains `PARTIAL` only until documentation-diff review and an owner-authorized local commit.
+- **Authoritative continuation:** `gate2/dependency-access-control` at `652e440495ff0d3a9b8c07baa65a24ae2ed2f023`
+- **Current phase:** Gate 2 is `VERIFIED` and `CLOSED`; Phase 17B remains unauthorized pending a separate owner decision.
 - **Verified committed foundation:** Phases 1–5, 14–16 at repository level
 - **Partial historical product phases:** 6–13 and 17A
 - **Broken closure gate:** Phase 17B live investigator
@@ -158,9 +159,12 @@ contained zero Razorpay/Gemini network findings, and no provider/model call was 
 Final evidence SHA-256:
 `fea6daa02efa9cb202a5906b9f463e002caab4d1353b26d698a100b0462227e7`.
 
-The work order remains administratively `PARTIAL` until the owner reviews this reconciled
-documentation diff and separately authorizes the exact 46-path local commit. No stage,
-commit, push, merge, deployment or Phase 17B work is authorized by this reconciliation.
+Gate 2 is `VERIFIED` and `CLOSED` by commit
+`652e440495ff0d3a9b8c07baa65a24ae2ed2f023`. Author and committer are
+`Dhanush R S <dhanushrs981@gmail.com>`; exactly 46 paths were committed; the worktree was
+clean; the branch was pushed successfully; local and remote hashes matched; and upstream
+tracking was configured. No force push, pull request, merge or deployment occurred.
+Phase 17B remains unauthorized pending a separate owner decision.
 
 ### Gate 3 — Phase 17B live investigator closure
 
@@ -1171,7 +1175,7 @@ actual measured work and failures.
 | Remaining phase | Expected effort |
 | --- | ---: |
 | Gate 1A — documentation review and local commit closure | Complete |
-| Gate 2 — dependency/access-control stabilization | technical acceptance complete; documentation review/local commit pending |
+| Gate 2 — dependency/access-control stabilization | Complete — `652e440` verified and pushed |
 | Phase 17B — investigator closure | included in Phase 17 range below |
 | 17 — investigator | 24–30 hours |
 | 18 — validation/ranking | 16–20 hours |
@@ -1187,14 +1191,15 @@ reduce stretch scope, not payment-safety proof.
 
 ## 23. Next work order
 
-Gate 1A is complete. Gate 2 technical acceptance is complete, but its uncommitted work
-order remains the only active scope:
+Gate 1A and Gate 2 are complete. The only active scope is the Gate 2 post-commit
+documentation closure:
 
-1. review the reconciled six-document diff and exact 46 changed paths;
-2. if accepted, separately authorize staging and one local Gate 2 commit under the required
+1. review the exact six-document closure diff without changing application code;
+2. if accepted, separately authorize one documentation-only commit under the required
    Dhanush identity;
-3. verify the committed path set, author/committer identity and clean worktree; and
-4. stop before any push, merge, deployment or Phase 17B work unless separately authorized.
+3. verify the six committed paths, author/committer identity, clean worktree, successful
+   push, matching local/remote hashes and upstream tracking; and
+4. stop before any pull request, merge, deployment or Phase 17B work.
 
-Phase 17B must not resume until the Gate 2 local commit is verified. Phase 18 must not begin
+Phase 17B read-only diagnosis requires a separate owner decision. Phase 18 must not begin
 while any P17 requirement is pending, silently deferred or supported only by a screenshot.

@@ -4,7 +4,8 @@
 - Gate 1 evidence date: 8 November 2026
 - Gate 1A evidence dates: 17–18 November 2026
 - Gate 2 final validation evidence date: 18 November 2026
-- Status refresh date: 18 November 2026
+- Gate 2 Git closure evidence date: 18–19 November 2026
+- Status refresh date: 19 November 2026
 - Audit source: sanitized local snapshot `ReclaimRail-Audit-20261031-220531.zip`
 - Public repository: `https://github.com/dhanushgowdars/ReclaimRail`
 - Remote `main`: `19126456b37d21d1ead659762c5f92916f3a64e1`
@@ -77,19 +78,21 @@ Gate 1A closure criteria:
 6. **satisfied:** show the exact staged diff and required identity and create one
    owner-authorized local Gate 1A commit, with no push.
 
-## Gate 2 dependency and controlled-reviewer candidate
+## Gate 2 dependency and controlled-reviewer closure
 
-Gate 2 implementation is present but uncommitted on branch
-`gate2/dependency-access-control` at parent
-`1b26642258ed9e5d3c3b4249d8dc2004050276c9`. The selected access model is a controlled,
-single-merchant reviewer demo. Public liveness/readiness remain public; workers, queues,
-dashboard, case, incident, outcome and evaluation reads now require a server-held reviewer
-token. The Next.js boundary exchanges the reviewer code once for a signed, expiring,
-`HttpOnly`, `SameSite=Strict` cookie. Browser storage no longer holds or forwards the code.
-Payment Lab and approval mutations retain their existing specialized backend tokens and
-also require a valid reviewer session and same-origin request.
+Gate 2 is `VERIFIED` and `CLOSED` on authoritative branch
+`gate2/dependency-access-control` by commit
+`652e440495ff0d3a9b8c07baa65a24ae2ed2f023`, whose parent is
+`1b26642258ed9e5d3c3b4249d8dc2004050276c9`. The commit contains exactly 46 paths.
+Author and committer are `Dhanush R S <dhanushrs981@gmail.com>`. The selected access model
+is a controlled, single-merchant reviewer demo. Public liveness/readiness remain public;
+workers, queues, dashboard, case, incident, outcome and evaluation reads now require a
+server-held reviewer token. The Next.js boundary exchanges the reviewer code once for a
+signed, expiring, `HttpOnly`, `SameSite=Strict` cookie. Browser storage no longer holds or
+forwards the code. Payment Lab and approval mutations retain their existing specialized
+backend tokens and also require a valid reviewer session and same-origin request.
 
-Dependency results on the candidate:
+Dependency results on the committed Gate 2 implementation:
 
 - Python runtime and complete locked dependency audits: zero known vulnerabilities;
 - npm production audit: zero vulnerabilities;
@@ -99,7 +102,7 @@ Dependency results on the candidate:
   `eslint-config-next@14.2.35`, which was not applied; and
 - no dependency was force-fixed and no product feature was removed.
 
-Final validation results on the exact 46-path candidate:
+Final validation results on the exact 46-path tree later committed unchanged as `652e440`:
 
 - backend format/lint and strict mypy passed for 120 source files;
 - protected-route focused suite: `52 passed`;
@@ -123,9 +126,12 @@ Final validation results on the exact 46-path candidate:
 - final shareable evidence SHA-256:
   `fea6daa02efa9cb202a5906b9f463e002caab4d1353b26d698a100b0462227e7`.
 
-Gate 2 technical acceptance is `VERIFIED`. The branch/work-order status remains `PARTIAL`
-only because the exact documentation diff and 46-path local commit still require separate
-owner review and authorization. Phase 17B remains unauthorized.
+Gate 2 technical acceptance and Git closure are `VERIFIED`. The worktree was clean after
+commit and push. The branch was pushed successfully, local and remote commit hashes
+matched, and upstream tracking was configured for
+`origin/gate2/dependency-access-control`. No force push, pull request, merge or deployment
+occurred. This post-commit authority-document refresh does not reopen Gate 2. Phase 17B
+remains unauthorized until a separate owner decision.
 
 ## Historical Gate 1 baseline reproduction result
 
@@ -361,10 +367,13 @@ Limitations:
 
 ## Next bounded work before feature implementation
 
-1. Review this Gate 2 documentation reconciliation and the exact 46-path diff; do not run
-   npm's breaking `--force` downgrade.
-2. If accepted, separately authorize staging and one local Gate 2 commit under
-   `Dhanush R S <dhanushrs981@gmail.com>`; verify the committed path set and clean worktree.
-3. Do not push, merge or deploy unless separately authorized.
-4. Only after the Gate 2 commit is verified may Phase 17B diagnosis be proposed; any live
-   Gemini run still requires a separate model/quota/corpus budget approval.
+1. Review the exact six-document Gate 2 post-commit closure diff; do not run npm's breaking
+   `--force` downgrade and do not modify application code.
+2. If accepted, separately authorize staging and one documentation-only closure commit
+   under `Dhanush R S <dhanushrs981@gmail.com>`.
+3. Verify the six committed documentation paths, author/committer identity, clean worktree,
+   successful push, matching local/remote hashes and upstream tracking; do not create a
+   pull request, merge or deployment.
+4. Stop for a separate owner decision before Phase 17B read-only diagnosis. Any live Gemini
+   run additionally requires an approved model list, quota/access preflight, request budget,
+   corpus hash and evidence path.

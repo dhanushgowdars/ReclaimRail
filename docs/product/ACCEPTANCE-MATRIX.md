@@ -141,7 +141,7 @@ release/submission blocker while `DEC-032` permits deterministic Phase 18 work.
 | P17B-12 | Runtime remains advisory/shadow | VERIFIED | no mutation tool; deterministic pipeline unaffected |
 | P17B-13 | Frontend labels incomplete/fallback/abstained truthfully | PARTIAL | committed UI plus browser evidence |
 | P17B-14 | Final DB, backend, frontend and security gates | VERIFIED | committed branch retains passing offline, PostgreSQL-backed, frontend and security validation; live selection remains separate |
-| P17B-15 | Groq external-blocker receipt observability | PARTIAL | first attempt `3/2/1` ended `INDETERMINATE_TRANSPORT`; one changed-condition revalidation ended after `15/14/1` with request 15 governor-admitted and sanitized `provider_rejected` at `provider_boundary`; no HTTP/provider code or failure kind was retained, no final report exists, and budget is `41/150` |
+| P17B-15 | Groq external-blocker receipt observability | PARTIAL | first attempt `3/2/1`; changed-condition revalidation `15/14/1`, 3 completed scenarios, no final report and budget `41/150`; actual request 15 maps to `p17b-04` turn 3, unlike the ideal mocked ordinal schedule; the old receipt lost typed status/reason, while the uncommitted candidate safely adds scenario/turn plus typed allowlisted diagnostics and passes focused `56` plus full backend `871 passed, 1 skipped`; original rejection remains unproved and no full corpus run is authorized |
 
 ## Remaining-phase gate summary
 

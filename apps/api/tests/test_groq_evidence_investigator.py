@@ -263,6 +263,106 @@ async def test_groq_supports_multiple_sequential_read_only_tool_turns() -> None:
 
 
 @pytest.mark.asyncio
+async def test_frozen_turn_three_wire_shape_keeps_history_and_portable_schemas() -> None:
+    payloads: list[dict[str, object]] = []
+    replies = [
+        ("call_first", "get_truth_snapshot"),
+        ("call_second", "get_recovery_history"),
+    ]
+
+    def handler(http_request: httpx2.Request) -> httpx2.Response:
+        payloads.append(json.loads(http_request.content))
+        if not replies:
+            return httpx2.Response(422, text="not retained")
+        call_id, name = replies.pop(0)
+        return httpx2.Response(
+            200,
+            json={
+                "model": "openai/gpt-oss-120b",
+                "usage": {"prompt_tokens": 2, "completion_tokens": 3},
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": call_id,
+                                    "function": {
+                                        "name": name,
+                                        "arguments": json.dumps({"case_id": CASE_ID}),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+            },
+        )
+
+    provider = GroqEvidenceInvestigator(
+        api_key="test-key",
+        model_name="openai/gpt-oss-120b",
+        transport=httpx2.MockTransport(handler),
+    )
+    base = {
+        "benchmark": {"corpus": "frozen", "scenario_id": "p17b-04"},
+        "objective": "inspect",
+        "case": {"id": CASE_ID, "case_id": CASE_ID},
+        "tools": public_tool_catalog(),
+        "budgets_remaining": {"tool_calls": 8},
+        "response_contract": "bounded",
+    }
+    first = await provider.next_turn({**base, "observations": []})
+    first_observation = {
+        "sequence": 1,
+        "tool": first.turn.tool_name,
+        "outcome": "succeeded",
+        "evidence_ids": (),
+        "payload": {},
+    }
+    second = await provider.next_turn({**base, "observations": [first_observation]})
+    second_observation = {
+        "sequence": 2,
+        "tool": second.turn.tool_name,
+        "outcome": "succeeded",
+        "evidence_ids": (),
+        "payload": {},
+    }
+    with pytest.raises(EvidenceInvestigatorProviderError) as raised:
+        await provider.next_turn({**base, "observations": [first_observation, second_observation]})
+    assert raised.value.kind is EvidenceInvestigatorFailureKind.PROVIDER_REJECTED
+    assert raised.value.status_code == 422
+
+    third = payloads[2]
+    assert [message["role"] for message in third["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+        "tool",
+    ]
+    assert third["tool_choice"] == "required"
+    assert third["parallel_tool_calls"] is False
+    assert [item["function"]["name"] for item in third["tools"]] == [
+        item["function"]["name"] for item in payloads[0]["tools"]
+    ]
+    assert third["messages"][2]["tool_calls"][0]["id"] == third["messages"][3]["tool_call_id"]
+    assert third["messages"][4]["tool_calls"][0]["id"] == third["messages"][5]["tool_call_id"]
+    forbidden_schema_keys = {"title", "format", "additionalProperties", "$defs", "$ref"}
+
+    def schema_keys(value: object) -> set[str]:
+        if isinstance(value, dict):
+            return set(value).union(*(schema_keys(item) for item in value.values()))
+        if isinstance(value, list):
+            return set().union(*(schema_keys(item) for item in value))
+        return set()
+
+    for definition in third["tools"]:
+        assert not (schema_keys(definition["function"]["parameters"]) & forbidden_schema_keys)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "observations",
     [

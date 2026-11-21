@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from collections.abc import Callable
@@ -34,7 +35,10 @@ from app.evaluation.phase17b_groq_governor import (  # noqa: E402
     GroqEvaluationGovernor,
 )
 from app.integrations.groq.evidence_investigator import GroqEvidenceInvestigator  # noqa: E402
-from app.integrations.investigator import EvidenceInvestigatorProvider  # noqa: E402
+from app.integrations.investigator import (  # noqa: E402
+    EvidenceInvestigatorProvider,
+    EvidenceInvestigatorProviderError,
+)
 
 MODEL = "openai/gpt-oss-120b"
 LIVE_ACKNOWLEDGEMENT = "OWNER_APPROVED_PHASE17B_LIVE_GROQ"
@@ -42,6 +46,54 @@ MAX_REQUEST_STARTS = 31
 CONFIGURED_TIMEOUT_SECONDS = 60.0
 EXPECTED_CORPUS_SHA256 = "814ccaab7c8f09b3ef70f41ab7838384ccb1c7a777d0c8070d2ec0b6337839de"
 RUNTIME_DIRECTORY = API_ROOT.parents[1] / ".runtime" / "phase17b"
+_FROZEN_SCENARIO_ID = re.compile(r"^p17b-\d{2}$")
+
+
+def _safe_request_context(request: dict[str, object]) -> dict[str, object]:
+    """Retain only frozen-schedule coordinates, never prompt or evidence content."""
+    benchmark = request.get("benchmark")
+    observations = request.get("observations")
+    if not isinstance(benchmark, dict) or not isinstance(observations, list):
+        return {}
+    scenario_id = benchmark.get("scenario_id")
+    turn = len(observations) + 1
+    if (
+        not isinstance(scenario_id, str)
+        or _FROZEN_SCENARIO_ID.fullmatch(scenario_id) is None
+        or not 1 <= turn <= 9
+    ):
+        return {}
+    return {"scenario_id": scenario_id, "scenario_turn": turn}
+
+
+def _safe_provider_error(error: BaseException) -> dict[str, object]:
+    """Extract only typed, allowlisted diagnostics from the provider boundary."""
+    if not isinstance(error, EvidenceInvestigatorProviderError):
+        return {}
+    safe: dict[str, object] = {}
+    if isinstance(error.status_code, int) and 100 <= error.status_code <= 599:
+        safe["provider_status_code"] = error.status_code
+    if error.reason_code is not None:
+        safe["provider_reason_code"] = error.reason_code.value
+    if error.rate_limit_metadata is not None:
+        allowlisted = {
+            "category",
+            "request_limit",
+            "request_remaining",
+            "token_limit",
+            "token_remaining",
+            "request_reset_seconds",
+            "token_reset_seconds",
+            "retry_after_seconds",
+        }
+        metadata = {
+            key: value
+            for key, value in error.rate_limit_metadata.as_dict().items()
+            if key in allowlisted and isinstance(value, (str, int, float, bool))
+        }
+        if metadata:
+            safe["rate_limit_metadata"] = metadata
+    return safe
 
 
 @dataclass(slots=True)
@@ -87,6 +139,7 @@ class MeteredProvider:
             "request_started_at": started_at.isoformat(),
             "configured_timeout_seconds": CONFIGURED_TIMEOUT_SECONDS,
             "governor_admission": "admitted",
+            **_safe_request_context(request),
         }
         self.receipts.append(receipt)
         self._persist()
@@ -111,6 +164,7 @@ class MeteredProvider:
                             else "indeterminate_transport"
                         )
                     ),
+                    **_safe_provider_error(error),
                 }
             )
             self._persist()

@@ -1004,3 +1004,88 @@ Phase 18 has not begun and Phase 19 is not authorized. `DEC-033` records the dur
 This reconciliation changed authority documents only. It made no provider, application-tool,
 database, Razorpay or Gemini call and did not run a corpus or canary. No application code,
 runtime artifact, Git index, commit, remote, pull request, merge or deployment was changed.
+
+## 21 November 2026 — Phase 17B request-15 offline diagnosis candidate
+
+The owner authorized offline request-15 diagnosis and a bounded code fix if evidence established
+a defect. No provider, corpus, canary, application-tool or PostgreSQL evidence call was
+authorized or made. The frozen corpus, checksum, prompts, fixtures, thresholds, credentials,
+runtime evidence and `41/150` live budget remain unchanged.
+
+The retained checkpoint contains completed results for `p17b-01` through `p17b-03`. Receipt
+token resets show requests 13–15 are the in-progress `p17b-04` conversation, making request 15
+turn 3. This differs from the ideal 31-request mocked schedule, where ordinal 15 would be
+`p17b-05` turn 3, because the live model used four requests in each of the first three
+scenarios. The checkpoint does not retain the two prior tool names, so they cannot be claimed
+as actual provider behavior.
+
+Offline reconstruction proved the turn-3 adapter shape is internally valid: roles are
+`system,user,assistant,tool,assistant,tool`; each tool result correlates to its immediately
+preceding assistant call; parallel tool calls are disabled; choice is the generic `required`
+mode; all 11 read-only plus 2 terminal declarations remain available; and schemas exclude
+non-portable presentation/reference fields. The adapter maps malformed responses, timeouts,
+request transport errors, access denial, quota exhaustion, 5xx and unknown exceptions to
+different failure kinds. The preserved `provider_rejected` value therefore proves only the
+sanitized adapter rejection class. Because the old receipt discarded typed status/reason
+fields, it does not establish the exact HTTP status, provider cause, quota, timeout, transport
+loss or model-quality outcome.
+
+The bounded candidate adds only safe frozen scenario/turn coordinates and typed allowlisted
+provider status/reason/rate-limit fields to future failure receipts. It never persists prompt,
+evidence, response body, arbitrary provider status text, headers, credentials or opaque tool
+call IDs. Regression coverage reconstructs the third-turn wire shape and proves private
+content remains absent from checkpoints.
+
+Validation:
+
+- focused pre-change mocked suite: `53 passed`;
+- focused post-change mocked suite: `55 passed`;
+- Ruff format check: 279 files formatted;
+- Ruff lint: passed;
+- strict mypy: passed for 130 source files; and
+- complete backend attempt: `848 passed, 1 skipped, 18 failed, 4 errors`; every failure/error
+  was a PostgreSQL integration path receiving `ConnectionRefusedError` from the configured
+  but unavailable database endpoint. No non-database regression was observed.
+
+Phase 17B remains `PARTIAL`; offline diagnostics cannot complete the live model-selection gate.
+A future separately authorized changed-condition live verification would be required to capture
+the new typed receipt fields and complete the frozen corpus. This candidate is uncommitted and
+unstaged; no Phase 18 work began.
+
+### PostgreSQL-backed validation continuation
+
+The earlier complete-suite attempt above used the stale configured endpoint and is preserved as
+failed evidence. A later owner-authorized continuation inspected the existing isolated container
+`reclaimrail_phase17b_validation-postgres-1` without printing credentials. It was already
+running healthy as PostgreSQL 17.11 with the required `127.0.0.1:55433` binding, so no container,
+volume, password or configuration was created or changed. Its established credentials were used
+only through process-local environment state.
+
+Results:
+
+- TCP `SELECT 1`: passed;
+- Alembic `current`: `b17b9c3d4e5f (head)`, exit 0;
+- Alembic `heads`: `b17b9c3d4e5f (head)`, exit 0;
+- Alembic `check`: no new upgrade operations, exit 0;
+- Ruff format check: 279 files formatted, exit 0;
+- Ruff lint: passed, exit 0;
+- strict mypy: 130 source files, exit 0;
+- focused Groq/benchmark suite after adding the no-HTTP-response regression: `56 passed`;
+- complete backend suite: `871 passed, 1 skipped`, exit 0; and
+- final durable JUnit:
+  `.runtime/phase17b/phase17b-request15-offline-validation-final-20261121.junit.xml`,
+  121,309 bytes, SHA-256
+  `e2e0839c6df8814302378e413fb11fca3ce4356e06ce93efc5165c81ecb01c64`.
+
+The one skip remains the recorded execution-counter integration race. The diagnostic review now
+covers both a provider exception with no HTTP response and a typed HTTP rejection. Future
+receipts retain only validated scenario ID/turn, typed allowlisted HTTP status/reason/rate-limit
+metadata and the pre-existing safe counters. They never retain raw exception text, prompts,
+evidence, headers, response bodies, opaque IDs or secrets.
+
+This validation made no provider, corpus, canary, Razorpay or application-tool call. The frozen
+corpus/checksum, model, prompts, fixtures, thresholds, provider ordering, safety boundaries,
+credentials, runtime evidence and `41/150` live budget remain unchanged. Phase 17B is still
+`PARTIAL` and blocks release/submission. `DEC-032` still permits Phase 18, but the owner chose
+to continue Phase 17B; Phase 18 did not begin. No full corpus run is authorized. Any next live
+action requires a separately reviewed, narrowly bounded diagnostic plan.

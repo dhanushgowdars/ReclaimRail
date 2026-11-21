@@ -444,3 +444,39 @@ Phase 17B remains a mandatory release/submission blocker. Groq is neither select
 on model quality, no production/model-selection claim exists and no Gemini fallback is
 authorized. `DEC-032` remains valid and permits deterministic, provider-neutral Phase 18 work
 while this external blocker remains; Phase 18 has not begun and Phase 19 is not authorized.
+
+### Request-15 offline diagnosis and validation candidate
+
+The owner chose to continue Phase 17B rather than begin the Phase 18 work permitted by
+`DEC-032`. Actual live receipt boundaries take precedence over the ideal mocked schedule:
+the retained input-token resets show requests 13–15 belong to the in-progress `p17b-04`
+conversation, so request 15 is actual turn 3. In the ideal 31-request mocked schedule,
+ordinal 15 would instead be `p17b-05` turn 3. The old checkpoint does not retain the two
+preceding tool names, typed provider status or provider reason.
+
+Offline reconstruction validates the request shape without establishing why the provider
+rejected it: roles and tool-call correlation are ordered, parallel tool calls are disabled,
+choice is the generic `required` mode, all 11 read-only plus 2 terminal declarations remain
+available and schemas use the portable subset. `provider_rejected` alone does not establish
+an HTTP status, quota failure, timeout, transport loss, payload defect or model-quality result.
+
+The uncommitted diagnostic candidate adds only validated frozen scenario ID/turn and typed,
+allowlisted HTTP status, provider reason and rate-limit metadata to future receipts. Tests
+prove both a typed HTTP rejection and a provider exception with no HTTP response; raw
+exception text, prompts, evidence, response bodies, arbitrary headers/status text, opaque
+IDs and secrets remain excluded. This improves future evidence but has not proved or fixed
+the original provider rejection.
+
+Final offline validation used the existing isolated healthy PostgreSQL 17.11 container at
+`127.0.0.1:55433` with its established process-local credentials. TCP `SELECT 1` passed;
+Alembic current/heads were `b17b9c3d4e5f (head)` and `alembic check` found no new upgrade
+operations. Ruff format/lint and strict mypy for 130 source files passed, focused tests were
+`56 passed`, and the complete backend suite was `871 passed, 1 skipped`. Final JUnit SHA-256:
+`e2e0839c6df8814302378e413fb11fca3ce4356e06ce93efc5165c81ecb01c64`.
+
+Phase 17B remains `PARTIAL` and blocks release/submission. The live budget remains `41/150`:
+the first corpus attempt recorded `3/2/1` starts/responses/indeterminate; the one authorized
+changed-condition revalidation recorded `15/14/1`, 3 completed scenarios and no final report
+or quality verdict. No full corpus run is currently authorized. The next live action requires
+a separately reviewed, narrowly bounded diagnostic plan. Gemini remains disabled; AI remains
+read-only and advisory.

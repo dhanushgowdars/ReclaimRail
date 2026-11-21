@@ -290,9 +290,77 @@ async def test_provider_failure_stops_after_checkpoint_with_sanitized_partial_pr
     receipt = checkpoint_payload["request_receipts"][-1]
     assert receipt["request_number"] == 5
     assert receipt["configured_timeout_seconds"] == 60.0
+    assert receipt["scenario_id"] == "p17b-02"
+    assert receipt["scenario_turn"] == 2
     assert receipt["failure_boundary"] == "provider_boundary"
     assert receipt["failure_classification"] == "quota_exhausted"
+    assert receipt["provider_status_code"] == 429
+    assert "rate_limit_metadata" not in receipt
     assert "objective" not in json.dumps(checkpoint_payload)
+
+
+@pytest.mark.asyncio
+async def test_failure_receipt_keeps_only_typed_provider_diagnostics(tmp_path: Path) -> None:
+    class RejectedProvider:
+        async def next_turn(self, request: dict[str, object]) -> object:
+            raise EvidenceInvestigatorProviderError(
+                "safe",
+                kind=EvidenceInvestigatorFailureKind.PROVIDER_REJECTED,
+                retryable=False,
+                status_code=422,
+                provider_status="private opaque provider text",
+            )
+
+    checkpoint = tmp_path / ".rejected.checkpoint.json"
+    metered = command.MeteredProvider(RejectedProvider())
+    metered.persist_receipt = lambda: command._checkpoint(checkpoint, metered, ())
+    request = {
+        "benchmark": {"scenario_id": "p17b-04"},
+        "observations": [{"private": "evidence"}, {"private": "evidence"}],
+        "objective": "private prompt content",
+    }
+    with pytest.raises(EvidenceInvestigatorProviderError):
+        await metered.next_turn(request)
+    payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+    receipt = payload["request_receipts"][-1]
+    assert receipt["scenario_id"] == "p17b-04"
+    assert receipt["scenario_turn"] == 3
+    assert receipt["provider_status_code"] == 422
+    assert receipt["failure_classification"] == "provider_rejected"
+    serialized = json.dumps(payload)
+    assert "private" not in serialized
+    assert "objective" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_provider_exception_without_http_response_keeps_no_status(
+    tmp_path: Path,
+) -> None:
+    class TransportFailureProvider:
+        async def next_turn(self, request: dict[str, object]) -> object:
+            raise EvidenceInvestigatorProviderError(
+                "safe",
+                kind=EvidenceInvestigatorFailureKind.TRANSIENT_PROVIDER,
+                retryable=False,
+            )
+
+    checkpoint = tmp_path / ".transport.checkpoint.json"
+    metered = command.MeteredProvider(TransportFailureProvider())
+    metered.persist_receipt = lambda: command._checkpoint(checkpoint, metered, ())
+    with pytest.raises(EvidenceInvestigatorProviderError):
+        await metered.next_turn(
+            {
+                "benchmark": {"scenario_id": "p17b-04"},
+                "observations": [],
+            }
+        )
+    receipt = json.loads(checkpoint.read_text(encoding="utf-8"))["request_receipts"][-1]
+    assert receipt["failure_classification"] == "transient_provider"
+    assert receipt["scenario_id"] == "p17b-04"
+    assert receipt["scenario_turn"] == 1
+    assert "provider_status_code" not in receipt
+    assert "provider_reason_code" not in receipt
+    assert "rate_limit_metadata" not in receipt
 
 
 @pytest.mark.asyncio

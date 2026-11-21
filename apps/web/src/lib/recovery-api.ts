@@ -345,6 +345,13 @@ export type RecoveryCaseDetail = {
       last_step: number;
       version: number;
     }>;
+    provider_attempts: Array<{
+      sequence_number: number; provider: string; requested_model: string;
+      returned_model: string | null; model_version: string | null;
+      started_at: string; completed_at: string | null; latency_ms: number;
+      status: string; failure_kind: string | null; http_status_code: number | null;
+      input_token_count: number; output_token_count: number; selected_result: boolean;
+    }>;
   }>;
   audit_chain: {
     valid: boolean;

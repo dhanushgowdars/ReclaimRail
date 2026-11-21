@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.investigation import (
     RecoveryInvestigationHypothesis,
+    RecoveryInvestigationProviderAttempt,
     RecoveryInvestigationSession,
     RecoveryInvestigationStep,
 )
@@ -235,6 +236,24 @@ class InvestigationHypothesisSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class InvestigationProviderAttemptSummary:
+    sequence_number: int
+    provider: str
+    requested_model: str
+    returned_model: str | None
+    model_version: str | None
+    started_at: datetime
+    completed_at: datetime | None
+    latency_ms: int
+    status: str
+    failure_kind: str | None
+    http_status_code: int | None
+    input_token_count: int
+    output_token_count: int
+    selected_result: bool
+
+
+@dataclass(frozen=True, slots=True)
 class InvestigationSessionSummary:
     session_id: UUID
     case_version: int
@@ -258,6 +277,7 @@ class InvestigationSessionSummary:
     completed_at: datetime | None
     steps: tuple[InvestigationStepSummary, ...]
     hypotheses: tuple[InvestigationHypothesisSummary, ...]
+    provider_attempts: tuple[InvestigationProviderAttemptSummary, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -585,6 +605,7 @@ async def load_recovery_case_detail(
     investigation_ids = tuple(item.id for item in investigation_sessions)
     steps_by_session: dict[UUID, list[RecoveryInvestigationStep]] = {}
     hypotheses_by_session: dict[UUID, list[RecoveryInvestigationHypothesis]] = {}
+    attempts_by_session: dict[UUID, list[RecoveryInvestigationProviderAttempt]] = {}
     if investigation_ids:
         steps_result = await session.execute(
             select(RecoveryInvestigationStep)
@@ -606,6 +627,16 @@ async def load_recovery_case_detail(
         )
         for hypothesis in hypotheses_result.scalars().all():
             hypotheses_by_session.setdefault(hypothesis.session_id, []).append(hypothesis)
+        attempts_result = await session.execute(
+            select(RecoveryInvestigationProviderAttempt)
+            .where(RecoveryInvestigationProviderAttempt.session_id.in_(investigation_ids))
+            .order_by(
+                RecoveryInvestigationProviderAttempt.session_id,
+                RecoveryInvestigationProviderAttempt.sequence_number,
+            )
+        )
+        for attempt in attempts_result.scalars().all():
+            attempts_by_session.setdefault(attempt.session_id, []).append(attempt)
 
     audit_entries = await load_recovery_audit_chain(
         session,
@@ -688,6 +719,25 @@ async def load_recovery_case_detail(
                         version=hypothesis.version,
                     )
                     for hypothesis in hypotheses_by_session.get(item.id, [])
+                ),
+                provider_attempts=tuple(
+                    InvestigationProviderAttemptSummary(
+                        sequence_number=attempt.sequence_number,
+                        provider=attempt.provider,
+                        requested_model=attempt.requested_model,
+                        returned_model=attempt.returned_model,
+                        model_version=attempt.model_version,
+                        started_at=attempt.started_at,
+                        completed_at=attempt.completed_at,
+                        latency_ms=attempt.latency_ms,
+                        status=attempt.status,
+                        failure_kind=attempt.failure_kind,
+                        http_status_code=attempt.http_status_code,
+                        input_token_count=attempt.input_token_count,
+                        output_token_count=attempt.output_token_count,
+                        selected_result=attempt.selected_result,
+                    )
+                    for attempt in attempts_by_session.get(item.id, [])
                 ),
             )
             for item in investigation_sessions

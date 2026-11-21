@@ -9,6 +9,7 @@ from app.db.models.incident import (
 )
 from app.db.models.investigation import (
     RecoveryInvestigationHypothesis,
+    RecoveryInvestigationProviderAttempt,
     RecoveryInvestigationSession,
     RecoveryInvestigationStep,
 )
@@ -83,6 +84,7 @@ __all__ = [
     "RecoveryAuditEvent",
     "RecoveryCase",
     "RecoveryInvestigationHypothesis",
+    "RecoveryInvestigationProviderAttempt",
     "RecoveryInvestigationSession",
     "RecoveryInvestigationStep",
     "RecoveryOutcome",

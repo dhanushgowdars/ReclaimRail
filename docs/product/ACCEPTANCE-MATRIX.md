@@ -129,8 +129,8 @@ Phase 17B remains unauthorized until a separate owner decision.
 | P17B-02 | Supported non-duplicate model route | BROKEN | no deprecated alias pretending to be independent failover |
 | P17B-03 | Structured-output contract passes deterministic fixtures | VERIFIED | current focused tests pass |
 | P17B-04 | Bounded provider retry and sanitized diagnostics | VERIFIED | focused retry/failover/quota tests pass; no live-provider claim is implied |
-| P17B-05 | Frozen corpus remains unchanged during diagnosis | VERIFIED | corpus hash recorded before live run |
-| P17B-06 | Provider access/quota preflight | NOT IMPLEMENTED | one cheap diagnostic establishes model access before corpus |
+| P17B-05 | Frozen corpus remains unchanged during diagnosis | PARTIAL | historical v1 corpus/hash remain preserved; v1 used non-UUID case IDs incompatible with the read-only tool contract, so UUID-valid v2 has a new recorded hash and requires one separately authorized run |
+| P17B-06 | Provider access/quota preflight | VERIFIED | one sanitized `gemini-3.6-flash` Generate Content preflight returned the forced read-only tool selection without execution; see ignored local evidence |
 | P17B-07 | Truth-compatible rate | BROKEN | at least 80% on a complete corpus run |
 | P17B-08 | Required-tool selection | BROKEN | at least 80% |
 | P17B-09 | Citation validity | BROKEN | 100% |
@@ -232,3 +232,5 @@ Copy this table into `WORK-LOG.md` for every phase:
 | Limitations | explicit unresolved items |
 | Git identity | author and committer |
 | Decision | owner approved/rejected/deferred |
+
+| P17B-15 | Groq external-blocker receipt observability | PARTIAL | Sanitized pre-call/response/failure checkpoint receipts are deterministic and tested; one authorized corpus-v2 run remains `INDETERMINATE_TRANSPORT` (`3/2/1`, zero retries), budget `26/150`, no final selection report or rerun authorization. |

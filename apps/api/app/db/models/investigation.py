@@ -1,4 +1,5 @@
 """Durable reviewer-safe transcript for the Phase 17 investigator."""
+# ruff: noqa: E501
 
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -132,6 +133,49 @@ class RecoveryInvestigationStep(Base):
     elapsed_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RecoveryInvestigationProviderAttempt(Base):
+    """Sanitized provider-call receipt; never stores provider payloads or errors."""
+
+    __tablename__ = "recovery_investigation_provider_attempts"
+    __table_args__ = (
+        UniqueConstraint("session_id", "sequence_number", name="uq_investigation_provider_attempt"),
+        CheckConstraint("sequence_number >= 1", name="ck_investigation_provider_attempt_sequence"),
+        CheckConstraint("latency_ms >= 0", name="ck_investigation_provider_attempt_latency"),
+        CheckConstraint(
+            "input_token_count >= 0", name="ck_investigation_provider_attempt_input_tokens"
+        ),
+        CheckConstraint(
+            "output_token_count >= 0", name="ck_investigation_provider_attempt_output_tokens"
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4)
+    session_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("recovery_investigation_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    requested_model: Mapped[str] = mapped_column(String(128), nullable=False)
+    returned_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    failure_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    http_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_token_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    output_token_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    selected_result: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default="false"
+    )
 
 
 class RecoveryInvestigationHypothesis(Base):

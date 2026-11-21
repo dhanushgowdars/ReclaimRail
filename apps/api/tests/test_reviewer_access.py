@@ -47,7 +47,7 @@ def test_operational_routes_fail_closed_when_reviewer_access_is_unconfigured(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("RECLAIMRAIL_REVIEWER_ACCESS_TOKEN")
+    monkeypatch.setenv("RECLAIMRAIL_REVIEWER_ACCESS_TOKEN", "")
     get_settings.cache_clear()
 
     response = client.get("/health/workers")

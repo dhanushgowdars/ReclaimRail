@@ -20,11 +20,14 @@ def test_budgets_are_bounded_and_reject_unbounded_values() -> None:
     assert budget.max_tool_calls == 8
     assert budget.max_model_retries == 2
     assert budget.max_duration == timedelta(seconds=30)
+    assert budget.retry_base_seconds == 0.5
 
     with pytest.raises(ValueError, match="Tool-call budget"):
         InvestigationBudgets(max_tool_calls=21)
     with pytest.raises(ValueError, match="duration"):
         InvestigationBudgets(max_duration=timedelta(minutes=6))
+    with pytest.raises(ValueError, match="retry maximum"):
+        InvestigationBudgets(retry_base_seconds=2, retry_max_seconds=1)
 
 
 def test_turn_contract_is_strict_and_supports_explicit_abstention() -> None:

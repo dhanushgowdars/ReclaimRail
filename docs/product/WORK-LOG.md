@@ -875,3 +875,91 @@ not modify application behavior, rerun accepted Gate 2 evidence, call Gemini or 
 or authorize Phase 17B. The next possible work order is Phase 17B read-only diagnosis, but
 it requires a separate owner decision after this exact documentation diff is reviewed,
 committed and pushed through separate approvals.
+
+## 20 November 2026 — Phase 17B configured-model preflight and corpus-contract remediation
+
+The owner authorized bounded Phase 17B Gemini diagnostics. The first two explicit
+`gemini-3.8-flash` preflights returned sanitized `503 UNAVAILABLE` evidence; a replacement
+key did not alter that provider-boundary result. The owner then directed the configured
+`gemini-3.6-flash` route. Its single Generate Content preflight passed with `minimal`
+thinking: one SDK attempt, zero retries, 512 maximum output tokens, 120-second timeout,
+automatic function execution and continuation disabled, and a forced read-only
+`get_truth_snapshot` selection. The returned function was never executed. No Razorpay call
+occurred. Ignored local report:
+`.runtime/phase17b/preflight-gemini-3.6-flash-generate-content-configured-20261120.json`.
+
+The owner next authorized exactly one frozen v1 corpus pass with `gemini-3.6-flash`,
+`minimal` thinking and a 90-request ceiling. A direct-file launch stopped locally before
+Gemini because the runner did not add the API root to `sys.path`; module-mode invocation
+then performed the one authorized run. It made ten provider requests, one for each scenario,
+and stored ignored sanitized evidence at
+`.runtime/phase17b/benchmark-gemini-3.6-flash-corpus-v1-20261120.json`. Thresholds failed:
+truth-compatible/tool-selection/citation rates were 0%, provider-failure rate was 100%, and
+the report recorded six provider rejections plus two quota-exhausted scenarios without raw
+provider text, prompts or secrets.
+
+Deterministic analysis found the candidate corpus contract defect: v1 case IDs such as
+`case-01` cannot satisfy the UUID-only read-only tool schema; the preflight used a valid
+UUID and passed. v1 and its checksum/report remain unchanged as failure evidence. The
+candidate now adds frozen `corpus-v2.json` with UUID case IDs, a matching checksum, local
+UUID validation before a provider call, corpus-ID propagation, safe per-scenario provider
+diagnostics and a direct-script bootstrap fix. No live v2 run was made.
+
+Focused local validation after the remediation:
+
+| Check | Result |
+| --- | --- |
+| Ruff format/check | passed |
+| Strict mypy, Phase 17B modules | passed; 3 source files |
+| Focused Phase 17B deterministic suite | `81 passed in 2.56s` |
+| Direct runner bootstrap (`--help`) | passed; no network call |
+
+One separately authorized `gemini-3.6-flash` v2 corpus run then completed within its
+90-request ceiling. It made ten calls, one per scenario, and failed before tool selection:
+eight sanitized `400 INVALID_ARGUMENT` provider rejections and two `429 RESOURCE_EXHAUSTED`
+quota failures. Truth-compatible, required-tool-selection and citation rates were all 0%.
+The ignored evidence is
+`.runtime/phase17b/benchmark-gemini-3.6-flash-corpus-v2-20261120.json`. The UUID corpus
+repair was necessary but did not resolve the full multi-function request contract.
+
+Phase 17B remains `BROKEN`. Do not rerun either corpus. The next work is an offline,
+deterministic reduction of the full Gemini request shape and tests for the accepted shape;
+any subsequent provider request requires a separate owner authorization. No staging, commit,
+push, merge, deployment or Razorpay call occurred.
+
+The offline remediation now reduces every Gemini function declaration to the portable schema
+subset `type`, `properties`, `required`, `items` and `enum`, stripping Pydantic-only
+presentation/validation metadata while retaining backend UUID and strict argument checks.
+Focused Ruff format/check, strict mypy and the Phase 17B deterministic selection pass with
+`82 passed in 2.73s`. No provider call followed this correction. The next provider gate is
+one separately authorized full-declaration preflight using a valid UUID—not another corpus.
+
+That full-declaration preflight subsequently made exactly one Generate Content request with
+all eleven read-only tools and two terminal response contracts. It executed no function and
+made no Razorpay call, but timed out at 120.859 seconds without a usable model response.
+Ignored sanitized evidence:
+`.runtime/phase17b/preflight-gemini-3.6-flash-full-declarations-v2-20261120.json`.
+No retry is authorized. The next work is offline request-shape and latency reduction before
+any further provider request.
+
+## 21 November 2026 — Phase 17B Groq external-blocker hardening
+
+The owner-authorized Groq corpus-v2 run stopped fail-closed after `3` starts, `2` responses
+and `1` indeterminate transport request; retries were `0`. The preserved checkpoint is
+`.runtime/phase17b/.groq-corpus-v2-20261121-authorized.checkpoint.json` with SHA-256
+`38677f99f60ce24be419b9dcf479dd36b543deff9ba592b6afd90c959eda75de`. No final report,
+selection claim or corpus rerun is authorized. Live budget is `26/150`.
+
+The benchmark checkpoint now persists only sanitized request-boundary receipts before an SDK
+call and after a response, exception, scenario and terminal transition. Receipts contain
+timestamps, configured timeout, elapsed time, reconciled counters, safe failure boundary and
+classification, plus allowlisted token/quota metadata; they never retain prompts, observations,
+raw responses, headers, opaque IDs, authorization data or secrets. Phase 17B remains `PARTIAL`.
+
+Draft owner decision (not assumed): authorize Phase 18 deterministic implementation while
+retaining Phase 17B as a release/submission blocker until a separately authorized live model
+selection run completes with its locked thresholds.
+
+The owner subsequently approved that bounded Phase 18 decision in `DEC-032`. It authorizes no
+Phase 18 implementation yet: the current task is limited to presenting the exact Phase 17B
+partial-checkpoint commit scope for separate path/message approval.

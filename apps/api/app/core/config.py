@@ -22,6 +22,7 @@ class Settings(BaseSettings):
         min_length=1,
         max_length=128,
     )
+    gemini_thinking_level: Literal["minimal", "low", "medium", "high"] = "minimal"
     gemini_temperature: float = Field(
         default=0.1,
         ge=0.0,
@@ -37,9 +38,17 @@ class Settings(BaseSettings):
         ge=1.0,
         le=60.0,
     )
+    groq_api_key: SecretStr | None = None
+    groq_model_name: str | None = Field(default=None, min_length=1, max_length=128)
+    groq_max_output_tokens: int = Field(default=4096, ge=256, le=4096)
+    groq_request_timeout_seconds: float = Field(default=60.0, ge=1.0, le=60.0)
+    recovery_investigator_provider_order: str = "groq"
     recovery_investigator_shadow_enabled: bool = True
     recovery_investigator_max_tool_calls: int = Field(default=8, ge=1, le=20)
     recovery_investigator_max_model_retries: int = Field(default=2, ge=0, le=5)
+    recovery_investigator_retry_base_seconds: float = Field(default=0.5, ge=0.0, le=30.0)
+    recovery_investigator_retry_max_seconds: float = Field(default=4.0, ge=0.0, le=60.0)
+    recovery_investigator_retry_jitter_ratio: float = Field(default=0.2, ge=0.0, le=1.0)
     recovery_investigator_max_total_tokens: int = Field(default=12_000, ge=256, le=100_000)
     recovery_investigator_max_duration_seconds: int = Field(default=30, ge=1, le=300)
 
@@ -295,6 +304,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_worker_supervision_intervals(self) -> Self:
+        if self.recovery_investigator_provider_order != "groq":
+            raise ValueError("Phase 17B active investigator provider order must be groq")
         if self.worker_heartbeat_ttl_seconds <= self.worker_heartbeat_interval_seconds * 2:
             raise ValueError(
                 "Worker heartbeat TTL must exceed two heartbeat intervals",
@@ -309,6 +320,13 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "Payment truth reconciliation retry maximum must not be lower than base",
+            )
+        if (
+            self.recovery_investigator_retry_max_seconds
+            < self.recovery_investigator_retry_base_seconds
+        ):
+            raise ValueError(
+                "Recovery investigator retry maximum must not be lower than base",
             )
         if (
             self.payment_truth_reconciliation_circuit_failure_threshold

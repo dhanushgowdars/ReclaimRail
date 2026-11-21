@@ -1,18 +1,21 @@
 """Bounded, durable, read-only recovery evidence investigation."""
+# ruff: noqa: E501
 
 import asyncio
 import hashlib
 import json
+import random
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.investigation import (
     RecoveryInvestigationHypothesis,
+    RecoveryInvestigationProviderAttempt,
     RecoveryInvestigationSession,
     RecoveryInvestigationStep,
 )
@@ -27,7 +30,11 @@ from app.domain.investigation import (
 )
 from app.integrations.gemini.evidence_investigator import (
     INVESTIGATOR_PROMPT_VERSION,
+)
+from app.integrations.investigator import (
+    EvidenceInvestigatorFailureKind,
     EvidenceInvestigatorProvider,
+    EvidenceInvestigatorProviderError,
 )
 from app.services.recovery_investigation_tools import (
     TOOL_REGISTRY_VERSION,
@@ -70,6 +77,70 @@ def _as_result(record: RecoveryInvestigationSession) -> RecoveryInvestigationRes
         result_summary=record.result_summary,
         evidence_ids=tuple(record.result_evidence_ids),
     )
+
+
+async def _start_provider_attempt(
+    session_factory: SessionFactory, *, session_id: UUID, provider: EvidenceInvestigatorProvider
+) -> UUID:
+    """Allocate one durable receipt before egress; the session lock serializes sequences."""
+    async with session_factory.begin() as session:
+        await session.get(RecoveryInvestigationSession, session_id, with_for_update=True)
+        latest_sequence = await session.scalar(
+            select(
+                func.coalesce(func.max(RecoveryInvestigationProviderAttempt.sequence_number), 0)
+            ).where(RecoveryInvestigationProviderAttempt.session_id == session_id)
+        )
+        sequence = (latest_sequence or 0) + 1
+        attempt = RecoveryInvestigationProviderAttempt(
+            session_id=session_id,
+            sequence_number=sequence,
+            provider=getattr(provider, "provider_name", "unknown"),
+            requested_model=str(getattr(provider, "model_name", "unknown")),
+            started_at=datetime.now(UTC),
+            status="started",
+        )
+        session.add(attempt)
+        await session.flush()
+        return attempt.id
+
+
+async def _finalize_provider_attempt(
+    session_factory: SessionFactory,
+    *,
+    attempt_id: UUID | None,
+    response: InvestigatorProviderResponse | None = None,
+    error: EvidenceInvestigatorProviderError | None = None,
+) -> None:
+    """Idempotently close an attempt without persisting raw error data."""
+    if attempt_id is None:
+        return
+    async with session_factory.begin() as session:
+        attempt = await session.get(
+            RecoveryInvestigationProviderAttempt, attempt_id, with_for_update=True
+        )
+        if attempt is None or attempt.completed_at is not None:
+            return
+        completed = datetime.now(UTC)
+        attempt.completed_at = completed
+        attempt.latency_ms = max(0, int((completed - attempt.started_at).total_seconds() * 1000))
+        if response is not None:
+            attempt.status = "succeeded"
+            attempt.returned_model = response.model_name
+            attempt.model_version = response.model_version
+            attempt.input_token_count = response.input_token_count or 0
+            attempt.output_token_count = response.output_token_count or 0
+            attempt.selected_result = True
+            record = await session.get(
+                RecoveryInvestigationSession, attempt.session_id, with_for_update=True
+            )
+            if record is not None:
+                record.provider = response.provider
+                record.model_name = response.model_name
+                record.model_version = response.model_version or response.model_name
+        else:
+            attempt.status = "failed_safe"
+            attempt.failure_kind = error.kind.value if error else "interrupted"
+            attempt.http_status_code = error.status_code if error else None
 
 
 async def _load_existing(
@@ -122,7 +193,11 @@ async def _create_or_load_session(
                 truth_version=truth.version,
                 evidence_cutoff_at=started_at,
                 status=InvestigationStatus.RUNNING.value,
-                provider="gemini" if provider else "deterministic_fallback",
+                provider=(
+                    getattr(provider, "provider_name", "unknown")
+                    if provider
+                    else "deterministic_fallback"
+                ),
                 model_name=None,
                 model_version=None,
                 prompt_version=INVESTIGATOR_PROMPT_VERSION,
@@ -192,6 +267,21 @@ def _validate_citations(turn: InvestigatorTurn, known_evidence: set[str]) -> Non
         cited.update(hypothesis.contradicting_evidence_ids)
     if cited.difference(known_evidence):
         raise ValueError("Model cited evidence that was not returned by a tool")
+
+
+def _retry_delay_seconds(
+    budgets: InvestigationBudgets,
+    attempt: int,
+    *,
+    jitter_fraction: float | None = None,
+) -> float:
+    base_delay: float = min(
+        float(budgets.retry_max_seconds),
+        float(budgets.retry_base_seconds) * (2.0 ** max(0, attempt - 1)),
+    )
+    fraction = random.random() if jitter_fraction is None else jitter_fraction
+    jitter = budgets.retry_jitter_ratio * ((2.0 * fraction) - 1.0)
+    return max(0.0, base_delay * (1.0 + jitter))
 
 
 async def _persist_hypotheses(
@@ -264,7 +354,7 @@ async def run_shadow_investigation(
 
     observations: list[dict[str, object]] = []
     known_evidence: set[str] = set()
-    tool_calls = retries = total_tokens = sequence = 0
+    tool_calls = total_tokens = sequence = 0
     while True:
         now = datetime.now(UTC)
         if now - began >= budgets.max_duration:
@@ -292,11 +382,14 @@ async def run_shadow_investigation(
             "observations": observations,
             "budgets_remaining": {
                 "tool_calls": budgets.max_tool_calls - tool_calls,
-                "model_retries": budgets.max_model_retries - retries,
+                "provider_retries": 0,
                 "tokens": budgets.max_total_tokens - total_tokens,
             },
             "response_contract": "call one tool, complete with citations, or abstain",
         }
+        attempt_id = await _start_provider_attempt(
+            session_factory, session_id=record.id, provider=provider
+        )
         try:
             remaining = max(
                 0.001,
@@ -304,20 +397,8 @@ async def run_shadow_investigation(
             )
             async with asyncio.timeout(remaining):
                 response = await provider.next_turn(request)
-            turn = _parse_turn(response)
-            total_tokens += (response.input_token_count or 0) + (response.output_token_count or 0)
-            if total_tokens > budgets.max_total_tokens:
-                return await _finish(
-                    session_factory,
-                    session_id=record.id,
-                    status=InvestigationStatus.FALLBACK,
-                    reason="token_budget_exhausted",
-                    completed_at=datetime.now(UTC),
-                    summary="Investigation stopped safely at its token budget.",
-                    evidence_ids=tuple(sorted(known_evidence)),
-                )
-            _validate_citations(turn, known_evidence)
         except TimeoutError:
+            await _finalize_provider_attempt(session_factory, attempt_id=attempt_id)
             return await _finish(
                 session_factory,
                 session_id=record.id,
@@ -327,17 +408,95 @@ async def run_shadow_investigation(
                 summary="Investigation stopped safely at its wall-clock budget.",
                 evidence_ids=tuple(sorted(known_evidence)),
             )
-        except Exception as error:  # noqa: BLE001 - explicit bounded provider boundary
-            retries += 1
-            if retries <= budgets.max_model_retries:
-                continue
+        except EvidenceInvestigatorProviderError as error:
+            await _finalize_provider_attempt(session_factory, attempt_id=attempt_id, error=error)
+            if error.kind is EvidenceInvestigatorFailureKind.MALFORMED_RESPONSE:
+                return await _finish(
+                    session_factory,
+                    session_id=record.id,
+                    status=InvestigationStatus.FALLBACK,
+                    reason="malformed_model_output",
+                    completed_at=datetime.now(UTC),
+                    summary=(
+                        "Model output was malformed; deterministic policy remains authoritative."
+                    ),
+                    evidence_ids=tuple(sorted(known_evidence)),
+                )
             return await _finish(
                 session_factory,
                 session_id=record.id,
                 status=InvestigationStatus.FALLBACK,
-                reason=f"model_retry_budget_exhausted:{type(error).__name__}",
+                reason=f"provider_{error.kind.value}",
                 completed_at=datetime.now(UTC),
-                summary="Model output was invalid; deterministic policy remains authoritative.",
+                summary=(
+                    "The model provider was unavailable; "
+                    "deterministic policy remains authoritative."
+                ),
+                evidence_ids=tuple(sorted(known_evidence)),
+            )
+        except Exception as error:  # noqa: BLE001 - provider implementations are untrusted
+            await _finalize_provider_attempt(session_factory, attempt_id=attempt_id)
+            return await _finish(
+                session_factory,
+                session_id=record.id,
+                status=InvestigationStatus.FALLBACK,
+                reason=f"provider_unclassified:{type(error).__name__}",
+                completed_at=datetime.now(UTC),
+                summary=(
+                    "The model provider failed safely; deterministic policy remains authoritative."
+                ),
+                evidence_ids=tuple(sorted(known_evidence)),
+            )
+
+        await _finalize_provider_attempt(session_factory, attempt_id=attempt_id, response=response)
+
+        if response.input_token_count is None or response.output_token_count is None:
+            return await _finish(
+                session_factory,
+                session_id=record.id,
+                status=InvestigationStatus.FALLBACK,
+                reason="usage_metadata_incomplete",
+                completed_at=datetime.now(UTC),
+                summary=(
+                    "Model usage evidence was incomplete; "
+                    "deterministic policy remains authoritative."
+                ),
+                evidence_ids=tuple(sorted(known_evidence)),
+            )
+
+        total_tokens += response.input_token_count + response.output_token_count
+        if total_tokens > budgets.max_total_tokens:
+            return await _finish(
+                session_factory,
+                session_id=record.id,
+                status=InvestigationStatus.FALLBACK,
+                reason="token_budget_exhausted",
+                completed_at=datetime.now(UTC),
+                summary="Investigation stopped safely at its token budget.",
+                evidence_ids=tuple(sorted(known_evidence)),
+            )
+        try:
+            turn = _parse_turn(response)
+        except Exception:  # noqa: BLE001 - strict Pydantic boundary
+            return await _finish(
+                session_factory,
+                session_id=record.id,
+                status=InvestigationStatus.FALLBACK,
+                reason="malformed_model_output",
+                completed_at=datetime.now(UTC),
+                summary="Model output was malformed; deterministic policy remains authoritative.",
+                evidence_ids=tuple(sorted(known_evidence)),
+            )
+        try:
+            _validate_citations(turn, known_evidence)
+        except ValueError:
+            return await _finish(
+                session_factory,
+                session_id=record.id,
+                status=InvestigationStatus.FALLBACK,
+                reason="invalid_model_citation",
+                completed_at=datetime.now(UTC),
+                summary="Model citations were invalid; deterministic policy remains authoritative.",
                 evidence_ids=tuple(sorted(known_evidence)),
             )
 
@@ -358,6 +517,7 @@ async def run_shadow_investigation(
                 return _as_result(current)
             current.model_name = response.model_name
             current.model_version = response.model_version or response.model_name
+            current.provider = response.provider
             current.input_token_count += response.input_token_count or 0
             current.output_token_count += response.output_token_count or 0
 

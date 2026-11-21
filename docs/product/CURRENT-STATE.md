@@ -324,6 +324,47 @@ identifier as deprecated and automatically routed to `gemini-3.8-flash`; it is a
 duplicate route, not independent failover capacity. No model-string change is authorized
 until the Phase 17B remediation specification is approved.
 
+### 20 November 2026 candidate preflight and corpus-contract remediation
+
+The locally configured `gemini-3.6-flash` route passed one bounded Generate Content
+preflight: `minimal` thinking, 512 maximum output tokens, 120-second timeout, one SDK
+attempt, zero retries, automatic function execution/continuation disabled and forced
+`get_truth_snapshot` selection. The returned function was not executed. No Razorpay call
+occurred. The report is ignored local evidence and contains no prompt, response or secret.
+
+The first owner-authorized v1 frozen-corpus run did not meet selection thresholds: it made
+ten calls (one per scenario, within the ceiling of 90), recorded 100% provider failure and
+zero truth-compatible, tool-selection or citation rates. The sanitized report retained no
+raw provider payload. Deterministic inspection found that every v1 corpus case ID used a
+non-UUID value such as `case-01`, while every declared read-only tool requires a UUID. The
+historical v1 corpus and failed report are preserved unchanged. A new UUID-valid v2 corpus
+and checksum were added, the runner now rejects malformed case IDs before a provider call,
+and safe provider status/reason codes are retained in future sanitized reports. Focused
+format, lint, strict mypy and 81 deterministic tests pass.
+
+One separately authorized v2 run subsequently made ten calls (one per scenario, within its
+90-request ceiling) and failed at the same full multi-function request boundary before any
+tool selection: eight sanitized `400 INVALID_ARGUMENT` rejections and two `429
+RESOURCE_EXHAUSTED` quota failures. Truth-compatible, required-tool-selection and citation
+rates were all 0%. The UUID correction is therefore necessary validation, but not the final
+provider-contract fix. The ignored report is
+`.runtime/phase17b/benchmark-gemini-3.6-flash-corpus-v2-20261120.json`; no function or
+Razorpay call was executed.
+
+Phase 17B remains `BROKEN`: no model meets the locked quality thresholds.
+
+After the v2 failure, the Gemini adapter was corrected offline to emit only the portable
+function-schema subset (`type`, `properties`, `required`, `items`, `enum`) rather than
+Pydantic presentation/validation metadata such as `title`, `format` and
+`additionalProperties`; backend UUID and strict argument validation remain authoritative.
+Focused format/lint, strict mypy and 82 deterministic tests pass. This is a remediation
+candidate only. One post-correction full-declaration preflight with a valid UUID made exactly
+one request, executed no function and timed out at 120.859 seconds without a model response.
+The ignored sanitized report is
+`.runtime/phase17b/preflight-gemini-3.6-flash-full-declarations-v2-20261120.json`. The next
+work is offline latency/request-shape reduction; another provider request requires separate
+authorization.
+
 ## Frontend truth
 
 The current frontend builds these surfaces: Live Demo, Command Center, Recovery Cases,
@@ -377,3 +418,14 @@ Limitations:
 4. Stop for a separate owner decision before Phase 17B read-only diagnosis. Any live Gemini
    run additionally requires an approved model list, quota/access preflight, request budget,
    corpus hash and evidence path.
+
+## 21 November 2026 Phase 17B Groq status
+
+`PARTIAL`: the controlled Groq canary succeeded, offline corpus and fresh PostgreSQL gates pass,
+but the one authorized corpus-v2 run ended `INDETERMINATE_TRANSPORT` at `3/2/1`
+starts/responses/indeterminate and zero retries. Budget is `26/150`; no corpus rerun or
+model-selection claim is authorized. Sanitized request-boundary checkpoint receipts now provide
+the missing durable timeout/failure observability without changing truth, policy or execution.
+
+`DEC-032` permits later provider-neutral Phase 18 deterministic implementation, but Phase 17B
+remains a mandatory release/submission blocker and no Phase 18 code has begun.

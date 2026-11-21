@@ -43,6 +43,9 @@ class InvestigationBudgets:
     max_model_retries: int = 2
     max_total_tokens: int = 12_000
     max_duration: timedelta = timedelta(seconds=30)
+    retry_base_seconds: float = 0.5
+    retry_max_seconds: float = 4.0
+    retry_jitter_ratio: float = 0.2
 
     def __post_init__(self) -> None:
         if not 1 <= self.max_tool_calls <= 20:
@@ -53,6 +56,12 @@ class InvestigationBudgets:
             raise ValueError("Token budget must be between 256 and 100000")
         if not timedelta(seconds=1) <= self.max_duration <= timedelta(minutes=5):
             raise ValueError("Investigation duration must be between one second and five minutes")
+        if not 0.0 <= self.retry_base_seconds <= 30.0:
+            raise ValueError("Provider retry base must be between zero and thirty seconds")
+        if not self.retry_base_seconds <= self.retry_max_seconds <= 60.0:
+            raise ValueError("Provider retry maximum must be at least the base and at most sixty")
+        if not 0.0 <= self.retry_jitter_ratio <= 1.0:
+            raise ValueError("Provider retry jitter ratio must be between zero and one")
 
 
 class HypothesisUpdate(BaseModel):
@@ -126,3 +135,6 @@ class InvestigatorProviderResponse:
     model_version: str | None = None
     input_token_count: int | None = None
     output_token_count: int | None = None
+    provider: str = "unknown"
+    attempts: tuple[object, ...] = ()
+    quota_metadata: dict[str, object] | None = None

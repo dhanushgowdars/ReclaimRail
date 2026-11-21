@@ -29,6 +29,48 @@ function Badge({ value }: { value: string }) {
   return <span className={`badge badge--${badgeTone(value)}`}>{titleCase(value)}</span>;
 }
 
+type Investigation = RecoveryCaseDetail["investigations"][number];
+
+function investigationPresentation(investigation: Investigation): {
+  heading: string;
+  explanation: string;
+} {
+  if (investigation.provider === "deterministic_fallback") {
+    return {
+      heading: "Evidence investigation · deterministic fallback",
+      explanation: "No Gemini investigation ran. Deterministic payment truth and policy remained authoritative.",
+    };
+  }
+  if (investigation.status === "running") {
+    return {
+      heading: "Gemini evidence investigation · incomplete",
+      explanation: "The read-only investigation has not produced a terminal conclusion.",
+    };
+  }
+  if (investigation.status === "abstained") {
+    return {
+      heading: "Gemini evidence investigation · abstained",
+      explanation: "Gemini declined to conclude because the available evidence was insufficient or conflicting.",
+    };
+  }
+  if (investigation.status === "fallback") {
+    return {
+      heading: "Gemini evidence investigation · fallback used",
+      explanation: "Gemini did not produce an accepted result. Deterministic payment truth and policy remained authoritative.",
+    };
+  }
+  if (investigation.status === "failed_safe") {
+    return {
+      heading: "Gemini evidence investigation · failed safely",
+      explanation: "A safety boundary stopped the investigation without changing payment truth or executing recovery.",
+    };
+  }
+  return {
+    heading: `Gemini evidence investigation · ${investigation.shadow_mode ? "shadow mode" : "advisory mode"}`,
+    explanation: "Gemini investigated stored evidence using bounded read-only tools; deterministic controls still decide every action.",
+  };
+}
+
 function hasExpired(value: string | null): boolean {
   return value !== null && Number.isFinite(Date.parse(value)) && Date.parse(value) <= Date.now();
 }
@@ -84,6 +126,7 @@ function DecisionTrace({ detail }: { detail: RecoveryCaseDetail }) {
   const evidence = [...new Set([...(trace?.evidence_references ?? []), ...(trace?.evidence_codes ?? [])])];
   const latestApproval = [...detail.approvals].sort((left, right) => right.requested_at.localeCompare(left.requested_at))[0];
   const investigation = [...detail.investigations].sort((left, right) => right.started_at.localeCompare(left.started_at))[0];
+  const investigationCopy = investigation ? investigationPresentation(investigation) : null;
   return <DetailCard eyebrow="AI recovery brain" title="Gemini recommendation under control">
     <div className="decision-boundary"><strong>AI recommends.</strong><span>Deterministic policy and authorized humans decide what may execute.</span></div>
     <div className="decision-provider"><span>Planning run {latestRun?.run_number ?? "—"}</span><strong>{latestRun === undefined ? "Awaiting evidence" : trace?.fallback_used ? "Deterministic fallback" : titleCase(latestRun.planner_provider)}</strong></div>
@@ -98,10 +141,11 @@ function DecisionTrace({ detail }: { detail: RecoveryCaseDetail }) {
     {trace?.alternatives_considered.length ? <div className="trace-citations"><b>Alternatives evaluated</b>{trace.alternatives_considered.map((item) => <article key={`${item.action_type}-${item.disposition}`}><strong>{titleCase(item.action_type)}</strong><span>{item.reason}</span></article>)}</div> : null}
     {trace?.known_uncertainties.length ? <p className="brain-operator-explanation"><b>Known uncertainty:</b> {trace.known_uncertainties.join(" ")}</p> : null}
     {trace?.evidence_tool_names.length ? <p className="brain-tools"><b>Bounded evidence tools:</b> {trace.evidence_tool_names.map(titleCase).join(" · ")}</p> : null}
-    {investigation ? <div className="trace-citations">
-      <b>Live evidence investigation · {investigation.shadow_mode ? "shadow mode" : "active mode"}</b>
+    {investigation && investigationCopy ? <div className="trace-citations" data-investigation-state={investigation.status}>
+      <b>{investigationCopy.heading}</b>
       <article>
         <strong><Badge value={investigation.status} /> {investigation.result_summary ?? titleCase(investigation.terminal_reason ?? "Investigation running")}</strong>
+        <span>{investigationCopy.explanation}</span>
         <span>Case v{investigation.case_version} · truth v{investigation.truth_version} · evidence cutoff {formatTimestamp(investigation.evidence_cutoff_at)}</span>
         <span>{titleCase(investigation.provider)}{investigation.model_name ? ` · ${investigation.model_name}` : ""} · {investigation.tool_call_count} bounded read-only call{investigation.tool_call_count === 1 ? "" : "s"} · {investigation.input_token_count + investigation.output_token_count} tokens</span>
       </article>
@@ -114,6 +158,11 @@ function DecisionTrace({ detail }: { detail: RecoveryCaseDetail }) {
         <strong>{hypothesis.claim} · {titleCase(hypothesis.status)}</strong>
         <span>{hypothesis.supporting_evidence_ids.length} supporting · {hypothesis.contradicting_evidence_ids.length} contradicting citation{hypothesis.contradicting_evidence_ids.length === 1 ? "" : "s"}</span>
         {hypothesis.next_observation ? <span>Next observation: {hypothesis.next_observation}</span> : null}
+      </article>)}
+      {investigation.provider_attempts.length === 0 ? <article><strong>Provider attempts</strong><span>No provider attempt receipt is available for this older investigation.</span></article> : investigation.provider_attempts.map((attempt) => <article key={`${investigation.session_id}-provider-${attempt.sequence_number}`}>
+        <strong>{attempt.sequence_number}. {titleCase(attempt.provider)} · {attempt.returned_model ?? attempt.requested_model} · <Badge value={attempt.status} />{attempt.selected_result ? " Selected result" : ""}</strong>
+        <span>Started {formatTimestamp(attempt.started_at)} · {attempt.completed_at ? `${attempt.latency_ms}ms` : "Interrupted before completion"} · {attempt.input_token_count + attempt.output_token_count} tokens</span>
+        {attempt.failure_kind ? <span>Safe provider failure: {titleCase(attempt.failure_kind)}{attempt.http_status_code ? ` · HTTP ${attempt.http_status_code}` : ""}</span> : null}
       </article>)}
     </div> : <p className="brain-fallback"><b>Evidence investigator:</b> No shadow investigation is recorded for this older case.</p>}
     {runs.length > 1 ? <p className="brain-replan"><b>{runs.length} planning runs are recorded.</b> The latest recommendation is shown above; earlier plans remain in the audit chain instead of being overwritten.</p> : null}

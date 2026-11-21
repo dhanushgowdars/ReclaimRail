@@ -35,6 +35,9 @@ def create_settings() -> SimpleNamespace:
         recovery_investigator_shadow_enabled=True,
         recovery_investigator_max_tool_calls=8,
         recovery_investigator_max_model_retries=2,
+        recovery_investigator_retry_base_seconds=0.5,
+        recovery_investigator_retry_max_seconds=4.0,
+        recovery_investigator_retry_jitter_ratio=0.2,
         recovery_investigator_max_total_tokens=12_000,
         recovery_investigator_max_duration_seconds=30,
     )
@@ -98,7 +101,7 @@ async def test_run_once_executes_batch_and_closes_database(
     )
     monkeypatch.setattr(
         payment_lab_recovery_worker,
-        "create_gemini_evidence_investigator",
+        "create_groq_evidence_investigator",
         MagicMock(return_value=investigator_provider),
     )
     stub_order_provider(monkeypatch)
@@ -128,7 +131,7 @@ async def test_run_once_executes_batch_and_closes_database(
     run_batch.assert_awaited_once_with(
         session_factory,
         reference_time=NOW,
-        provider=provider,
+        provider=None,
         investigator_provider=investigator_provider,
         investigator_budgets=payment_lab_recovery_worker.InvestigationBudgets(),
         batch_size=25,
@@ -182,7 +185,7 @@ async def test_reconciliation_settings_and_persisted_control_counts_reach_heartb
     )
     monkeypatch.setattr(
         payment_lab_recovery_worker,
-        "create_gemini_evidence_investigator",
+        "create_groq_evidence_investigator",
         MagicMock(return_value=None),
     )
     stub_order_provider(monkeypatch, order_provider)
@@ -260,7 +263,7 @@ async def test_run_once_closes_database_after_batch_failure(
     )
     monkeypatch.setattr(
         payment_lab_recovery_worker,
-        "create_gemini_evidence_investigator",
+        "create_groq_evidence_investigator",
         MagicMock(return_value=None),
     )
     stub_order_provider(monkeypatch)
@@ -304,7 +307,7 @@ async def test_continuous_empty_batch_sleeps_and_closes_on_cancellation(
     )
     monkeypatch.setattr(
         payment_lab_recovery_worker,
-        "create_gemini_evidence_investigator",
+        "create_groq_evidence_investigator",
         MagicMock(return_value=None),
     )
     stub_order_provider(monkeypatch)

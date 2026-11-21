@@ -15,6 +15,10 @@ from app.domain.investigation import (
     InvestigatorProviderResponse,
     InvestigatorTurn,
 )
+from app.integrations.gemini.evidence_investigator import (
+    EvidenceInvestigatorFailureKind,
+    EvidenceInvestigatorProviderError,
+)
 from app.services import recovery_investigator_service
 from app.services.recovery_investigator_service import run_shadow_investigation
 
@@ -190,8 +194,9 @@ async def test_three_cases_follow_different_live_tool_sequences(
 
     assert result.status is InvestigationStatus.COMPLETED
     assert [call.kwargs["tool_name"] for call in tool.await_args_list] == list(tool_sequence)
-    assert len(factory.session.added) == len(tool_sequence)
-    assert all(step.tool_name in tool_sequence for step in factory.session.added)  # type: ignore[attr-defined]
+    persisted_steps = [item for item in factory.session.added if hasattr(item, "tool_name")]
+    assert len(persisted_steps) == len(tool_sequence)
+    assert all(step.tool_name in tool_sequence for step in persisted_steps)  # type: ignore[attr-defined]
     assert record.shadow_mode is True
 
 
@@ -339,8 +344,8 @@ async def test_token_budget_and_malformed_output_fail_to_labelled_fallback(
         started_at=started_at,
     )
     assert malformed_result.status is InvestigationStatus.FALLBACK
-    assert malformed_result.terminal_reason.startswith("model_retry_budget_exhausted")
-    assert malformed_provider.calls == 3
+    assert malformed_result.terminal_reason == "malformed_model_output"
+    assert malformed_provider.calls == 1
 
 
 @pytest.mark.asyncio
@@ -365,8 +370,109 @@ async def test_unreturned_evidence_cannot_be_cited(
     )
 
     assert result.status is InvestigationStatus.FALLBACK
-    assert result.terminal_reason.startswith("model_retry_budget_exhausted")
-    assert provider.calls == 3
+    assert result.terminal_reason == "invalid_model_citation"
+    assert provider.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_only_transient_provider_failures_receive_bounded_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started_at = datetime.now(UTC)
+    record = make_record()
+    record.evidence_cutoff_at = started_at
+
+    class TransientThenAbstainProvider:
+        calls = 0
+
+        async def next_turn(self, request: dict[str, object]) -> InvestigatorProviderResponse:
+            self.calls += 1
+            if self.calls < 3:
+                raise EvidenceInvestigatorProviderError(
+                    "sanitized transient failure",
+                    kind=EvidenceInvestigatorFailureKind.TRANSIENT_PROVIDER,
+                    retryable=True,
+                    status_code=503,
+                )
+            return InvestigatorProviderResponse(
+                turn=InvestigatorTurn(
+                    action=InvestigationTurnAction.ABSTAIN,
+                    abstention_reason="Evidence remains insufficient.",
+                ),
+                model_name="gemini-test",
+                input_token_count=10,
+                output_token_count=5,
+            )
+
+    provider = TransientThenAbstainProvider()
+    sleep = AsyncMock()
+    monkeypatch.setattr(
+        recovery_investigator_service,
+        "_create_or_load_session",
+        AsyncMock(return_value=(record, True)),
+    )
+    monkeypatch.setattr(recovery_investigator_service, "_persist_hypotheses", AsyncMock())
+    monkeypatch.setattr(recovery_investigator_service.asyncio, "sleep", sleep)
+    monkeypatch.setattr(recovery_investigator_service.random, "random", lambda: 0.5)
+
+    result = await run_shadow_investigation(
+        FakeSessionFactory(record),  # type: ignore[arg-type]
+        recovery_case_id=CASE_ID,
+        provider=provider,
+        started_at=started_at,
+    )
+
+    assert result.status is InvestigationStatus.FALLBACK
+    assert provider.calls == 1
+    assert sleep.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_quota_and_incomplete_usage_stop_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started_at = datetime.now(UTC)
+    record = make_record()
+    record.evidence_cutoff_at = started_at
+    monkeypatch.setattr(
+        recovery_investigator_service,
+        "_create_or_load_session",
+        AsyncMock(return_value=(record, True)),
+    )
+
+    quota_provider = AsyncMock()
+    quota_provider.next_turn.side_effect = EvidenceInvestigatorProviderError(
+        "sanitized quota failure",
+        kind=EvidenceInvestigatorFailureKind.QUOTA_EXHAUSTED,
+        retryable=False,
+        status_code=429,
+    )
+    quota_result = await run_shadow_investigation(
+        FakeSessionFactory(record),  # type: ignore[arg-type]
+        recovery_case_id=CASE_ID,
+        provider=quota_provider,
+        started_at=started_at,
+    )
+    assert quota_result.terminal_reason == "provider_quota_exhausted"
+    assert quota_provider.next_turn.await_count == 1
+
+    incomplete_record = make_record()
+    incomplete_record.evidence_cutoff_at = started_at
+    monkeypatch.setattr(
+        recovery_investigator_service,
+        "_create_or_load_session",
+        AsyncMock(return_value=(incomplete_record, True)),
+    )
+    incomplete_provider = RawProvider(call("get_truth_snapshot"))
+    incomplete_provider.input_tokens = None  # type: ignore[assignment]
+    incomplete_result = await run_shadow_investigation(
+        FakeSessionFactory(incomplete_record),  # type: ignore[arg-type]
+        recovery_case_id=CASE_ID,
+        provider=incomplete_provider,
+        started_at=started_at,
+    )
+    assert incomplete_result.terminal_reason == "usage_metadata_incomplete"
+    assert incomplete_provider.calls == 1
 
 
 @pytest.mark.asyncio

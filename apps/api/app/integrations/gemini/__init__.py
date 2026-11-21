@@ -1,5 +1,6 @@
 from app.integrations.gemini.evidence_investigator import (
     INVESTIGATOR_PROMPT_VERSION,
+    EvidenceInvestigatorFailureKind,
     EvidenceInvestigatorProvider,
     EvidenceInvestigatorProviderError,
     GoogleGenAIEvidenceInvestigator,
@@ -26,6 +27,7 @@ __all__ = [
     "BoundedRecoveryPlannerResult",
     "EvidenceInvestigatorProvider",
     "EvidenceInvestigatorProviderError",
+    "EvidenceInvestigatorFailureKind",
     "GeminiPlannerFallbackReason",
     "GeminiPlannerProviderError",
     "GeminiRecoveryAnalysisPayload",

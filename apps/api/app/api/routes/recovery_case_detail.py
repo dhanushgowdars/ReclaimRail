@@ -247,6 +247,23 @@ class InvestigationHypothesisSummaryResponse(ResponseModel):
     version: int = Field(ge=1)
 
 
+class InvestigationProviderAttemptSummaryResponse(ResponseModel):
+    sequence_number: int = Field(ge=1)
+    provider: str
+    requested_model: str
+    returned_model: str | None
+    model_version: str | None
+    started_at: datetime
+    completed_at: datetime | None
+    latency_ms: int = Field(ge=0)
+    status: str
+    failure_kind: str | None
+    http_status_code: int | None = Field(default=None, ge=100, le=599)
+    input_token_count: int = Field(ge=0)
+    output_token_count: int = Field(ge=0)
+    selected_result: bool
+
+
 class InvestigationSessionSummaryResponse(ResponseModel):
     session_id: UUID
     case_version: int = Field(ge=0)
@@ -270,6 +287,7 @@ class InvestigationSessionSummaryResponse(ResponseModel):
     completed_at: datetime | None
     steps: list[InvestigationStepSummaryResponse]
     hypotheses: list[InvestigationHypothesisSummaryResponse]
+    provider_attempts: list[InvestigationProviderAttemptSummaryResponse]
 
 
 class RecoveryAuditEventSummaryResponse(ResponseModel):

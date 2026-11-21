@@ -31,7 +31,7 @@ classification safely. It is temporary and never means complete.
 | 15 | Versioned payment truth | VERIFIED | committed baseline plus Gate 2 fresh migration/integration gate passed |
 | 16 | Reliable events/reconciliation | VERIFIED | Gate 1A closes `G1-P0-001` with deterministic, full-controller, responsive and committed evidence; later provider-backed provenance remains mapped separately |
 | 17A | Gemini investigator core in shadow mode | PARTIAL | current local work must be preserved and rerun against PostgreSQL |
-| 17B | Live investigator closure | BROKEN | locked benchmark thresholds and final repository gates |
+| 17B | Live investigator closure | PARTIAL | implementation/canary/offline/PostgreSQL evidence remains valid; live model selection is unavailable after two incomplete governed attempts and remains a release/submission blocker |
 | 18 | Claim validation and action ranking | NOT IMPLEMENTED | all P18 gates |
 | 19 | Policy and state-bound approval | NOT IMPLEMENTED | all P19 gates; reuse older approval only where it satisfies the new contract |
 | 20 | Durable provider execution | NOT IMPLEMENTED | all P20 gates; reuse older executor only where it satisfies the new contract |
@@ -119,26 +119,29 @@ was clean, the branch push succeeded, local and remote hashes matched, and upstr
 tracking was configured. No force push, pull request, merge or deployment occurred. The
 final evidence archive SHA-256 is
 `fea6daa02efa9cb202a5906b9f463e002caab4d1353b26d698a100b0462227e7`.
-Phase 17B remains unauthorized until a separate owner decision.
+At Gate 2 closure Phase 17B still required separate authorization. That authorization and
+the later governed evidence are now recorded below; `DEC-033` retains Phase 17B as a
+release/submission blocker while `DEC-032` permits deterministic Phase 18 work.
 
 ## Phase 17B acceptance
 
 | ID | Requirement | Current status | Gate |
 | --- | --- | --- | --- |
-| P17B-01 | Preserve and isolate the current benchmark/runtime changes | PARTIAL | reviewable commits/patches on an approved branch |
-| P17B-02 | Supported non-duplicate model route | BROKEN | no deprecated alias pretending to be independent failover |
+| P17B-01 | Preserve and isolate the current benchmark/runtime changes | VERIFIED | committed Phase 17B checkpoint on the approved branch; ignored runtime evidence remains preserved separately |
+| P17B-02 | Supported non-duplicate model route | VERIFIED | Groq `openai/gpt-oss-120b` is the sole active evaluation route; Gemini remains disabled |
 | P17B-03 | Structured-output contract passes deterministic fixtures | VERIFIED | current focused tests pass |
 | P17B-04 | Bounded provider retry and sanitized diagnostics | VERIFIED | focused retry/failover/quota tests pass; no live-provider claim is implied |
-| P17B-05 | Frozen corpus remains unchanged during diagnosis | PARTIAL | historical v1 corpus/hash remain preserved; v1 used non-UUID case IDs incompatible with the read-only tool contract, so UUID-valid v2 has a new recorded hash and requires one separately authorized run |
-| P17B-06 | Provider access/quota preflight | VERIFIED | one sanitized `gemini-3.6-flash` Generate Content preflight returned the forced read-only tool selection without execution; see ignored local evidence |
-| P17B-07 | Truth-compatible rate | BROKEN | at least 80% on a complete corpus run |
-| P17B-08 | Required-tool selection | BROKEN | at least 80% |
-| P17B-09 | Citation validity | BROKEN | 100% |
-| P17B-10 | Abstention accuracy | BROKEN | at least 80% |
-| P17B-11 | Provider and malformed-output selection gate | BROKEN | both 0% for the selected report |
+| P17B-05 | Frozen corpus remains unchanged during diagnosis | VERIFIED | corpus-v2 remains locked at SHA-256 `814ccaab7c8f09b3ef70f41ab7838384ccb1c7a777d0c8070d2ec0b6337839de` |
+| P17B-06 | Provider access/quota preflight | VERIFIED | Groq preflight passed before the single changed-condition revalidation; no application tool executed |
+| P17B-07 | Truth-compatible rate | PARTIAL | threshold is at least 80%; unavailable because neither governed Groq attempt completed the corpus |
+| P17B-08 | Required-tool selection | PARTIAL | threshold is at least 80%; unavailable because neither governed Groq attempt completed the corpus |
+| P17B-09 | Citation validity | PARTIAL | required 100%; unavailable because neither governed Groq attempt completed the corpus |
+| P17B-10 | Abstention accuracy | PARTIAL | threshold is at least 80%; unavailable because neither governed Groq attempt completed the corpus |
+| P17B-11 | Provider and malformed-output selection gate | PARTIAL | no final report or model-selection result exists; Groq is neither selected nor rejected on model quality |
 | P17B-12 | Runtime remains advisory/shadow | VERIFIED | no mutation tool; deterministic pipeline unaffected |
 | P17B-13 | Frontend labels incomplete/fallback/abstained truthfully | PARTIAL | committed UI plus browser evidence |
-| P17B-14 | Final DB, backend, frontend and security gates | PARTIAL | all baseline gates pass on the committed branch |
+| P17B-14 | Final DB, backend, frontend and security gates | VERIFIED | committed branch retains passing offline, PostgreSQL-backed, frontend and security validation; live selection remains separate |
+| P17B-15 | Groq external-blocker receipt observability | PARTIAL | first attempt `3/2/1` ended `INDETERMINATE_TRANSPORT`; one changed-condition revalidation ended after `15/14/1` with request 15 governor-admitted and sanitized `provider_rejected` at `provider_boundary`; no HTTP/provider code or failure kind was retained, no final report exists, and budget is `41/150` |
 
 ## Remaining-phase gate summary
 
@@ -232,5 +235,3 @@ Copy this table into `WORK-LOG.md` for every phase:
 | Limitations | explicit unresolved items |
 | Git identity | author and committer |
 | Decision | owner approved/rejected/deferred |
-
-| P17B-15 | Groq external-blocker receipt observability | PARTIAL | Sanitized pre-call/response/failure checkpoint receipts are deterministic and tested; one authorized corpus-v2 run remains `INDETERMINATE_TRANSPORT` (`3/2/1`, zero retries), budget `26/150`, no final selection report or rerun authorization. |

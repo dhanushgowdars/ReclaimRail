@@ -963,3 +963,44 @@ selection run completes with its locked thresholds.
 The owner subsequently approved that bounded Phase 18 decision in `DEC-032`. It authorizes no
 Phase 18 implementation yet: the current task is limited to presenting the exact Phase 17B
 partial-checkpoint commit scope for separate path/message approval.
+
+## 21 November 2026 — Phase 17B changed-condition Groq revalidation reconciliation
+
+The owner authorized one changed-condition corpus revalidation after more than four hours,
+cleared rolling provider windows, an operational public provider status and hardened
+per-request receipts. Preflight passed and the focused wrapper/governor suite reported
+`15 passed`. The maximum schedule was 31 request starts with zero retries.
+
+The revalidation used `groq / openai/gpt-oss-120b` and stopped fail-closed without creating
+a final report. It completed 3 scenarios and recorded 15 request starts, 14 responses, 1
+indeterminate request, 15 SDK attempts, 0 retries and 0 application-tool executions. Confirmed
+usage was 32,746 input tokens and 2,072 output tokens; the last confirmed
+`request_remaining` was 986.
+
+The preserved checkpoint is
+`.runtime/phase17b/.groq-corpus-v2-20261121-revalidation.checkpoint.json`, size 5,124 bytes,
+SHA-256 `ce227ad68b163d51705f19bc05639a6ebd9721fe4123a194d10f393efe527d28`.
+Request 15 was governor-admitted and failed at `provider_boundary` after 1,375 ms against a
+configured 60.0-second timeout. Its sanitized classification is `provider_rejected`. The
+checkpoint retains no HTTP status, provider code, provider failure kind, timeout result or
+quota-rejection field. The 1,375 ms interval does not prove timeout expiration, and the
+evidence does not prove HTTP 400, 429 or 5xx, quota rejection, transport loss or model-quality
+failure. The exact provider cause, full-corpus thresholds and model-selection result are
+unavailable.
+
+Budget accounting is `23/150` before the first attempt, plus 3 starts to `26/150`, plus 15
+revalidation starts to the current `41/150`. One owner-authorized changed-condition corpus
+revalidation was executed. No additional execution or retry occurred after it. No further
+unchanged-condition corpus execution is authorized. A future revalidation requires materially
+changed conditions, a versioned evaluation plan and separate owner authorization.
+
+Phase 17B remains `PARTIAL`. Its implementation, successful controlled canary, offline corpus
+validation and PostgreSQL-backed validation remain valid, while the live model-selection gate
+remains unsatisfied and blocks release/submission. Groq is neither selected nor rejected on
+model quality; no production/model-selection claim exists and no Gemini fallback is authorized.
+`DEC-032` continues to authorize deterministic Phase 18 work under this external blocker;
+Phase 18 has not begun and Phase 19 is not authorized. `DEC-033` records the durable freeze.
+
+This reconciliation changed authority documents only. It made no provider, application-tool,
+database, Razorpay or Gemini call and did not run a corpus or canary. No application code,
+runtime artifact, Git index, commit, remote, pull request, merge or deployment was changed.

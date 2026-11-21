@@ -284,7 +284,7 @@ baseline, not the uncommitted Phase 17B state.
 | Event reliability and reconciliation | VERIFIED | Gate 1A closes the reproduced amplification defect and passes deterministic, full-controller, responsive and local commit closure |
 | Gemini structured recovery planner | PARTIAL | schema-constrained planner with deterministic fallback exists; live quality is not established |
 | Gemini Evidence Investigator core | PARTIAL | merged shadow-mode core, durable transcript and 11 read-only tools exist |
-| Phase 17B live investigator | BROKEN | latest report selected no model and failed locked quality thresholds |
+| Phase 17B live investigator | PARTIAL | implementation, controlled canary and offline/PostgreSQL validation pass, but two governed Groq corpus attempts did not complete and no model-selection result exists |
 | Provider-unavailable reconciliation loop | VERIFIED | Gate 1A controlled runtime proves persisted cooldown/circuit/budget across restart with zero repeat call inside the open circuit |
 | Evidence-claim semantic validator | NOT IMPLEMENTED | explicitly deferred to Phase 18 |
 | Comparative action ranking | NOT IMPLEMENTED | Phase 18 |
@@ -351,7 +351,8 @@ provider-contract fix. The ignored report is
 `.runtime/phase17b/benchmark-gemini-3.6-flash-corpus-v2-20261120.json`; no function or
 Razorpay call was executed.
 
-Phase 17B remains `BROKEN`: no model meets the locked quality thresholds.
+At this historical Gemini checkpoint Phase 17B remained `BROKEN`; later Groq evidence below
+supersedes that current classification without establishing a model-quality result.
 
 After the v2 failure, the Gemini adapter was corrected offline to emit only the portable
 function-schema subset (`type`, `properties`, `required`, `items`, `enum`) rather than
@@ -406,26 +407,40 @@ Limitations:
 | Tracked backup patch/directories | OBSOLETE | `before-phase-13d-progress.patch` and `untracked-backup-before-phase-13d/` are historical debris |
 | Ignored `.runtime` backups/reports | PARTIAL | useful audit evidence exists, but obsolete backup copies and failed reports need an explicit retention decision |
 
-## Next bounded work before feature implementation
-
-1. Review the exact six-document Gate 2 post-commit closure diff; do not run npm's breaking
-   `--force` downgrade and do not modify application code.
-2. If accepted, separately authorize staging and one documentation-only closure commit
-   under `Dhanush R S <dhanushrs981@gmail.com>`.
-3. Verify the six committed documentation paths, author/committer identity, clean worktree,
-   successful push, matching local/remote hashes and upstream tracking; do not create a
-   pull request, merge or deployment.
-4. Stop for a separate owner decision before Phase 17B read-only diagnosis. Any live Gemini
-   run additionally requires an approved model list, quota/access preflight, request budget,
-   corpus hash and evidence path.
-
 ## 21 November 2026 Phase 17B Groq status
 
-`PARTIAL`: the controlled Groq canary succeeded, offline corpus and fresh PostgreSQL gates pass,
-but the one authorized corpus-v2 run ended `INDETERMINATE_TRANSPORT` at `3/2/1`
-starts/responses/indeterminate and zero retries. Budget is `26/150`; no corpus rerun or
-model-selection claim is authorized. Sanitized request-boundary checkpoint receipts now provide
-the missing durable timeout/failure observability without changing truth, policy or execution.
+`PARTIAL`: the Phase 17B implementation, successful controlled Groq canary, offline corpus
+validation and fresh PostgreSQL-backed validation remain valid. The first governed corpus-v2
+attempt ended `INDETERMINATE_TRANSPORT` after `3` starts, `2` responses and `1` indeterminate
+request with zero retries. Its checkpoint remains preserved at SHA-256
+`38677f99f60ce24be419b9dcf479dd36b543deff9ba592b6afd90c959eda75de`.
 
-`DEC-032` permits later provider-neutral Phase 18 deterministic implementation, but Phase 17B
-remains a mandatory release/submission blocker and no Phase 18 code has begun.
+One owner-authorized changed-condition corpus revalidation was executed after the external
+conditions were reviewed. Preflight passed and the focused wrapper/governor suite reported
+`15 passed`. The run had a maximum schedule of 31 request starts and stopped after 15 starts,
+14 responses and 1 indeterminate request; it completed 3 scenarios, made 15 SDK attempts,
+used zero retries and executed zero application tools. Confirmed usage was 32,746 input tokens
+and 2,072 output tokens; the last confirmed `request_remaining` was 986. No final report was
+created, so full-corpus thresholds and model selection are unavailable.
+
+The revalidation checkpoint is
+`.runtime/phase17b/.groq-corpus-v2-20261121-revalidation.checkpoint.json`, size 5,124 bytes,
+SHA-256 `ce227ad68b163d51705f19bc05639a6ebd9721fe4123a194d10f393efe527d28`.
+Request 15 was governor-admitted and failed at `provider_boundary` after 1,375 ms against a
+configured 60.0-second timeout. The sanitized classification is `provider_rejected`. No HTTP
+status, provider code, provider failure kind, timeout result or quota-rejection field was
+retained. The evidence therefore does not establish HTTP 400, 429 or 5xx, quota rejection,
+transport loss, timeout expiration or model-quality failure; the exact provider cause is
+unavailable.
+
+The live budget progressed from `23/150` before the first attempt to `26/150` after its 3
+starts, then to `41/150` after the revalidation's 15 starts. One owner-authorized
+changed-condition corpus revalidation was executed. No additional execution or retry occurred
+after it. `DEC-033` freezes Phase 17B as `PARTIAL` and prohibits another unchanged-condition
+corpus run. A future provider revalidation requires materially changed conditions, a versioned
+evaluation plan and separate owner authorization.
+
+Phase 17B remains a mandatory release/submission blocker. Groq is neither selected nor rejected
+on model quality, no production/model-selection claim exists and no Gemini fallback is
+authorized. `DEC-032` remains valid and permits deterministic, provider-neutral Phase 18 work
+while this external blocker remains; Phase 18 has not begun and Phase 19 is not authorized.

@@ -1,0 +1,54 @@
+{
+  "abstention_accuracy": 0.0,
+  "citation_validity_rate": 0.5,
+  "failed_safe_rate": 1.0,
+  "malformed_output_rate": 0.0,
+  "provider_failure_rate": 0.5,
+  "requests_used": 2,
+  "required_tool_selection_rate": 1.0,
+  "scenario_scores": [
+    {
+      "abstention_correct": false,
+      "citations_valid": true,
+      "exception_type": null,
+      "failed_safe": true,
+      "http_status": null,
+      "malformed_output": false,
+      "passed": false,
+      "provider_failed": false,
+      "requested_model": "gemini-3.5-flash",
+      "required_tools_selected": true,
+      "sanitized_error_message": null,
+      "scenario_id": "p17b-02",
+      "served_model": "gemini-3.6-flash",
+      "transport_starts": 1,
+      "truth_compatible": false,
+      "validation_failure_reasons": [
+        "terminal_mismatch",
+        "abstention_incorrect"
+      ]
+    },
+    {
+      "abstention_correct": null,
+      "citations_valid": false,
+      "exception_type": "TimeoutError",
+      "failed_safe": true,
+      "http_status": null,
+      "malformed_output": false,
+      "passed": false,
+      "provider_failed": true,
+      "requested_model": "gemini-3.5-flash",
+      "required_tools_selected": true,
+      "sanitized_error_message": "Provider request failed with status=unknown",
+      "scenario_id": "p17b-08",
+      "served_model": null,
+      "transport_starts": 1,
+      "truth_compatible": false,
+      "validation_failure_reasons": [
+        "provider_failure"
+      ]
+    }
+  ],
+  "thresholds_met": false,
+  "truth_compatible_rate": 0.0
+}

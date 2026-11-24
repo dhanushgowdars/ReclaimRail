@@ -1,3 +1,4 @@
+import logging
 from importlib.metadata import version
 from types import SimpleNamespace
 
@@ -500,3 +501,130 @@ def test_locked_sdk_thinking_levels_and_retry_range_are_validated() -> None:
             recovery_investigator_retry_base_seconds=2,
             recovery_investigator_retry_max_seconds=1,
         )
+
+
+class RetriableGeminiError(Exception):
+    def __init__(self, status_code: int, retry_after: str | None = None) -> None:
+        super().__init__("private provider body")
+        self.status_code = status_code
+        headers = {} if retry_after is None else {"Retry-After": retry_after}
+        self.response = SimpleNamespace(headers=headers)
+
+
+@pytest.mark.asyncio
+async def test_503_and_429_retry_twice_with_retry_after_and_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    requests: list[str] = []
+    sleeps: list[float] = []
+    responses: list[object] = [
+        RetriableGeminiError(503, "4"),
+        RetriableGeminiError(429),
+        generate_content_response(("get_truth_snapshot", {"case_id": "case-1"})),
+    ]
+    responses[-1].model_version = "gemini-primary-001"  # type: ignore[union-attr]
+
+    class FakeModels:
+        async def generate_content(self, **kwargs: object) -> object:
+            requests.append(str(kwargs["model"]))
+            response = responses.pop(0)
+            if isinstance(response, BaseException):
+                raise response
+            return response
+
+    class FakeAsyncClient:
+        models = FakeModels()
+
+        async def aclose(self) -> None:
+            return None
+
+    class FakeClient:
+        aio = FakeAsyncClient()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(investigator_module.genai, "Client", lambda **_: FakeClient())
+    provider = GoogleGenAIEvidenceInvestigator(
+        api_key="offline-test-key",
+        model_name="gemini-primary",
+        fallback_model_name="gemini-fallback",
+        forced_tool_name="get_truth_snapshot",
+        sleep=lambda delay: _record_sleep(sleeps, delay),
+    )
+
+    with caplog.at_level(logging.INFO, logger=investigator_module.__name__):
+        result = await provider.next_turn(read_only_request())
+
+    assert requests == ["gemini-primary"] * 3
+    assert sleeps == [4.0, 2.0]
+    assert result.model_name == "gemini-primary-001"
+    assert "served model=gemini-primary-001 requested_model=gemini-primary" in caplog.text
+    assert "offline-test-key" not in caplog.text
+    assert "Inspect only" not in caplog.text
+
+
+async def _record_sleep(sleeps: list[float], delay: float) -> None:
+    sleeps.append(delay)
+
+
+@pytest.mark.asyncio
+async def test_falls_back_after_primary_exhausts_two_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[str] = []
+    sleeps: list[float] = []
+    fallback_response = generate_content_response(("get_truth_snapshot", {"case_id": "case-1"}))
+    fallback_response.model_version = "gemini-fallback-001"
+    responses: list[object] = [
+        RetriableGeminiError(503, "0"),
+        RetriableGeminiError(503, "0"),
+        RetriableGeminiError(503, "0"),
+        fallback_response,
+    ]
+
+    class FakeModels:
+        async def generate_content(self, **kwargs: object) -> object:
+            requests.append(str(kwargs["model"]))
+            response = responses.pop(0)
+            if isinstance(response, BaseException):
+                raise response
+            return response
+
+    class FakeAsyncClient:
+        models = FakeModels()
+
+        async def aclose(self) -> None:
+            return None
+
+    class FakeClient:
+        aio = FakeAsyncClient()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(investigator_module.genai, "Client", lambda **_: FakeClient())
+    provider = GoogleGenAIEvidenceInvestigator(
+        api_key="offline-test-key",
+        model_name="gemini-primary",
+        fallback_model_name="gemini-fallback",
+        forced_tool_name="get_truth_snapshot",
+        sleep=lambda delay: _record_sleep(sleeps, delay),
+    )
+
+    result = await provider.next_turn(read_only_request())
+
+    assert requests == ["gemini-primary"] * 3 + ["gemini-fallback"]
+    assert sleeps == [0.0, 0.0]
+    assert result.model_name == "gemini-fallback-001"
+
+
+def test_gemini_primary_and_fallback_models_are_settings_backed() -> None:
+    settings = Settings(
+        _env_file=None,
+        gemini_model_name="gemini-primary",
+        gemini_fallback_model_name="gemini-fallback",
+    )
+    assert settings.gemini_model_name == "gemini-primary"
+    assert settings.gemini_fallback_model_name == "gemini-fallback"

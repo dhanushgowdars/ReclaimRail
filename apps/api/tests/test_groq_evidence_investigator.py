@@ -155,7 +155,7 @@ async def test_groq_preserves_assistant_call_and_correlates_sequential_tool_resu
     tool_result = payloads[1]["messages"][3]
     assert assistant["tool_calls"][0]["id"] == "opaque_truth_1"
     assert tool_result["tool_call_id"] == "opaque_truth_1"
-    assert tool_result["name"] == "get_truth_snapshot"
+    assert "name" not in tool_result
 
 
 @pytest.mark.asyncio
@@ -260,6 +260,8 @@ async def test_groq_supports_multiple_sequential_read_only_tool_turns() -> None:
     ]
     assert calls[2]["messages"][3]["tool_call_id"] == "call_truth"
     assert calls[2]["messages"][5]["tool_call_id"] == "call_webhooks"
+    assert "name" not in calls[2]["messages"][3]
+    assert "name" not in calls[2]["messages"][5]
 
 
 @pytest.mark.asyncio
@@ -681,3 +683,100 @@ async def test_chain_never_fails_over_for_rejected_or_access_denied(
 def test_chain_rejects_more_than_two_providers() -> None:
     with pytest.raises(ValueError, match="one or two"):
         OrderedEvidenceInvestigator((object(), object(), object()))  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_groq_400_preserves_provider_fields_for_sanitized_receipt() -> None:
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            400,
+            headers={"x-request-id": "req_123", "authorization": "Bearer secret"},
+            json={
+                "error": {
+                    "code": "tool_use_failed",
+                    "type": "invalid_request_error",
+                    "message": "Tool failed: bearer secret",
+                    "failed_generation": "<tool_call>bad</tool_call>",
+                }
+            },
+        )
+
+    provider = GroqEvidenceInvestigator(
+        api_key="test-key",
+        model_name="openai/gpt-oss-120b",
+        transport=httpx2.MockTransport(handler),
+    )
+    with pytest.raises(EvidenceInvestigatorProviderError):
+        await provider.next_turn(request())
+    from scripts.run_phase17b_groq_benchmark import _safe_diagnostic_details
+
+    receipt = _safe_diagnostic_details(provider.last_diagnostic_details)
+    assert receipt["http_status"] == 400
+    assert receipt["provider_error_code"] == "tool_use_failed"
+    assert receipt["provider_error_type"] == "invalid_request_error"
+    assert receipt["provider_error_message"] == "Tool failed: [REDACTED_BEARER]"
+    assert receipt["failed_generation"] == "<tool_call>bad</tool_call>"
+    assert receipt["x_request_id"] == "req_123"
+    assert len(receipt["tool_declarations_sha256"]) == 64
+    assert receipt["tool_choice"] == "required"
+    assert receipt["parallel_tool_calls"] is False
+    assert receipt["message_structure"][0]["role"] == "system"
+    assert "authorization" not in json.dumps(receipt).lower()
+
+
+@pytest.mark.asyncio
+async def test_tool_failure_retry_reuses_identical_tool_result_messages() -> None:
+    payloads: list[dict[str, object]] = []
+
+    def handler(http_request: httpx2.Request) -> httpx2.Response:
+        payloads.append(json.loads(http_request.content))
+        if len(payloads) == 2:
+            return httpx2.Response(
+                400, json={"error": {"code": "tool_use_failed", "message": "bad JSON"}}
+            )
+        name = "get_truth_snapshot" if len(payloads) == 1 else "complete_investigation"
+        args = (
+            {"case_id": CASE_ID}
+            if len(payloads) == 1
+            else {"summary": "safe", "evidence_ids": ["e1"]}
+        )
+        return httpx2.Response(
+            200,
+            json={
+                "model": "openai/gpt-oss-120b",
+                "usage": {"prompt_tokens": 2, "completion_tokens": 3},
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_1" if len(payloads) == 1 else "call_2",
+                                    "function": {"name": name, "arguments": json.dumps(args)},
+                                }
+                            ],
+                        }
+                    }
+                ],
+            },
+        )
+
+    provider = GroqEvidenceInvestigator(
+        api_key="test-key",
+        model_name="openai/gpt-oss-120b",
+        transport=httpx2.MockTransport(handler),
+    )
+    await provider.next_turn(request())
+    observation = [
+        {
+            "sequence": 1,
+            "tool": "get_truth_snapshot",
+            "outcome": "succeeded",
+            "evidence_ids": ("e1",),
+            "payload": {"synthetic": True},
+        }
+    ]
+    with pytest.raises(EvidenceInvestigatorProviderError):
+        await provider.next_turn(request(observation))
+    await provider.next_turn(request(observation))
+    assert payloads[1] == payloads[2]

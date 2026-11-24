@@ -69,7 +69,7 @@ async def test_request_count_ceiling_paces_without_retry() -> None:
 
 
 @pytest.mark.asyncio
-async def test_provider_error_stops_wrapper_after_one_attempt() -> None:
+async def test_definitive_provider_error_does_not_stop_next_scenario() -> None:
     fake = FakeTime()
 
     class FailingProvider:
@@ -89,6 +89,30 @@ async def test_provider_error_stops_wrapper_after_one_attempt() -> None:
     with pytest.raises(EvidenceInvestigatorProviderError):
         await wrapped.next_turn({"tools": public_tool_catalog(), "observations": []})
     assert provider.calls == 1
+    with pytest.raises(EvidenceInvestigatorProviderError):
+        await wrapped.next_turn({"tools": public_tool_catalog(), "observations": []})
+    assert provider.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_indeterminate_timeout_stops_wrapper() -> None:
+    fake = FakeTime()
+
+    class FailingProvider:
+        async def next_turn(self, request: dict[str, object]) -> object:
+            raise EvidenceInvestigatorProviderError(
+                "sanitized",
+                kind=EvidenceInvestigatorFailureKind.TIMEOUT,
+                retryable=True,
+            )
+
+    wrapped = GovernedEvaluationProvider(
+        FailingProvider(), GroqEvaluationGovernor(fake.clock, fake.sleep)
+    )
+    with pytest.raises(EvidenceInvestigatorProviderError):
+        await wrapped.next_turn({"tools": public_tool_catalog(), "observations": []})
+    with pytest.raises(EvidenceInvestigatorProviderError):
+        await wrapped.next_turn({"tools": public_tool_catalog(), "observations": []})
     with pytest.raises(GovernorStoppedError):
         await wrapped.next_turn({"tools": public_tool_catalog(), "observations": []})
 
@@ -98,3 +122,35 @@ def test_dry_run_schedule_is_local_and_respects_windows() -> None:
     assert len(schedule) == 3
     assert all(item.estimated_tokens <= EVALUATION_TPM_CEILING for item in schedule)
     assert all(item.wait_seconds >= 0 for item in schedule)
+
+
+@pytest.mark.asyncio
+async def test_tool_use_failed_retries_once_with_backoff_and_attempt_number() -> None:
+    fake = FakeTime()
+
+    class Adapter:
+        last_diagnostic_details = {"provider_error_code_raw": "tool_use_failed"}
+
+    class Meter:
+        provider = Adapter()
+        attempt_number = 0
+        attempts: list[int] = []
+
+        async def next_turn(self, request: dict[str, object]) -> object:
+            self.attempts.append(self.attempt_number)
+            if self.attempt_number == 1:
+                raise EvidenceInvestigatorProviderError(
+                    "safe",
+                    kind=EvidenceInvestigatorFailureKind.PROVIDER_REJECTED,
+                    retryable=False,
+                    status_code=400,
+                )
+            return "accepted"
+
+    meter = Meter()
+    wrapped = GovernedEvaluationProvider(meter, GroqEvaluationGovernor(fake.clock, fake.sleep))
+    assert (
+        await wrapped.next_turn({"tools": public_tool_catalog(), "observations": []}) == "accepted"
+    )
+    assert meter.attempts == [1, 2]
+    assert any(wait >= 2.5 for wait in fake.waits)

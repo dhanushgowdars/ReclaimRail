@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import re
 import sys
 import time
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
@@ -34,7 +36,11 @@ from app.evaluation.phase17b_groq_governor import (  # noqa: E402
     GovernedEvaluationProvider,
     GroqEvaluationGovernor,
 )
-from app.integrations.groq.evidence_investigator import GroqEvidenceInvestigator  # noqa: E402
+from app.integrations.groq.evidence_investigator import (  # noqa: E402
+    GROQ_EVALUATION_INSTRUCTION,
+    GROQ_EVALUATION_PROMPT_VERSION,
+    GroqEvidenceInvestigator,
+)
 from app.integrations.investigator import (  # noqa: E402
     EvidenceInvestigatorProvider,
     EvidenceInvestigatorProviderError,
@@ -43,10 +49,95 @@ from app.integrations.investigator import (  # noqa: E402
 MODEL = "openai/gpt-oss-120b"
 LIVE_ACKNOWLEDGEMENT = "OWNER_APPROVED_PHASE17B_LIVE_GROQ"
 MAX_REQUEST_STARTS = 31
+LIVE_REQUEST_CEILING = 120
+MIN_REQUEST_INTERVAL_SECONDS = 2.5
 CONFIGURED_TIMEOUT_SECONDS = 60.0
 EXPECTED_CORPUS_SHA256 = "814ccaab7c8f09b3ef70f41ab7838384ccb1c7a777d0c8070d2ec0b6337839de"
 RUNTIME_DIRECTORY = API_ROOT.parents[1] / ".runtime" / "phase17b"
+RUN_LOCK_NAME = ".groq-phase17b-corpus.lock"
 _FROZEN_SCENARIO_ID = re.compile(r"^p17b-\d{2}$")
+_BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
+_KEY = re.compile(r"(?i)\b(?:sk|rk|key|token|secret)[-_A-Za-z0-9]*\s*[:=]\s*[^\s,;]+")
+_HEADER = re.compile(
+    r"(?i)\b(?:authorization|x-api-key|api-key|cookie|set-cookie)\s*[:=]\s*[^\s,;]+"
+)
+
+
+def _scrub_text(value: object, limit: int = 300) -> str:
+    text = _BEARER.sub("[REDACTED_BEARER]", str(value))
+    text = _KEY.sub(
+        lambda match: match.group(0).split("=", 1)[0].split(":", 1)[0] + "=[REDACTED]", text
+    )
+    return _HEADER.sub("[REDACTED_HEADER]", text)[:limit]
+
+
+def _safe_diagnostic_details(
+    details: object, error: BaseException | None = None
+) -> dict[str, object]:
+    source = details if isinstance(details, dict) else {}
+    safe: dict[str, object] = {}
+    for key in (
+        "http_status",
+        "provider_error_code",
+        "provider_error_type",
+        "finish_reason",
+        "turn_type",
+        "local_validation_failure_reason_code",
+    ):
+        value = source.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            safe[key] = _scrub_text(value, 120) if isinstance(value, str) else value
+    for key in ("call_id", "tool_name"):
+        if isinstance(source.get(key), str):
+            safe[key] = _scrub_text(source[key], 256)
+    if "arguments" in source:
+        encoded = json.dumps(
+            source["arguments"], sort_keys=True, separators=(",", ":"), default=str
+        )
+        safe["arguments"] = _scrub_text(encoded, 500)
+    if source.get("scrubbed_error_message") is not None:
+        safe["scrubbed_error_message"] = _scrub_text(source["scrubbed_error_message"], 300)
+    for key, limit in (
+        ("provider_error_code_raw", 120),
+        ("provider_error_type_raw", 120),
+        ("provider_error_message_raw", 300),
+        ("failed_generation_raw", 500),
+        ("x_request_id", 256),
+        ("tool_declarations_sha256", 64),
+    ):
+        if isinstance(source.get(key), str):
+            safe[key.removesuffix("_raw")] = _scrub_text(source[key], limit)
+    if isinstance(source.get("parallel_tool_calls"), bool):
+        safe["parallel_tool_calls"] = source["parallel_tool_calls"]
+    if isinstance(source.get("tool_choice"), str):
+        safe["tool_choice"] = _scrub_text(source["tool_choice"], 120)
+    structure = source.get("message_structure")
+    if isinstance(structure, list) and len(structure) <= 20:
+        safe["message_structure"] = [
+            {
+                "role": _scrub_text(item.get("role"), 24),
+                "tool_call_id": _scrub_text(item["tool_call_id"], 256)
+                if isinstance(item.get("tool_call_id"), str)
+                else None,
+                "tool_call_ids": [
+                    _scrub_text(call_id, 256)
+                    for call_id in item.get("tool_call_ids", [])
+                    if isinstance(call_id, str)
+                ][:2],
+                "content_length": item.get("content_length"),
+            }
+            for item in structure
+            if isinstance(item, dict) and isinstance(item.get("content_length"), int)
+        ]
+    if isinstance(error, EvidenceInvestigatorProviderError):
+        safe["turn_type"] = "provider_error"
+        safe.setdefault("provider_error_type", error.kind.value)
+        if error.status_code is not None:
+            safe["http_status"] = error.status_code
+        if error.reason_code is not None:
+            safe["provider_error_code"] = error.reason_code.value
+        safe.setdefault("scrubbed_error_message", "Groq evidence investigation failed safely")
+    return safe
 
 
 def _safe_request_context(request: dict[str, object]) -> dict[str, object]:
@@ -107,6 +198,10 @@ class MeteredProvider:
     quota_metadata: list[dict[str, object]] = field(default_factory=list)
     receipts: list[dict[str, object]] = field(default_factory=list)
     persist_receipt: Callable[[], None] | None = None
+    min_start_interval_seconds: float = 0.0
+    maximum_starts: int = MAX_REQUEST_STARTS
+    attempt_number: int = 1
+    _last_start_monotonic: float | None = None
 
     def _persist(self) -> None:
         if self.persist_receipt is not None:
@@ -129,16 +224,28 @@ class MeteredProvider:
         }
 
     async def next_turn(self, request: dict[str, object]) -> InvestigatorProviderResponse:
-        if self.request_starts >= MAX_REQUEST_STARTS:
+        if self.request_starts >= self.maximum_starts:
             raise RuntimeError("frozen corpus request-start ceiling exceeded")
+        now = time.monotonic()
+        pacing_wait = 0.0
+        if self._last_start_monotonic is not None:
+            pacing_wait = max(
+                0.0,
+                self.min_start_interval_seconds - (now - self._last_start_monotonic),
+            )
+            if pacing_wait:
+                await asyncio.sleep(pacing_wait)
+        self._last_start_monotonic = time.monotonic()
         self.request_starts += 1
         started_at = datetime.now(UTC)
         started = time.monotonic()
         receipt: dict[str, object] = {
             "request_number": self.request_starts,
+            "attempt_number": self.attempt_number,
             "request_started_at": started_at.isoformat(),
             "configured_timeout_seconds": CONFIGURED_TIMEOUT_SECONDS,
             "governor_admission": "admitted",
+            "pacing_wait_seconds": round(pacing_wait, 3),
             **_safe_request_context(request),
         }
         self.receipts.append(receipt)
@@ -167,6 +274,11 @@ class MeteredProvider:
                     **_safe_provider_error(error),
                 }
             )
+            diagnostic = _safe_diagnostic_details(
+                getattr(self.provider, "last_diagnostic_details", None), error
+            )
+            if diagnostic:
+                receipt["diagnostic"] = diagnostic
             self._persist()
             raise
         self.responses_received += 1
@@ -184,6 +296,11 @@ class MeteredProvider:
                 "quota_metadata": quota_metadata,
             }
         )
+        diagnostic = _safe_diagnostic_details(
+            getattr(self.provider, "last_diagnostic_details", None)
+        )
+        if diagnostic:
+            receipt["diagnostic"] = diagnostic
         self._persist()
         return response
 
@@ -221,6 +338,21 @@ def _validate_destination(path: Path) -> tuple[Path, Path]:
     return output, checkpoint
 
 
+@contextmanager
+def _exclusive_run() -> Iterator[None]:
+    RUNTIME_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    lock = RUNTIME_DIRECTORY / RUN_LOCK_NAME
+    try:
+        with lock.open("x", encoding="utf-8") as handle:
+            handle.write("phase17b corpus active\n")
+    except FileExistsError:
+        raise RuntimeError("another Phase 17B corpus run is active or needs inspection") from None
+    try:
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
 def _checkpoint(
     path: Path, provider: MeteredProvider, completed: tuple[BenchmarkScenarioResult, ...]
 ) -> None:
@@ -235,7 +367,7 @@ def _checkpoint(
             "responses_received": provider.responses_received,
             "requests_indeterminate": provider.requests_indeterminate,
             "sdk_attempts": provider.request_starts,
-            "retries": 0,
+            "retries": sum(receipt.get("attempt_number") == 2 for receipt in provider.receipts),
             "request_receipts": provider.receipts,
             "last_confirmed": (
                 next(
@@ -270,24 +402,32 @@ async def run(args: argparse.Namespace) -> bool:
     corpus, digest = load_frozen_corpus(args.corpus, args.checksum)
     if digest != EXPECTED_CORPUS_SHA256:
         raise ValueError("Groq benchmark requires the locked corpus-v2 SHA-256")
-    settings = get_settings()
-    key = settings.groq_api_key.get_secret_value().strip() if settings.groq_api_key else ""
-    if not key:
-        raise ValueError("Groq API access is not configured")
+    with _exclusive_run():
+        output, checkpoint = _validate_destination(args.output)
+        settings = get_settings()
+        key = settings.groq_api_key.get_secret_value().strip() if settings.groq_api_key else ""
+        if not key:
+            raise ValueError("Groq API access is not configured")
 
-    async def sleeper(seconds: float) -> None:
-        await asyncio.sleep(seconds)
+        async def sleeper(seconds: float) -> None:
+            await asyncio.sleep(seconds)
 
-    provider = MeteredProvider(
-        GroqEvidenceInvestigator(
-            api_key=key,
-            model_name=MODEL,
-            max_output_tokens=512,
-            request_timeout_seconds=CONFIGURED_TIMEOUT_SECONDS,
+        provider = MeteredProvider(
+            GroqEvidenceInvestigator(
+                api_key=key,
+                model_name=MODEL,
+                max_output_tokens=512,
+                request_timeout_seconds=CONFIGURED_TIMEOUT_SECONDS,
+            ),
+            min_start_interval_seconds=MIN_REQUEST_INTERVAL_SECONDS,
+            maximum_starts=LIVE_REQUEST_CEILING,
         )
-    )
-    governed = GovernedEvaluationProvider(provider, GroqEvaluationGovernor(time.monotonic, sleeper))
-    return await run_with_provider(corpus, digest, output, checkpoint, provider, governed)
+        governed = GovernedEvaluationProvider(
+            provider, GroqEvaluationGovernor(time.monotonic, sleeper)
+        )
+        return await run_with_provider(
+            corpus, digest, output, checkpoint, provider, governed, LIVE_REQUEST_CEILING
+        )
 
 
 async def run_with_provider(
@@ -297,35 +437,52 @@ async def run_with_provider(
     checkpoint: Path,
     provider: MeteredProvider,
     governed: GovernedEvaluationProvider,
+    max_request_starts: int = MAX_REQUEST_STARTS,
 ) -> bool:
     """Dependency-injected offline seam; production paths never call this."""
     results: list[BenchmarkScenarioResult] = []
     provider.persist_receipt = lambda: _checkpoint(checkpoint, provider, tuple(results))
     for scenario in corpus.scenarios:
-        remaining = MAX_REQUEST_STARTS - provider.request_starts
+        remaining = max_request_starts - provider.request_starts
         if remaining <= 0:
-            raise RuntimeError("frozen corpus request-start ceiling exhausted")
+            break
+        receipt_start = len(provider.receipts)
         result = await run_frozen_scenario(
             cast(EvidenceInvestigatorProvider, governed),
             scenario,
             corpus_id=corpus.corpus_id,
             max_requests=min(9, remaining),
         )
+        result = replace(
+            result,
+            diagnostic_receipts=tuple(provider.receipts[receipt_start:]),
+        )
         results.append(result)
         _checkpoint(checkpoint, provider, tuple(results))
-        if result.provider_failed or result.malformed_output:
-            return False
     report = build_benchmark_report(corpus, digest, tuple(results))
     payload = json.loads(sanitized_report_json(report))
+    for scenario_payload in payload["scenarios"]:
+        receipts = scenario_payload["diagnostic_receipts"]
+        scenario_payload["first_attempt_outcomes"] = [
+            {
+                "request_number": receipt["request_number"],
+                "outcome": receipt.get("failure_classification", "response_received"),
+            }
+            for receipt in receipts
+            if receipt.get("attempt_number") == 1
+        ]
+        scenario_payload["final_outcome"] = scenario_payload["terminal_reason"]
     payload["run"] = {
         "provider": "groq",
         "model": MODEL,
+        "prompt_version": GROQ_EVALUATION_PROMPT_VERSION,
+        "prompt_sha256": hashlib.sha256(GROQ_EVALUATION_INSTRUCTION.encode()).hexdigest(),
         "generated_at": datetime.now(UTC).isoformat(),
         "requests_started": provider.request_starts,
         "responses_received": provider.responses_received,
         "requests_indeterminate": provider.requests_indeterminate,
         "sdk_attempts": provider.request_starts,
-        "retries": 0,
+        "retries": sum(receipt.get("attempt_number") == 2 for receipt in provider.receipts),
         "input_tokens": provider.input_tokens,
         "output_tokens": provider.output_tokens,
         "quota_metadata": provider.quota_metadata,

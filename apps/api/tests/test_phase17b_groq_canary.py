@@ -107,10 +107,7 @@ async def test_controlled_synthetic_canary_completes_three_correlated_turns() ->
     assert seen[2]["tool_choice"] == "required"
     assert seen[1]["messages"][-1]["role"] == "tool"
     assert seen[1]["messages"][-2]["tool_calls"][0]["id"] == seen[1]["messages"][-1]["tool_call_id"]
-    assert (
-        seen[1]["messages"][-2]["tool_calls"][0]["function"]["name"]
-        == seen[1]["messages"][-1]["name"]
-    )
+    assert "name" not in seen[1]["messages"][-1]
     assert seen[2]["messages"][-1]["tool_call_id"] == "opaque_2"
 
 

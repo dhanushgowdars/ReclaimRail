@@ -21,7 +21,7 @@ from app.evaluation.phase17b_groq_governor import (
     estimate_tokens,
     serialized_payload,
 )
-from app.integrations.gemini.evidence_investigator import INVESTIGATOR_SYSTEM_INSTRUCTION
+from app.integrations.groq.evidence_investigator import GROQ_EVALUATION_INSTRUCTION
 from app.integrations.investigator import (
     EvidenceInvestigatorFailureKind,
     EvidenceInvestigatorProviderError,
@@ -30,6 +30,13 @@ from scripts import run_phase17b_groq_benchmark as command
 
 API_ROOT = Path(__file__).parents[1]
 SCRIPT = API_ROOT / "scripts" / "run_phase17b_groq_benchmark.py"
+
+
+def test_receipt_scrubber_preserves_late_authorization_phrase() -> None:
+    assert command._scrub_text("late authorization contradicts recovery") == (
+        "late authorization contradicts recovery"
+    )
+    assert "Bearer secret" not in command._scrub_text("Authorization: Bearer secret")
 
 
 def _environment() -> dict[str, str]:
@@ -168,7 +175,7 @@ async def test_real_frozen_corpus_mock_success_writes_final_and_checkpoint(tmp_p
                     serialized_payload(
                         request,
                         [
-                            {"role": "system", "content": INVESTIGATOR_SYSTEM_INSTRUCTION},
+                            {"role": "system", "content": GROQ_EVALUATION_INSTRUCTION},
                             {"role": "user", "content": json.dumps(request, sort_keys=True)},
                         ],
                     )
@@ -178,7 +185,7 @@ async def test_real_frozen_corpus_mock_success_writes_final_and_checkpoint(tmp_p
         ]
     )
     assert len(schedule) == 31
-    assert sum(item.estimated_tokens for item in schedule) == 144_289
+    assert sum(item.estimated_tokens for item in schedule) == 147_863
     assert (
         max(
             sum(
@@ -188,7 +195,7 @@ async def test_real_frozen_corpus_mock_success_writes_final_and_checkpoint(tmp_p
             )
             for reservation in schedule
         )
-        == 4_699
+        == 4_814
     )
     assert sum(item.wait_seconds for item in schedule) == 1_800
     assert all(item.estimated_tokens <= EVALUATION_TPM_CEILING for item in schedule)
@@ -280,14 +287,23 @@ async def test_provider_failure_stops_after_checkpoint_with_sanitized_partial_pr
         GovernedEvaluationProvider(metered, GroqEvaluationGovernor(now, sleeper)),
     )
     assert not selected
-    assert fake.calls == metered.request_starts == 5
-    assert metered.responses_received == 4 and metered.requests_indeterminate == 1
-    assert not output.exists()
+    assert fake.calls == metered.request_starts > 5
+    assert metered.responses_received == metered.request_starts - 1
+    assert output.exists()
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert len(report["scenarios"]) == len(corpus.scenarios)
+    assert report["run"]["requests_started"] == metered.request_starts
+    assert report["scenarios"][1]["provider_failed"] is True
+    assert report["scenarios"][1]["diagnostic_receipts"]
     checkpoint_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
-    assert checkpoint_payload["completed_scenarios"] == ["p17b-01", "p17b-02"]
+    assert checkpoint_payload["completed_scenarios"] == [
+        scenario.scenario_id for scenario in corpus.scenarios
+    ]
     assert checkpoint_payload["retries"] == 0
-    assert "safe" not in json.dumps(checkpoint_payload)
-    receipt = checkpoint_payload["request_receipts"][-1]
+    diagnostic = checkpoint_payload["request_receipts"][4]["diagnostic"]
+    assert diagnostic["scrubbed_error_message"] == "Groq evidence investigation failed safely"
+    assert diagnostic["provider_error_type"] == "quota_exhausted"
+    receipt = checkpoint_payload["request_receipts"][4]
     assert receipt["request_number"] == 5
     assert receipt["configured_timeout_seconds"] == 60.0
     assert receipt["scenario_id"] == "p17b-02"

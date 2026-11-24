@@ -1,0 +1,105 @@
+{
+  "abstention_accuracy": 0.0,
+  "citation_validity_rate": 0.6,
+  "failed_safe_rate": 1.0,
+  "malformed_output_rate": 0.0,
+  "provider_failure_rate": 0.4,
+  "requests_used": 5,
+  "required_tool_selection_rate": 1.0,
+  "scenario_scores": [
+    {
+      "abstention_correct": null,
+      "citations_valid": true,
+      "exception_type": null,
+      "failed_safe": true,
+      "http_status": null,
+      "malformed_output": false,
+      "passed": true,
+      "provider_failed": false,
+      "required_tools_selected": true,
+      "sanitized_error_message": null,
+      "scenario_id": "p17b-01",
+      "served_model": "gemini-3.6-flash",
+      "transport_starts": 1,
+      "truth_compatible": true,
+      "validation_failure_reasons": []
+    },
+    {
+      "abstention_correct": null,
+      "citations_valid": false,
+      "exception_type": "ServerError",
+      "failed_safe": true,
+      "http_status": null,
+      "malformed_output": false,
+      "passed": false,
+      "provider_failed": true,
+      "required_tools_selected": true,
+      "sanitized_error_message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+      "scenario_id": "p17b-02",
+      "served_model": null,
+      "transport_starts": 1,
+      "truth_compatible": false,
+      "validation_failure_reasons": [
+        "provider_failure"
+      ]
+    },
+    {
+      "abstention_correct": false,
+      "citations_valid": true,
+      "exception_type": null,
+      "failed_safe": true,
+      "http_status": null,
+      "malformed_output": false,
+      "passed": false,
+      "provider_failed": false,
+      "required_tools_selected": true,
+      "sanitized_error_message": null,
+      "scenario_id": "p17b-03",
+      "served_model": "gemini-3.6-flash",
+      "transport_starts": 1,
+      "truth_compatible": false,
+      "validation_failure_reasons": [
+        "terminal_mismatch",
+        "abstention_incorrect"
+      ]
+    },
+    {
+      "abstention_correct": null,
+      "citations_valid": true,
+      "exception_type": null,
+      "failed_safe": true,
+      "http_status": null,
+      "malformed_output": false,
+      "passed": true,
+      "provider_failed": false,
+      "required_tools_selected": true,
+      "sanitized_error_message": null,
+      "scenario_id": "p17b-04",
+      "served_model": "gemini-3.6-flash",
+      "transport_starts": 1,
+      "truth_compatible": true,
+      "validation_failure_reasons": []
+    },
+    {
+      "abstention_correct": null,
+      "citations_valid": false,
+      "exception_type": "ServerError",
+      "failed_safe": true,
+      "http_status": null,
+      "malformed_output": false,
+      "passed": false,
+      "provider_failed": true,
+      "required_tools_selected": true,
+      "sanitized_error_message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+      "scenario_id": "p17b-08",
+      "served_model": null,
+      "transport_starts": 1,
+      "truth_compatible": false,
+      "validation_failure_reasons": [
+        "provider_failure"
+      ]
+    }
+  ],
+  "thresholds_met": false,
+  "truth_compatible_rate": 0.4
+}

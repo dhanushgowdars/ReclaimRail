@@ -1089,3 +1089,524 @@ credentials, runtime evidence and `41/150` live budget remain unchanged. Phase 1
 `PARTIAL` and blocks release/submission. `DEC-032` still permits Phase 18, but the owner chose
 to continue Phase 17B; Phase 18 did not begin. No full corpus run is authorized. Any next live
 action requires a separately reviewed, narrowly bounded diagnostic plan.
+
+## 21 November 2026 — Phase 17B p17b-04 diagnostic wrapper offline implementation
+
+### Authorization and repository preflight
+
+The owner authorized only the evaluation-only `p17b-04` diagnostic wrapper, mocked tests and
+three authority-document updates. Live execution was explicitly prohibited. Before editing,
+all required authority documents were read in order. Repository evidence matched exactly:
+
+- root: `D:\NEW VOLUME\INTERNSHIP PREP\RAZORPAY\ReclaimRail-Gate2`;
+- branch: `phase17b/investigator-closure`;
+- HEAD: `218b70da3c6c4716bcb4c5d93d675316a6d0d257`;
+- worktree, staged paths and untracked paths: clean/zero;
+- Git identity: `Dhanush R S <dhanushrs981@gmail.com>`.
+
+### Implemented scope
+
+Only these runtime/test paths were added:
+
+1. `apps/api/scripts/run_phase17b_groq_p17b04_diagnostic.py`;
+2. `apps/api/tests/test_phase17b_groq_p17b04_diagnostic.py`.
+
+The wrapper hard-locks corpus-v2 SHA-256
+`814ccaab7c8f09b3ef70f41ab7838384ccb1c7a777d0c8070d2ec0b6337839de`, scenario
+`p17b-04`, provider/model `groq/openai/gpt-oss-120b`, starting-budget acknowledgement
+`41/150`, three maximum request starts, zero retries and no failover. It uses the existing
+`run_frozen_scenario` engine from turn 1, allowing model-selected tools to choose only their
+matching frozen observations. It does not force tool names, arguments, observations or opaque
+IDs and does not import an application-tool executor.
+
+The engine `max_requests=3` and an independent pre-transport wrapper both enforce the ceiling.
+Provider/governor failures, malformed output and invalid/repeated/wrong-argument turns stop
+fail-closed. An otherwise valid third non-terminal tool turn records
+`incomplete_request_ceiling`, not a corpus verdict. Final/checkpoint artifacts are new-only,
+ignored `.runtime/phase17b` JSON paths and contain sanitized coordinates, counters/timings and
+typed allowlisted provider diagnostics. They explicitly record `corpus_verdict=not_evaluated`
+and `model_selection=not_evaluated`.
+
+### Offline commands and exact results
+
+The first formatter invocation inside the restricted sandbox could not open the existing user
+uv cache (`Access is denied`). The same offline command was rerun with access to that existing
+cache and formatted one new file. No dependency download or network/provider request occurred.
+
+| Command | Result |
+| --- | --- |
+| `uv run --frozen ruff format scripts/run_phase17b_groq_p17b04_diagnostic.py tests/test_phase17b_groq_p17b04_diagnostic.py` | passed; `1 file reformatted, 1 file left unchanged` |
+| `uv run --frozen ruff check scripts/run_phase17b_groq_p17b04_diagnostic.py tests/test_phase17b_groq_p17b04_diagnostic.py` | initial run found one unused `json` import; import removed |
+| `uv run --frozen pytest -q tests/test_phase17b_groq_p17b04_diagnostic.py` | initial run `14 passed, 2 failed`; failures were test-fixture defects (mutable observation-list capture and schema-invalid empty-evidence terminal), not runtime/provider failures |
+| same isolated new-test command after fixture correction | `16 passed in 1.62s` |
+| `uv run --frozen ruff format --check app scripts tests` | passed; `253 files already formatted` |
+| `uv run --frozen ruff check app scripts tests` | passed; all checks passed |
+| `uv run --frozen mypy app scripts/run_phase17b_groq_p17b04_diagnostic.py` | passed; no issues in 130 source files |
+| `uv run --frozen pytest -q tests/test_phase17b_groq_p17b04_diagnostic.py tests/test_phase17b_groq_benchmark_wrapper.py tests/test_phase17b_groq_governor.py tests/test_groq_evidence_investigator.py tests/test_phase17b_benchmark.py` | passed; `67 passed in 7.60s` |
+
+The mocked coverage proves exact preflight acknowledgements before credential loading, locked
+scenario/checksum, new-only destinations, natural observation counts `0 -> 1 -> 2`,
+model-selected frozen lookup, early terminal handling, the absolute three-start ceiling,
+failure on each possible start without retry, governor refusal before transport, malformed
+output, unsafe tools/arguments, artifact redaction, prohibited-import absence and no quality
+selection claim.
+
+### Provider and phase result
+
+Groq, Gemini, Razorpay, PostgreSQL, workers, application-tool executors, the corpus and canary
+were not called or run. No provider credential was loaded by validation and no `.runtime`
+artifact was created. The live budget remains `41/150`. Historical request 15 remains actual
+`p17b-04` turn 3, but its old receipt still lacks the provider-generated prior tool names,
+opaque IDs and typed cause; the exact rejection cause remains unknown. This wrapper cannot
+recover that history and was not presented as doing so.
+
+Phase 17B remains `PARTIAL`, Groq remains neither selected nor rejected on quality, and release/
+submission remains blocked. Running this wrapper requires a separate owner authorization; the
+`41/150` acknowledgement is only a guard. No staging, commit, push, branch switch, deployment or
+Phase 18 work occurred.
+
+## 21 November 2026 — p17b-04 unsafe-terminal offline correction
+
+A read-only review of the five-path diagnostic candidate found one unsafe success signal. The
+authoritative frozen-scenario engine records citation validity and forbidden-summary safety,
+but the wrapper classified every schema-valid terminal turn as `terminal_response` and returned
+success before checking those booleans. An early complete turn could therefore cite unseen
+evidence, or a fully observed turn could contain a forbidden recovery recommendation, while the
+wrapper still exited zero. No provider or application path had been run with that candidate.
+
+The wrapper now classifies a terminal with invalid citations or `failed_safe=false` as
+`unsafe_terminal_response`, persists the engine's typed `citations_valid` boolean, writes no
+prompt/summary/evidence ID/tool name and returns nonzero. `corpus_verdict` and `model_selection`
+remain `not_evaluated`. The safe early-terminal test now uses an evidence-free abstention rather
+than unseen citations. New mocked tests prove unseen-citation and forbidden-summary terminals
+fail closed with sanitized final/checkpoint artifacts, and cancellation after request start
+leaves only a sanitized checkpoint. The prior ceiling, governor, provider-failure, malformed,
+unsafe-tool/argument, redaction and no-selection checks remain in the focused suite.
+
+Offline results:
+
+| Command | Result |
+| --- | --- |
+| `uv run --frozen ruff format scripts/run_phase17b_groq_p17b04_diagnostic.py tests/test_phase17b_groq_p17b04_diagnostic.py` | passed; `1 file reformatted, 1 file left unchanged` |
+| `uv run --frozen pytest -q tests/test_phase17b_groq_p17b04_diagnostic.py` | passed; `19 passed in 1.84s` |
+| `uv run --frozen ruff format --check app scripts tests` | passed; `253 files already formatted` |
+| first `uv run --frozen ruff check app scripts tests` | failed with one import-order finding after adding `asyncio`; import order corrected |
+| final `uv run --frozen ruff check app scripts tests` | passed; all checks passed |
+| `uv run --frozen mypy app scripts/run_phase17b_groq_p17b04_diagnostic.py` | passed; no issues in 130 source files |
+| `uv run --frozen pytest -q tests/test_phase17b_groq_p17b04_diagnostic.py tests/test_phase17b_groq_benchmark_wrapper.py tests/test_phase17b_groq_governor.py tests/test_groq_evidence_investigator.py tests/test_phase17b_benchmark.py` | passed; `70 passed in 7.65s` |
+| `git diff --check` | passed; exit 0 |
+
+No diagnostic, Groq, Gemini, Razorpay, PostgreSQL, worker, corpus, canary or application-tool
+execution occurred. No provider credential was loaded and no `.runtime` artifact was created.
+Phase 17B remains `PARTIAL`; Groq remains neither selected nor rejected on quality; the exact
+historical request-15 rejection cause remains unknown; and the live budget remains `41/150`.
+
+## 21 November 2026 — p17b-04 diagnostic closed; full-corpus preparation only
+
+The owner closed the p17b-04 diagnostic after the v2 run: Groq was healthy, six of six
+requests received responses, no provider error occurred, and no validator rejected a response.
+The six model-selected tools were `get_truth_snapshot`, `get_internal_payment`,
+`get_merchant_policy_summary`, `get_payment_link_status`, `get_provider_payment` and
+`get_recovery_history`. The result stopped at the diagnostic six-start ceiling before a
+terminal answer. The engine's existing `malformed_output=true` field therefore represented
+request-budget exhaustion, not malformed provider output. No quality or model-selection claim
+is made. Budget is `50/150`; Phase 17B remains `PARTIAL`.
+
+### Full governed corpus preparation — not run
+
+- Frozen corpus scenarios: `10`.
+- Authoritative engine maximum turns per scenario: `9` (`run_frozen_scenario` defaults to
+  `max_requests=9` and loops while `request_count < max_requests`).
+- Worst-case starts: `10 x 9 = 90`.
+- The diagnostic ceiling of `6` was wrapper-specific and was not the engine limit.
+- Remaining live budget after the closed diagnostic: `100`; the 90-start worst case fits with
+  10 starts of headroom. No budget increase is proposed unless a revised plan adds requests.
+- Existing full runner hard ceiling: `31`, which is insufficient for a complete worst-case
+  corpus and currently stops the whole run on provider/malformed failure.
+
+The full runner does not yet use the DEC-034 retention seam: it constructs the older plain
+`MeteredProvider`, while the retention-aware implementation is currently in the p17b-04
+diagnostic wrapper. Before any corpus run, an offline change is required to share the bounded
+scrubber/receipt capture with the full runner and add tests proving every turn retains only
+DEC-034 fields. The corpus must not run until that change passes offline gates.
+
+Proposed owner decision: a rejected or indeterminate scenario is recorded as a failed
+case-level result with complete sanitized diagnostics, then the governed run continues to the
+next scenario. Aggregate denominators must report all ten scenarios, including failed and
+incomplete cases; no failed case may be silently dropped or converted into a quality pass.
+
+Planned run contract after approval and offline correction:
+
+- corpus/checksum: corpus-v2 / `814ccaab7c8f09b3ef70f41ab7838384ccb1c7a777d0c8070d2ec0b6337839de`;
+- model: Groq `openai/gpt-oss-120b` only;
+- request ceiling: 90 starts worst case, with no retries/failover;
+- output/checkpoint: new files under ignored `.runtime/phase17b`;
+- lease: one exclusive run lease, new-only destination checks inside the lease, stale lease
+  fails closed;
+- Gemini, Razorpay, application tools, PostgreSQL and workers: not used.
+
+The three commits `0ba09c0`, `29b95c3` and `218b70d` are not local-only: each is present on
+`origin/phase17b/investigator-closure`, and the branch tracks that remote at the same HEAD.
+No push occurred during this preparation.
+
+## 21 November 2026 — DEC-034 diagnostic retention and owner-authorized p17b-04 run
+
+### Preserved prior artifact
+
+Before editing, the prior report and checkpoint were printed and preserved unchanged. They
+contained three responses and `malformed_output=true`, but no per-turn tool, call-ID, HTTP,
+provider-reason or validator fields. The missing fields could not be reconstructed.
+
+### Offline implementation
+
+The owner authorized `DEC-034`: synthetic frozen-corpus diagnostics may retain only typed,
+allowlisted HTTP status, provider error code/type, a first-300-character scrubbed error message,
+tool name, arguments limited to 500 scrubbed characters, call ID, finish reason, turn type and a
+local validation-failure reason. Headers, bearer/API keys, credentials, raw payloads, prompts,
+customer data and unsanitized provider text remain forbidden.
+
+The essential adapter change is limited to an in-memory `last_diagnostic_details` seam containing
+the already-validated function call before conversation cleanup. The wrapper scrubs bearer/key-
+like values and header names, bounds fields, and persists only those allowlisted values. It does
+not alter tool execution, truth, policy, approval, persistence or provider ordering.
+
+Offline validation after the retention change:
+
+| Command | Result |
+| --- | --- |
+| Ruff format on adapter/wrapper/tests | `3 files left unchanged` |
+| Ruff lint on adapter/wrapper/tests | `All checks passed!` |
+| strict mypy (`app` plus wrapper) | `Success: no issues found in 130 source files` |
+| focused Phase 17B suite | `73 passed in 8.06s` |
+
+The first retention test correctly failed because the scrubber left the literal `x-api-key`
+header name in the message; the header-name scrub was added and the final suite passed.
+
+### Owner-authorized live run
+
+The first invocation with the new v2 output path stopped before credentials because the wrapper
+still required the historical `41/150` acknowledgement. No provider request occurred. The guard
+was corrected to the current budget `44/150`, offline validation was rerun (`73 passed in 8.06s`),
+and the one authorized live run executed exactly six starts with Groq
+`openai/gpt-oss-120b`, 60-second timeout, zero retries and no failover.
+
+New ignored artifacts:
+
+- `.runtime/phase17b/groq-p17b-04-diagnostic-20261121-owner-v2.json`
+- `.runtime/phase17b/.groq-p17b-04-diagnostic-20261121-owner-v2.checkpoint.json`
+
+Per-turn retained details:
+
+| Turn | Tool | Arguments | Call ID | Finish | Result |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | `get_truth_snapshot` | `{"case_id":"00000000-0000-4000-8000-000000000004"}` | `fc_b30eab10-35f9-45dd-a920-67b521a0b991` | `tool_calls` | response, 1156 ms, 2134/73 tokens, request remaining 999 |
+| 2 | `get_internal_payment` | same case ID | `fc_5cf4390b-3cc5-4a14-a796-cc986009df88` | `tool_calls` | response, 985 ms, 2218/88 tokens, request remaining 998 |
+| 3 | `get_merchant_policy_summary` | same case ID | `fc_3f8cbf7a-133d-4fc9-ab91-f96084e642ff` | `tool_calls` | response, 985 ms, 2292/116 tokens, request remaining 997 |
+| 4 | `get_payment_link_status` | same case ID | `fc_4e04b353-d825-428e-9b13-be10f95bf4e6` | `tool_calls` | response, 1250 ms, 2372/94 tokens, request remaining 996 |
+| 5 | `get_provider_payment` | same case ID | `fc_01315bd5-15be-4ba1-b51e-e54af1085422` | `tool_calls` | response, 1094 ms, 2449/95 tokens, request remaining 995 |
+| 6 | `get_recovery_history` | same case ID | `fc_987b5d95-67c3-439f-b12f-e39e6ca7d631` | `tool_calls` | response, 937 ms, 2523/86 tokens, request remaining 994 |
+
+No HTTP status, provider error code/type, scrubbed error message or validator rejection was
+retained because no provider error occurred. The run stopped at the six-start ceiling. The
+engine labelled the result `incomplete_request_ceiling`, `malformed_output=true`,
+`citations_valid=false`, `failed_safe=true`; this is the existing budget-exhaustion encoding,
+not evidence that a provider response was malformed. `corpus_verdict` and `model_selection`
+remain `not_evaluated`. Budget accounting is now `50/150`. No corpus, Gemini, Razorpay,
+application-tool, PostgreSQL or worker call occurred. No staging, commit or push occurred.
+
+## 21 November 2026 — p17b-04 concurrent-invocation offline safeguard
+
+The five-path candidate was reviewed again from its complete Python contents and exact
+authority-document diff. Existing mocked evidence already proved that `MeteredProvider`
+increments `request_starts` and persists a receipt before awaiting transport, so successful,
+failed and cancelled requests all spend a start. It also proved the per-run three-start cap,
+non-terminal third-turn incomplete state, invalid-citation/forbidden-summary non-success,
+malformed and unknown/repeated/wrong-argument turns, and adapter rejection of multiple tool
+calls.
+
+The review found one remaining concrete failure path: the counter and cap belonged to one
+`MeteredProvider`, so simultaneous wrapper processes could each pass preflight and start up to
+three requests. Two same-path invocations could also both observe absent output/checkpoint
+destinations before either wrote its first receipt. This was not covered by the earlier tests.
+
+The wrapper now creates one exclusive process-visible lease file under ignored
+`.runtime/phase17b` before loading credentials or constructing transport. A concurrent or stale
+lease raises a closed diagnostic error and remains available for operator inspection. After
+acquiring the lease, the wrapper rechecks that output and checkpoint are still absent. The
+lease is released in a `finally` path; cancellation retains the sanitized checkpoint and removes
+only the lease. Tests prove a nested concurrent attempt cannot enter or overwrite sentinel
+artifacts, an active/stale lease blocks before credential loading without deleting the lease,
+and cancellation releases the lease after counting the indeterminate request.
+
+Offline results:
+
+| Command | Result |
+| --- | --- |
+| `uv run --frozen ruff format scripts/run_phase17b_groq_p17b04_diagnostic.py tests/test_phase17b_groq_p17b04_diagnostic.py` | passed; `1 file reformatted, 1 file left unchanged`; final repeat left both unchanged |
+| `uv run --frozen pytest -q tests/test_phase17b_groq_p17b04_diagnostic.py` | passed; `21 passed in 1.93s` |
+| first `uv run --frozen ruff check app scripts tests` | failed with two test-only `SIM117` context-manager style findings; corrected without behavior change |
+| final `uv run --frozen ruff format --check app scripts tests` | passed; `253 files already formatted` |
+| final `uv run --frozen ruff check app scripts tests` | passed; all checks passed |
+| `uv run --frozen mypy app scripts/run_phase17b_groq_p17b04_diagnostic.py` | passed; no issues in 130 source files |
+| `uv run --frozen pytest -q tests/test_phase17b_groq_p17b04_diagnostic.py tests/test_phase17b_groq_benchmark_wrapper.py tests/test_phase17b_groq_governor.py tests/test_groq_evidence_investigator.py tests/test_phase17b_benchmark.py` | passed; `72 passed in 8.40s` |
+| `git diff --check` | passed; exit 0 |
+
+This is mocked offline evidence. It does not prove OS behavior after a hard process kill, real
+Groq request/response behavior, provider quota accounting, model quality or the historical
+request-15 cause. A hard kill intentionally leaves a stale lease and blocks future execution
+until operator inspection; the wrapper does not automatically delete it. No diagnostic,
+provider, database, worker, corpus, canary or application-tool execution occurred. Phase 17B
+remains `PARTIAL`, and the live budget remains `41/150`.
+
+### Full corpus runner preparation — DEC-034/DEC-035
+
+The governed corpus runner now retains DEC-034 sanitized per-turn receipts for every scenario,
+including rejection, cancellation, malformed output and governor refusal. Failed or indeterminate
+scenarios are recorded and execution continues, preserving all ten denominators. Starts are
+counted before transport, paced at least 2.5 seconds apart, and sanitized Groq rate-limit metadata
+is retained; 429 is a provider failure with zero retries. An exclusive ignored run lease prevents
+concurrent runs. The engine maximum is nine turns per scenario; the diagnostic six-start ceiling
+was not the engine limit. The owner-approved full-run ceiling is 90 starts and the live accounting
+cap is 250. Offline Ruff, strict mypy and focused Phase 17B tests passed.
+
+The single owner-authorized full corpus run then completed with 16 starts, 15 responses and one
+indeterminate provider request; exit status was 1 because thresholds did not pass. Scenarios
+p17b-01 and p17b-02 reached terminal responses. p17b-03 failed on turn 3 with HTTP 400 and typed
+`provider_rejected`; p17b-04 through p17b-10 were retained as failed cases after governor refusal,
+with no silent denominator drops. All ten scenarios are present. The sanitized report and
+checkpoint are the new ignored `benchmark-groq-corpus-v2-20261121-owner-final` artifacts. The
+budget is now 66/250. This is provider evidence, not a model-quality selection claim; Phase 17B
+remains `PARTIAL`.
+
+### Offline correction after governed run review — 22 November 2026
+
+The retained p17b-03 turn-3 receipt contains HTTP 400, typed `provider_rejected`, and the safe
+message `Groq evidence investigation failed safely`; raw provider payload, tool declarations,
+tool choice and request messages were not retained. The governor previously stopped globally on
+every provider error; it now continues after definitive provider outcomes and stops only on
+timeout, transient or unknown provider errors. Tool-result messages now retain only standard
+role/tool_call_id/content linkage, omitting the deprecated name field. Offline replay tests cover
+the retained 400 shape, continuation, timeout stop and request linkage. Ruff, strict mypy, 52
+focused tests and diff check passed. No live call was made; Phase 17B remains `PARTIAL` and the
+budget remains 66/250.
+
+23 November 2026 offline retry candidate: governor now counts consecutive final transient/timeout
+failures and stops after two; definitive failures continue. The governed provider retries only
+`tool_use_failed` or transient/timeout once with 2.5-second backoff, and the metered provider
+persists attempt number before each transport start. Report scenarios expose first-attempt outcomes
+and final outcome separately. Offline Ruff format/lint passed, strict mypy passed (130 source
+files), focused pytest passed (55 tests), and git diff --check passed. A mocked retry
+after a multi-turn HTTP 400 replayed identical request messages. No corpus was run. One
+owner-authorized Groq model-list GET returned HTTP 200 and 11 active model IDs; its response
+contains no tool-calling capability field, so no alternative is verified for tool use.
+
+22 November 2026 retention correction: HTTP 400 provider error code/type/message, failed_generation,
+and x-request-id now flow through bounded sanitized receipts. Requests retain a tool declaration
+SHA-256 and structural message metadata. Removing the tool-message `name` remains an unproven
+hypothesis: the earlier p17b-03 turn-2 request already contained a tool result and succeeded.
+Offline Ruff format/lint, strict mypy (130 files), focused pytest (53 passed), and git diff --check
+passed. The following single corpus run is separately owner authorized; budget before it is 66/250.
+
+The single authorized run wrote new ignored `benchmark-groq-corpus-v2-20261122-owner-retention`
+report/checkpoint artifacts and exited 1 after 30 starts, 26 responses, four provider failures,
+zero retries. HTTP 400 `tool_use_failed` occurred in p17b-02, p17b-04 and p17b-07; p17b-08
+had a transient provider failure, after which the governor refused p17b-09 and p17b-10.
+The three 400s continued to later scenarios. All ten cases remain denominated. Provider messages
+identify malformed generated tool arguments in two cases and an undeclared `json` tool in one.
+Metrics: truth 0.2, required tools 0.3, citations 0.4, abstention 0.0, provider failures 0.6,
+malformed outputs 0.0. Budget now 96/250. No rerun authorized; Phase 17B remains `PARTIAL`.
+
+23 November 2026 prompt and receipt correction: Groq-only versioned general instructions now
+require one declared function, valid JSON, abstention on unresolved evidence and verified webhook
+evidence for disputed authorization. The corpus and thresholds are unchanged. The report retains
+the prompt version/hash. Receipt redaction now matches header assignments rather than the bare
+word `authorization`; model-facing text and scoring do not use this scrubber. The local governor
+still uses a 6,000-token estimated rolling-minute ceiling with a 25% estimate margin; its roughly
+60-second pacing is conservative local policy, not proven Groq header enforcement. Offline Ruff
+format/lint, strict mypy (130 files), focused pytest (78 passed), and git diff --check passed.
+
+The one authorized versioned-prompt corpus run exited 1 and wrote new ignored
+`benchmark-groq-corpus-v2-20261123-prompt-v3` report/checkpoint artifacts. It recorded 37
+transport starts, 30 responses, seven failed starts and five retries; budget is 133/250.
+All ten scenarios remain in the denominator. p17b-02 and p17b-07 ended on HTTP 400
+`tool_use_failed`; first-attempt 400s in p17b-03 and p17b-04 recovered on retry. p17b-09
+received one tool response before the local governor's estimated day token ceiling refused the
+next turn; p17b-10 was refused before transport. Thus this is not a complete ten-scenario
+provider evaluation despite a ten-row report. Metrics: truth 0.3, required tools 0.5,
+citations 0.6, abstention 0.0, provider failures 0.4, malformed outputs 0.0. Prompt version
+`groq-evaluation-v3-post-corpus-tuning`, SHA-256
+`687bbc1f3661030b9adcb43a9c270d3a21633c0c2474d8e86be152c815b3bb75`.
+No rerun is authorized; Phase 17B remains `PARTIAL`.
+
+## 23 November 2026 — Mistral second-provider bounded smoke candidate
+
+Owner approved Mistral as a candidate, preserving Groq evidence and disabling Gemini. Preflight:
+branch `phase17b/investigator-closure`, HEAD `218b70da3c6c4716bcb4c5d93d675316a6d0d257`,
+required Dhanush Git identity, dirty worktree inventoried and preserved, `.env` ignored, Mistral
+key present without exposure. A small subclass of the existing strict Groq chat parser changes
+only model allowlist, base URL, Mistral tool-result `name` linkage and allowlisted quota metadata;
+the common parser is used because it already rejects untrusted calls and never executes tools.
+The three-slot smoke runner has one-second minimum spacing, 250,000 TPM configuration, 60-second
+timeout, no retry/failover, new ignored output and no application tool executor.
+
+Offline commands from `apps/api`: `uv run --frozen ruff format` on four candidate files passed
+(`4 files left unchanged` on final run); `uv run --frozen ruff check app scripts tests` passed;
+`uv run --frozen mypy app scripts/run_phase17b_mistral_smoke.py` passed (`131 source files`);
+focused `uv run --frozen pytest -q` on Mistral and five existing Phase 17B test files passed
+(`86 passed in 10.13s`); `git diff --check` passed. The one owner-authorized model-list request
+returned HTTP 200 in 656 ms; no sanitized rate-limit header was present. The candidate
+`mistral-large-2512` did not appear in the chat/function-calling-capable model set, so the runner
+stopped after request 1. The two authorized chat request slots were not used. Ignored artifact:
+`.runtime/phase17b/mistral-smoke-20261123-owner.json`. No corpus, provider tool execution,
+PostgreSQL, worker, Groq, Gemini or Razorpay call occurred in this work order. Phase 17B remains
+`PARTIAL`; historical Groq budget 133/250 is unchanged.
+
+## 23 November 2026 — Mistral medium remaining smoke slots
+
+The owner approved `mistral-medium-latest` based on the previously saved authenticated model-list
+receipt; no model-list request was repeated. The smoke code now records only a closed target
+availability status for new model lists and tests all three states. It configures 20,000 TPM,
+one request per second, 60-second timeout, one attempt per slot and zero failover. The old
+Mistral and Groq modified/untracked paths were preserved. The first offline invocation from the
+repository root failed because it did not select the API uv project; no provider request was made.
+The corrected invocation from `apps/api` passed Ruff format/check and lint, strict mypy for 131
+files, focused pytest `90 passed in 11.38s`, and `git diff --check`.
+
+The first authorized plain POST returned HTTP 429 in 594 ms with no returned model, usage or
+allowlisted rate-limit values. It was stored only in new ignored
+`.runtime/phase17b/mistral-medium-smoke-continuation-20261123-owner.json`. The smoke stopped.
+A guarded forced-only mode was added and validated offline: Ruff, strict mypy and
+`91 passed in 11.64s`, diff check passed. It read the prior sanitized model-list and plain-call
+receipts and sent one forced-tool POST only, with no model-list or plain repeat. That request
+returned HTTP 429 in 453 ms, again without returned model, usage, allowlisted rate-limit values
+or tool call. Its new ignored artifact is
+`.runtime/phase17b/mistral-medium-forced-only-20261123-owner.json`. Exactly two additional Mistral
+requests were made; both failed and consumed their slots. No application tool, corpus, canary,
+diagnostic scenario, Groq, Gemini, Razorpay, PostgreSQL or worker execution occurred. Phase 17B
+remains `PARTIAL`; historical Groq live budget 133/250 is unchanged.
+
+## 24 November 2026 — Gemini 3.8 Flash isolated smoke
+
+Owner authorization was limited to an isolated `gemini-3.8-flash` smoke with a new Google AI
+Studio project/key and at most three requests. Preflight recorded branch
+`phase17b/investigator-closure`, HEAD `218b70da3c6c4716bcb4c5d93d675316a6d0d257`, required Git
+identity `Dhanush R S <dhanushrs981@gmail.com>`, zero staged paths, 11 modified paths and five
+untracked paths before this work order. All were preserved. `apps/api/.env` was confirmed ignored;
+`RECLAIMRAIL_GEMINI_38_API_KEY` was present and non-empty without printing, hashing, logging or
+serializing its value. The historical Gemini key was not read or used.
+
+Official Google documentation and the installed Google Gen AI SDK 2.34.0 established the current
+contract: `gemini-3.8-flash` supports Interactions function declarations; client-side functions
+must be executed and returned explicitly for a continuation; SDK decoding continuation defaults
+on and must be disabled to enforce one transport attempt; forced selection uses
+`generation_config.tool_choice.allowed_tools`; and response format was not combined with function
+calling. The new evaluation-only path declares the 11 authoritative read-only tools, disables
+continuation, configures SDK attempts to one, never sends a function result and has no application
+tool executor.
+
+Offline commands from `apps/api` used a task-local temporary uv cache:
+
+| Command | Result |
+| --- | --- |
+| `uv run --frozen ruff format --check app scripts tests` | passed; `259 files already formatted` |
+| `uv run --frozen ruff check app scripts tests` | passed; `All checks passed!` |
+| `uv run --frozen mypy app scripts/run_phase17b_gemini38_smoke.py` | passed; no issues in 132 source files |
+| `uv run --frozen pytest -q tests/test_phase17b_gemini38_smoke.py tests/test_gemini_evidence_investigator.py tests/test_phase17b_preflight.py tests/test_phase17b_benchmark.py tests/test_groq_evidence_investigator.py tests/test_phase17b_groq_benchmark_wrapper.py tests/test_phase17b_groq_governor.py tests/test_phase17b_groq_p17b04_diagnostic.py tests/test_phase17b_mistral_candidate.py` | passed; `170 passed in 12.35s` |
+| `git diff --check` | passed; exit 0 |
+
+The authorized live command was
+`uv run --frozen python scripts/run_phase17b_gemini38_smoke.py ../../.runtime/phase17b`.
+Request 1 was authenticated model metadata: HTTP 200, 593 ms, requested and returned model
+`gemini-3.8-flash`, with no quota metadata. Request 2 was the plain Interactions prompt: one
+attempt timed out at exactly 60,000 ms; no HTTP status, returned model, text, input/output/thinking
+tokens or quota metadata was available, so exact `OK` was not observed. The runner stopped and did
+not start request 3. The unused forced-function slot produced no function name or arguments.
+
+New ignored sanitized artifacts:
+
+- `.runtime/phase17b/gemini38-smoke-20261124T052546Z-1-model_metadata.json`;
+- `.runtime/phase17b/gemini38-smoke-20261124T052546Z-2-plain.json`.
+
+No key/header, prompt, objective, observation, raw response, arbitrary provider message, opaque
+ID, function result or private evidence was retained. No corpus, canary, diagnostic scenario,
+Razorpay, Groq, Mistral, PostgreSQL, worker, evidence-service or application-tool execution
+occurred. No frontend evidence was applicable to this evaluation-only smoke. Gemini 3.8 Flash is
+available to the isolated project but plain inference and function calling are not technically
+verified; it is not ready for a separately authorized evaluation plan. Phase 17B remains
+`PARTIAL`; Gemini is not selected; Groq remains unselected and its historical budget/evidence
+remains unchanged at `133/250`. No stage, commit, push, deploy or branch switch occurred.
+
+## 24 November 2026 — Gemini 4 Hydrogen bounded smoke
+
+The owner authorized `gemini-4-hydrogen` as the next bounded Phase 17B candidate while explicitly
+prohibiting another model-list call and every corpus/canary/diagnostic request. Branch remained
+`phase17b/investigator-closure` at `218b70da3c6c4716bcb4c5d93d675316a6d0d257`; Git identity
+remained `Dhanush R S <dhanushrs981@gmail.com>` and zero paths were staged. The ignored
+`RECLAIMRAIL_GEMINI_38_API_KEY` was used without exposing its value. All existing Groq, Mistral,
+Gemini and documentation paths were preserved.
+
+Official Google documentation currently lists the direct Interactions model code as
+`gemini-4-hydrogen`, supports thinking levels `low`, `medium`, `high` and `xhigh`, identifies
+`low` as the fewest-token/lowest-latency level, and states that `max_output_tokens` includes
+thinking tokens. The isolated smoke path was generalized around an explicit allowlist containing
+only the preserved `gemini-3.8-flash` path and Hydrogen. Hydrogen skips model metadata, uses low
+thinking, 256 maximum output tokens, a 120-second timeout, one attempt, zero retry/failover,
+disabled SDK continuation and no automatic/application function executor. Future model-list
+sanitation now reads `supported_actions`; no live model-list request was repeated.
+
+Offline commands from `apps/api` used the task-local temporary uv cache:
+
+| Command | Result |
+| --- | --- |
+| `uv run --frozen ruff format --check app scripts tests` | passed; `259 files already formatted` |
+| `uv run --frozen ruff check app scripts tests` | passed; `All checks passed!` |
+| `uv run --frozen mypy app scripts/run_phase17b_gemini38_smoke.py` | passed; no issues in 132 source files |
+| `uv run --frozen pytest -q tests/test_phase17b_gemini38_smoke.py tests/test_gemini_evidence_investigator.py tests/test_phase17b_preflight.py tests/test_phase17b_benchmark.py tests/test_groq_evidence_investigator.py tests/test_phase17b_groq_benchmark_wrapper.py tests/test_phase17b_groq_governor.py tests/test_phase17b_groq_p17b04_diagnostic.py tests/test_phase17b_mistral_candidate.py` | passed; final rerun `175 passed in 12.43s` |
+| `git diff --check` | passed; exit 0 |
+
+The authorized live command was
+`uv run --frozen python scripts/run_phase17b_gemini38_smoke.py ../../.runtime/phase17b --model gemini-4-hydrogen`.
+Exactly one request started: the plain Interactions request returned HTTP 503 after 31,891 ms,
+classified `provider_unavailable`, with typed safe metadata `retry_after_seconds=30`. It returned
+no text, returned model ID, token usage or function call, so exact `OK` was not observed. This
+failure consumed slot 1 and the runner did not start the forced-function slot.
+
+The one new ignored receipt is
+`.runtime/phase17b/gemini4-hydrogen-smoke-20261124T054256Z-1-plain.json`. It contains no prompt,
+raw response, arbitrary provider message, header, credential, project/request/interaction ID or
+opaque call ID. No function was executed. No corpus, canary, diagnostic scenario, Groq, Mistral,
+Razorpay, PostgreSQL, worker, evidence-service or application-tool execution occurred. No
+frontend evidence was applicable to this isolated evaluation smoke. Hydrogen generation access
+and function calling remain unconfirmed; it is not ready for a separately reviewed evaluation
+plan. Phase 17B remains `PARTIAL`; no model was selected and historical Groq evidence/budget
+remains unchanged at `133/250`. No stage, commit, push, deploy or branch switch occurred.
+
+## 24 November 2026 — Gemini controlled-canary validation diagnostic
+
+Owner authorized at most six Gemini starts. A bounded enum now covers every response-parser
+rejection branch without retaining raw arguments or IDs. The same prompt, declarations, linkage
+and frozen observations were preserved; each model was capped at three starts.
+
+Offline: Ruff format/check and lint passed; strict mypy passed for 134 source files; the focused
+suite passed `196 passed in 12.34s`; `git diff --check` passed. The one `gemini-3.5-flash` run
+made one request and received HTTP 503 after 32,078 ms. The one `gemini-4-hydrogen` run made one
+request and received HTTP 503 after 31,969 ms. Both retained retry-after 30 seconds,
+`validation_failure_reason=null`, `citations_valid=false`, `truth_compatible=false`,
+`failed_safe=true`, and final status `provider_transient_provider`. Exactly two starts were used,
+with zero responses, retries, failover or application-tool execution. No other provider, corpus,
+database, worker, stage, commit, push or deployment ran.
+
+## 24 November 2026 — offline Gemini retry/fallback and durable report candidate
+
+The read-only Gemini investigator now reads primary and optional fallback model names from
+settings/environment. Only HTTP 429/503 is retried, at most twice per model; bounded Retry-After
+is preferred, otherwise deterministic 1/2-second backoff is used. After primary exhaustion the
+same request uses the fallback. Successful calls log only requested/served model names. The
+controlled-canary runner writes and fsyncs the sanitized report before cleanup, and a cleanup
+exception no longer replaces the durable result.
+
+Mocked tests cover Retry-After/backoff, retry limits, fallback selection, safe model-only logging,
+settings, and report survival across cleanup failure. Targeted validation passed `61 passed`.
+The full focused gate passed: Ruff format check `262 files already formatted`, Ruff lint passed,
+strict mypy passed for 134 source files, pytest passed `220 passed in 14.05s`, and
+`git diff --check` passed. No API request, live canary, stage, commit, push or deployment occurred.

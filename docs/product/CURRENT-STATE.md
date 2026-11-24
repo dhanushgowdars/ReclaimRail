@@ -480,3 +480,203 @@ changed-condition revalidation recorded `15/14/1`, 3 completed scenarios and no 
 or quality verdict. No full corpus run is currently authorized. The next live action requires
 a separately reviewed, narrowly bounded diagnostic plan. Gemini remains disabled; AI remains
 read-only and advisory.
+
+### p17b-04 bounded diagnostic wrapper — offline implementation
+
+The evaluation-only `p17b-04` diagnostic wrapper is now implemented without changing the
+frozen corpus, checksum, provider adapter, governor, authoritative turn engine, prompts,
+fixtures, thresholds, model ordering, persistence, frontend or application services. It
+loads the locked corpus-v2 at SHA-256
+`814ccaab7c8f09b3ef70f41ab7838384ccb1c7a777d0c8070d2ec0b6337839de`, selects exactly
+`p17b-04`, begins at turn 1 and delegates all turns to `run_frozen_scenario`. Provider-selected
+tools determine subsequent frozen observations; the wrapper contains no forced function,
+historical tool name, historical argument, fabricated opaque ID or application-tool executor.
+
+The wrapper requires separate exact acknowledgements for the starting budget `41/150` and a
+future owner-authorized live diagnostic. It has independent engine and transport ceilings of
+three request starts, zero retries and no failover. New output and checkpoint paths must be
+unused JSON files under ignored `.runtime/phase17b`. Artifacts retain only sanitized request
+coordinates, counters/timings and typed allowlisted provider diagnostics. A three-start run
+without a terminal response is labelled `incomplete_request_ceiling`; every artifact states
+that corpus verdict and model selection were not evaluated.
+
+The first offline implementation validation passed Ruff, strict mypy and a focused mocked
+suite with `67 passed`. A subsequent read-only review found that every schema-valid terminal
+turn was labelled successful even when the authoritative engine reported invalid citations or
+`failed_safe=false`. That unsafe success signal was corrected: those terminals now produce
+`unsafe_terminal_response`, retain only the engine's boolean `citations_valid` result and exit
+nonzero. A safe early abstention remains a terminal diagnostic response without becoming a
+quality verdict. New tests cover unseen citations, forbidden summary content, sanitized output
+and checkpoint artifacts, and cancellation after request start.
+
+Corrected offline validation passed: the isolated diagnostic suite reported `19 passed in
+1.84s`; Ruff format check reported `253 files already formatted`; final Ruff lint passed after
+one import-order correction; strict mypy passed for 130 source files; and the complete focused
+Phase 17B suite reported `70 passed in 7.65s`. No Groq, Gemini, Razorpay, PostgreSQL, worker,
+corpus, canary or application-tool execution occurred. No runtime artifact was created.
+
+A further offline review found that the three-start counter was scoped to one wrapper process:
+two simultaneous invocations could each pass preflight and reserve three starts, and same-path
+invocations could race before the first checkpoint existed. The wrapper now acquires one
+process-visible exclusive lease in `.runtime/phase17b` before credentials or transport and
+rechecks both destinations inside the lease. A concurrent or stale lease fails closed and is
+not removed by the rejected invocation; cancellation releases the lease while preserving its
+sanitized checkpoint. The expanded isolated suite reported `21 passed in 1.93s`; final Ruff
+format/lint and strict mypy passed; and the complete focused suite reported `72 passed in
+8.40s`.
+
+This offline wrapper does not explain the historical request-15 rejection and does not select
+or reject Groq on quality. The exact provider rejection cause remains unknown, the live budget
+remains `41/150`, and Phase 17B remains `PARTIAL` and a release/submission blocker. Running the
+wrapper still requires separate owner authorization; the budget acknowledgement alone is not
+authorization.
+
+### p17b-04 diagnostic retention correction and owner-authorized run
+
+`DEC-034` authorizes bounded per-turn diagnostic retention for synthetic frozen-corpus
+diagnostics only. The Groq adapter now exposes an in-memory, already-validated call seam to the
+diagnostic wrapper; the wrapper persists only typed allowlisted status/reason, scrubbed message
+prefixes, tool name, bounded scrubbed arguments, call ID, finish reason, turn type and local
+validation reason. Headers, keys, bearer tokens, raw payloads, prompts, customer data and
+unsanitized provider text remain forbidden.
+
+The previous report and checkpoint remain unchanged and are preserved as evidence: three
+responses, `malformed_output=true`, no retained diagnostic fields. One newly authorized run was
+then executed from p17b-04 turn 1 with Groq `openai/gpt-oss-120b`, six maximum starts, 60-second
+timeout, zero retries and no failover. It used six model-selected read-only tools and stopped at
+the request ceiling without a terminal answer or provider error. The retained per-turn call
+IDs, tool names and case-ID arguments are in the ignored v2 report/checkpoint; no HTTP/provider
+error fields were present because no provider rejection occurred.
+
+The result remains `incomplete_request_ceiling`, with `corpus_verdict=not_evaluated` and
+`model_selection=not_evaluated`. The engine marks budget exhaustion as `malformed_output=true`
+even though all six observed responses were tool calls; this is an existing engine result, not
+evidence of a malformed provider payload. The live budget is now `50/150`. Phase 17B remains
+`PARTIAL`; Groq is neither selected nor rejected on quality.
+
+Full-corpus preparation is implemented offline: DEC-034 per-turn retention, 2.5-second pacing,
+sanitized rate-limit metadata, exclusive run lease and continue-on-failure denominator handling.
+The engine maximum is nine turns per scenario; the diagnostic six-start ceiling was separate. The
+authorized run ceiling is 90 starts and the total live cap is 250. The one authorized run completed
+with 16 starts, 15 responses and one indeterminate request. p17b-03 recorded sanitized HTTP 400
+`provider_rejected`; p17b-04 through p17b-10 were retained as governor-refused failed cases, so
+all ten scenarios remain denominated. The report exit was nonzero because thresholds failed. The
+budget is 66/250. This does not select or reject Groq on model quality; Phase 17B remains `PARTIAL`.
+
+Offline review correction: definitive HTTP/provider rejection now fails only the current scenario;
+timeout, transient and unknown provider outcomes still stop the run. Groq tool-result messages use
+standard role/tool_call_id/content linkage. The retained report did not keep tool declarations,
+tool_choice or full request messages, so the exact 400 cause remains unknown; the request-shape
+change is a compatibility hypothesis, not proof. Offline validation passed with 52 focused tests,
+Ruff, strict mypy and diff check. No live call was made; budget remains 66/250.
+
+The one owner-authorized 22 November corpus run completed with 30 starts, 26 responses and four
+provider failures. Retained HTTP 400 details identify `tool_use_failed` in p17b-02, p17b-04 and
+p17b-07; a transient failure in p17b-08 stopped subsequent transport. All ten scenarios remain
+in denominators. Locked thresholds failed; budget is 96/250. Phase 17B remains `PARTIAL`.
+
+23 November offline candidate: one retry per model turn for tool_use_failed or transient/timeout,
+persisted attempt receipts and backoff, and a two-consecutive-final-transient stop rule passed
+focused mocked tests. No corpus rerun occurred. The one authorized model-list read supplied IDs
+but no tool-calling capability metadata. Phase 17B remains `PARTIAL`; budget remains 96/250.
+
+The one owner-authorized versioned-prompt run recorded 37 starts, 30 responses and five retries.
+Two scenarios ended in HTTP 400 tool_use_failed; the local estimated day token guard refused
+p17b-09 after one tool response and p17b-10 before transport. The ten-row report fails locked
+thresholds and is not a complete provider evaluation. Prompt SHA-256 is
+`687bbc1f3661030b9adcb43a9c270d3a21633c0c2474d8e86be152c815b3bb75`.
+Phase 17B remains `PARTIAL`; live budget is 133/250.
+
+23 November Mistral candidate: `RECLAIMRAIL_MISTRAL_API_KEY` is present and `.env` is ignored.
+A separate evaluation-only adapter and bounded smoke runner passed offline focused tests, Ruff,
+strict mypy and diff check. The one authorized Mistral `GET /v1/models` returned HTTP 200, but
+`mistral-large-2512` was absent from the returned chat/function-calling-capable set. The smoke
+stopped after this one request; no plain chat or forced tool call was made. This does not prove
+whether the model ID was absent entirely or present without the required capability flags,
+because the sanitized artifact retained only eligible model IDs. Phase 17B remains `PARTIAL`;
+historical Groq budget stays 133/250.
+
+23 November Mistral medium continuation: the preserved authenticated model-list artifact
+identified `mistral-medium-latest` as chat and function-calling capable. A closed target status
+(`absent_from_model_list`, `present_but_not_chat_tool_capable`, `eligible`) replaced broad model
+metadata in future smoke reports. Offline gates passed. The two additional authorized POSTs
+were plain chat (HTTP 429, 594 ms) and forced read-only tool choice (HTTP 429, 453 ms), each one
+attempt with no retry/failover. No completion, returned model ID, token usage, rate-limit number,
+tool call or tool execution was observed. Mistral is not technically verified for corpus
+evaluation. Phase 17B remains `PARTIAL`; Groq budget remains 133/250.
+
+## 24 November 2026 Gemini 3.8 Flash isolated smoke
+
+`PARTIAL`: the owner authorized only a three-slot smoke using the isolated
+`RECLAIMRAIL_GEMINI_38_API_KEY`; the variable was present and `apps/api/.env` remained ignored.
+The isolated evaluation path uses Google Gen AI SDK 2.34.0 and the current Interactions API,
+sets a 60-second timeout, disables SDK continuation, configures one transport attempt with no
+retry or failover, declares only the real 11 Phase 17B read-only functions, and never submits a
+function result or invokes an application tool. It does not use the historical Gemini key or
+the historical `gemini-3.6-flash` Generate Content request shape.
+
+Offline validation passed: Ruff reported 259 files already formatted and all lint checks passed;
+strict mypy reported no issues in 132 source files; the focused Gemini/Phase 17B provider and
+evaluation suite reported `170 passed in 12.35s`; and `git diff --check` passed. The authenticated
+model-metadata request returned HTTP 200 in 593 ms and returned exactly `gemini-3.8-flash`.
+The plain Interactions request then timed out at exactly 60,000 ms with one transport attempt,
+no HTTP status, provider response, returned model, token usage or quota metadata. It therefore
+did not return exactly `OK`. The runner stopped before the forced-function request, as required.
+
+The two ignored sanitized artifacts are
+`.runtime/phase17b/gemini38-smoke-20261124T052546Z-1-model_metadata.json` and
+`.runtime/phase17b/gemini38-smoke-20261124T052546Z-2-plain.json`. They contain no key, header,
+prompt, raw body, arbitrary provider message, opaque ID, function result or private evidence.
+No corpus, canary, diagnostic scenario, Razorpay, Groq, Mistral, PostgreSQL, worker,
+evidence-service or application-tool execution occurred. Gemini 3.8 Flash access is confirmed,
+but plain inference and function calling are not technically verified; it is not ready for a
+separately authorized evaluation plan. Phase 17B remains `PARTIAL`, no provider is selected, and
+the historical Groq budget/evidence remains unchanged at `133/250`.
+
+## 24 November 2026 Gemini 4 Hydrogen isolated smoke
+
+`PARTIAL`: the authenticated project catalog previously listed `gemini-4-hydrogen`, but that
+catalog visibility was not treated as generation access and the model-list request was not
+repeated. Official Google Interactions documentation identifies `low` as Hydrogen's lowest
+supported thinking level. The isolated smoke path now accepts an explicit allowlisted model,
+retains the historical Gemini 3.8 behavior, allows Hydrogen without enabling Neon, Argon or
+Carbon, and fixes future model-list sanitation to read the SDK's current `supported_actions`
+field. No frozen corpus, prompt, threshold or application service changed.
+
+Offline validation passed: Ruff reported 259 files already formatted and all lint checks passed;
+strict mypy reported no issues in 132 source files; the focused Gemini/Phase 17B provider and
+evaluation suite reported `175 passed in 12.43s`; and `git diff --check` passed. Hydrogen requests
+use `thinking_level=low`, maximum 256 output tokens, a 120-second timeout, one SDK attempt, zero
+retry/failover, disabled continuation and no function executor.
+
+The single started live request was the plain Interactions request. It returned HTTP 503 after
+31,891 ms, classified `provider_unavailable`, with safe quota metadata
+`retry_after_seconds=30`. It returned no model response, exact `OK`, model ID or input/output/
+thinking-token counts. The runner stopped before the forced `get_truth_snapshot` request. The
+new ignored sanitized receipt is
+`.runtime/phase17b/gemini4-hydrogen-smoke-20261124T054256Z-1-plain.json`.
+
+Hydrogen generation access and function calling remain unconfirmed. It is not technically ready
+for a separately reviewed evaluation plan and is not selected. Phase 17B remains `PARTIAL`; the
+historical Groq budget/evidence remains unchanged at `133/250`. No Groq, Mistral, Razorpay,
+PostgreSQL, worker, evidence-service or application-tool execution occurred.
+
+## 24 November 2026 Gemini controlled-canary diagnostic
+
+`PARTIAL`: receipts now retain one bounded `validation_failure_reason` per parser branch without
+raw arguments or IDs. Prompt, linkage, frozen observations and the no-tool-execution boundary were
+unchanged. The combined ceiling was six starts, enforced as three per model. Ruff format/lint,
+strict mypy for 134 source files, 196 focused tests and `git diff --check` passed.
+`gemini-3.5-flash` and `gemini-4-hydrogen` each made one request and received HTTP 503 with
+retry-after 30 seconds before a model response. Both failed safe with zero retries/failover. No
+parser reason, citations or truth compatibility could be evaluated; the earlier malformed turn
+remains unexplained.
+
+## 24 November 2026 offline Gemini resilience candidate
+
+`PARTIAL`: the read-only Gemini investigator now accepts settings-backed primary and optional
+fallback models. HTTP 429/503 receives at most two retries per model, using bounded Retry-After
+when available and deterministic backoff otherwise, before fallback. Successful requests log only
+the served and requested model names. The canary runner persists its sanitized report before
+client cleanup and retains the result if cleanup fails. Ruff format/lint, strict mypy for 134
+source files, 220 focused tests and `git diff --check` passed. No API request or live canary ran.

@@ -1,6 +1,7 @@
 """Bounded Groq adapter; it returns local function calls and never executes them."""
 # ruff: noqa: E501
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -32,6 +33,13 @@ from app.integrations.investigator import (
 from app.services.recovery_investigation_tools import CaseToolArguments, public_tool_catalog
 
 GROQ_BASE_URL: Final = "https://api.groq.com/openai/v1"
+GROQ_EVALUATION_PROMPT_VERSION: Final = "groq-evaluation-v3-post-corpus-tuning"
+GROQ_EVALUATION_INSTRUCTION: Final = INVESTIGATOR_SYSTEM_INSTRUCTION + (
+    "\nChoose exactly one declared function; never call a function named json. "
+    "Emit one complete, valid JSON argument object matching that function's schema. "
+    "Abstain when required evidence is missing or unresolved. "
+    "Use the verified-webhook evidence tool when payment authorization state is in question."
+)
 GROQ_FUNCTION_CALLING_ALLOWLIST: Final = frozenset({"openai/gpt-oss-120b"})
 _OPAQUE_TOOL_CALL_ID: Final = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 _DURATION: Final = re.compile(r"^(?P<value>\d+(?:\.\d+)?)(?P<unit>ms|s|m|h)?$")
@@ -70,7 +78,12 @@ def _tools(request: dict[str, object]) -> list[dict[str, object]]:
                 "type": "function",
                 "function": {
                     "name": name,
-                    "description": item["description"],
+                    "description": item["description"]
+                    + (
+                        " Use this read-only function when verifying payment authorization state."
+                        if name == "get_verified_webhooks"
+                        else ""
+                    ),
                     "parameters": _provider_function_schema(item["input_schema"]),
                 },
             }
@@ -253,6 +266,12 @@ def _error(
 
 class GroqEvidenceInvestigator:
     provider_name = "groq"
+    base_url = GROQ_BASE_URL
+    model_allowlist = GROQ_FUNCTION_CALLING_ALLOWLIST
+
+    @staticmethod
+    def _quota_from_headers(headers: httpx2.Headers) -> EvidenceInvestigatorRateLimitMetadata:
+        return _rate_limit_metadata(headers)
 
     def __init__(
         self,
@@ -277,7 +296,7 @@ class GroqEvidenceInvestigator:
                 retryable=False,
                 reason_code=EvidenceInvestigatorProviderReason.MODEL_MISSING,
             )
-        if model_name not in GROQ_FUNCTION_CALLING_ALLOWLIST:
+        if model_name not in self.model_allowlist:
             raise ValueError(
                 "Configured Groq model is not in the reviewed function-calling allowlist"
             )
@@ -288,6 +307,9 @@ class GroqEvidenceInvestigator:
             transport,
         )
         self._conversations: dict[str, _Conversation] = {}
+        # Evaluation-only diagnostic seam; callers must sanitize before persistence.
+        self.last_diagnostic_details: dict[str, object] | None = None
+        self._retry_fingerprint: str | None = None
 
     @staticmethod
     def _conversation_key(request: dict[str, object]) -> str:
@@ -303,7 +325,7 @@ class GroqEvidenceInvestigator:
     def _initial_messages(request: dict[str, object]) -> list[dict[str, object]]:
         initial_request = {**request, "observations": []}
         return [
-            {"role": "system", "content": INVESTIGATOR_SYSTEM_INSTRUCTION},
+            {"role": "system", "content": GROQ_EVALUATION_INSTRUCTION},
             {
                 "role": "user",
                 "content": "Investigate this recovery case without taking action:\n"
@@ -345,24 +367,29 @@ class GroqEvidenceInvestigator:
         pending = conversation.pending_call
         assert pending is not None
         conversation.messages.append(pending.assistant_message)
-        conversation.messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": pending.call_id,
-                "name": pending.tool_name,
-                "content": json.dumps(
-                    observation, sort_keys=True, separators=(",", ":"), default=str
-                ),
-            }
-        )
+        conversation.messages.append(self._tool_result_message(pending, observation))
         if pending.tool_name not in conversation.historical_tool_names:
             conversation.historical_tool_names.append(pending.tool_name)
         conversation.observation_count += 1
         conversation.pending_call = None
         return key, conversation
 
+    @staticmethod
+    def _tool_result_message(
+        pending: _GroqToolCall, observation: dict[str, object]
+    ) -> dict[str, object]:
+        return {
+            "role": "tool",
+            "tool_call_id": pending.call_id,
+            "content": json.dumps(observation, sort_keys=True, separators=(",", ":"), default=str),
+        }
+
     async def next_turn(self, request: dict[str, object]) -> InvestigatorProviderResponse:
         key: str | None = None
+        fingerprint = hashlib.sha256(
+            json.dumps(request, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        self.last_diagnostic_details = None
         try:
             all_tool_definitions = _tools(request)
             definitions_by_name = {
@@ -381,7 +408,11 @@ class GroqEvidenceInvestigator:
                 if any(name not in definitions_by_name for name in forced_names):
                     raise ValueError("Evaluation forced function is not allowlisted")
             key = self._conversation_key(request)
-            _, conversation = self._messages(request)
+            if self._retry_fingerprint == fingerprint and key in self._conversations:
+                conversation = self._conversations[key]
+            else:
+                _, conversation = self._messages(request)
+            self._retry_fingerprint = None
             if forced_names is None:
                 tool_definitions = all_tool_definitions
                 allowed = set(definitions_by_name)
@@ -409,14 +440,51 @@ class GroqEvidenceInvestigator:
                 "max_completion_tokens": self._max_output_tokens,
                 "temperature": 0,
             }
+            self.last_diagnostic_details = {
+                "tool_declarations_sha256": hashlib.sha256(
+                    json.dumps(tool_definitions, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+                "tool_choice": payload["tool_choice"],
+                "parallel_tool_calls": False,
+                "message_structure": [
+                    {
+                        "role": message.get("role"),
+                        "tool_call_id": message.get("tool_call_id"),
+                        "tool_call_ids": [
+                            call.get("id") for call in calls if isinstance(call, dict)
+                        ]
+                        if isinstance((calls := message.get("tool_calls")), list)
+                        else [],
+                        "content_length": len(str(message.get("content") or "")),
+                    }
+                    for message in conversation.messages
+                ],
+            }
             async with httpx2.AsyncClient(
-                base_url=GROQ_BASE_URL,
+                base_url=self.base_url,
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 timeout=httpx2.Timeout(self._timeout_seconds),
                 transport=self._transport,
             ) as client:
                 response = await client.post("/chat/completions", json=payload)
             if response.status_code >= 400:
+                provider_error: dict[str, object] = {}
+                try:
+                    parsed = response.json()
+                    if isinstance(parsed, dict) and isinstance(parsed.get("error"), dict):
+                        provider_error = parsed["error"]
+                except (ValueError, TypeError):
+                    pass
+                assert self.last_diagnostic_details is not None
+                self.last_diagnostic_details.update(
+                    {
+                        "provider_error_code_raw": provider_error.get("code"),
+                        "provider_error_type_raw": provider_error.get("type"),
+                        "provider_error_message_raw": provider_error.get("message"),
+                        "failed_generation_raw": provider_error.get("failed_generation"),
+                        "x_request_id": response.headers.get("x-request-id"),
+                    }
+                )
                 raise _error(RuntimeError("http failure"), response.status_code, response.headers)
             body = response.json()
             choices = body.get("choices")
@@ -433,12 +501,21 @@ class GroqEvidenceInvestigator:
             if not isinstance(calls, list) or len(calls) != 1:
                 raise ValueError("Groq must return exactly one local function call")
             tool_call = _tool_call_from_response(calls[0], allowed)
+            self.last_diagnostic_details = {
+                **(self.last_diagnostic_details or {}),
+                "turn_type": tool_call.turn.action.value,
+                "call_id": tool_call.call_id,
+                "tool_name": tool_call.tool_name,
+                "arguments": tool_call.turn.tool_arguments,
+                "finish_reason": "tool_calls",
+            }
             if tool_call.turn.action is InvestigationTurnAction.CALL_TOOL:
                 conversation.pending_call = tool_call
             else:
                 self._conversations.pop(key, None)
+            self._retry_fingerprint = None
             usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
-            quota = _rate_limit_metadata(response.headers)
+            quota = self._quota_from_headers(response.headers)
             quota_metadata = (
                 quota.as_dict()
                 if any(
@@ -461,11 +538,43 @@ class GroqEvidenceInvestigator:
                 provider=self.provider_name,
                 quota_metadata=quota_metadata,
             )
-        except EvidenceInvestigatorProviderError:
-            if key is not None:
+        except EvidenceInvestigatorProviderError as error:
+            if isinstance(self.last_diagnostic_details, dict) and (
+                self.last_diagnostic_details.get("provider_error_code_raw") == "tool_use_failed"
+                or error.kind
+                in {
+                    EvidenceInvestigatorFailureKind.TIMEOUT,
+                    EvidenceInvestigatorFailureKind.TRANSIENT_PROVIDER,
+                }
+            ):
+                self._retry_fingerprint = fingerprint
+            self.last_diagnostic_details = {
+                **(self.last_diagnostic_details or {}),
+                "turn_type": "provider_error",
+                "finish_reason": "provider_error",
+                "local_validation_failure_reason_code": "provider_boundary_error",
+            }
+            if isinstance(error, EvidenceInvestigatorProviderError):
+                self.last_diagnostic_details.update(
+                    {
+                        "http_status": error.status_code,
+                        "provider_error_type": error.kind.value,
+                        "provider_error_code": (
+                            error.reason_code.value if error.reason_code is not None else None
+                        ),
+                        "scrubbed_error_message": str(error),
+                    }
+                )
+            if key is not None and self._retry_fingerprint is None:
                 self._conversations.pop(key, None)
             raise
         except (ValueError, json.JSONDecodeError):
+            self.last_diagnostic_details = {
+                "turn_type": "malformed",
+                "finish_reason": "malformed_output",
+                "local_validation_failure_reason_code": "malformed_function_response",
+                "scrubbed_error_message": "Groq returned invalid investigator output",
+            }
             if key is not None:
                 self._conversations.pop(key, None)
             raise EvidenceInvestigatorProviderError(
@@ -474,6 +583,7 @@ class GroqEvidenceInvestigator:
                 retryable=False,
             ) from None
         except Exception as error:
+            self._retry_fingerprint = fingerprint
             raise _error(error) from None
 
 

@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import logging
 import re
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -22,6 +24,10 @@ from app.integrations.investigator import (
     EvidenceInvestigatorProviderReason,
 )
 from app.services.recovery_investigation_tools import public_tool_catalog
+
+LOGGER = logging.getLogger(__name__)
+_MAX_RETRIES_PER_MODEL = 2
+_MAX_RETRY_AFTER_SECONDS = 60.0
 
 __all__ = [
     "EvidenceInvestigatorFailureKind",
@@ -135,6 +141,26 @@ def _provider_status_code(error: Exception) -> int | None:
         if isinstance(value, int):
             return value
     return None
+
+
+def _retry_after_seconds(error: Exception) -> float | None:
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    if not isinstance(headers, Mapping):
+        return None
+    value = next(
+        (raw for key, raw in headers.items() if str(key).casefold() == "retry-after"),
+        None,
+    )
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    if seconds < 0:
+        return None
+    return min(seconds, _MAX_RETRY_AFTER_SECONDS)
 
 
 _SAFE_PROVIDER_STATUSES = frozenset(
@@ -493,10 +519,12 @@ class GoogleGenAIEvidenceInvestigator:
         *,
         api_key: str,
         model_name: str,
+        fallback_model_name: str | None = None,
         max_output_tokens: int = 4096,
         request_timeout_seconds: float = 8.0,
         thinking_level: str = "minimal",
         forced_tool_name: str | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         if not api_key.strip():
             raise ValueError("Gemini API key cannot be empty")
@@ -504,10 +532,18 @@ class GoogleGenAIEvidenceInvestigator:
             raise ValueError("Gemini model name cannot be empty")
         self._api_key = api_key.strip()
         self.model_name = model_name.strip()
+        self.fallback_model_name = (
+            fallback_model_name.strip() if fallback_model_name is not None else None
+        )
+        if self.fallback_model_name == "":
+            raise ValueError("Gemini fallback model name cannot be empty")
+        if self.fallback_model_name == self.model_name:
+            self.fallback_model_name = None
         self._max_output_tokens = max_output_tokens
         self._request_timeout_seconds = request_timeout_seconds
         self._thinking_level = _thinking_level(thinking_level)
         self._forced_tool_name = forced_tool_name
+        self._sleep = sleep
         self._discovered_model_version: str | None = None
 
     def _client(self) -> genai.Client:
@@ -559,15 +595,45 @@ class GoogleGenAIEvidenceInvestigator:
             forced_tool_name=self._forced_tool_name,
         )
         allowed_evidence_tool_names = _function_names(config)
-        client = self._client()
-        async_client = client.aio
+        contents = build_investigator_prompt(request)
+        models = (self.model_name,) + (
+            (self.fallback_model_name,) if self.fallback_model_name is not None else ()
+        )
+        last_error: EvidenceInvestigatorProviderError | None = None
+        response: object | None = None
+        requested_model = self.model_name
+        for model in models:
+            requested_model = model
+            for attempt in range(_MAX_RETRIES_PER_MODEL + 1):
+                client = self._client()
+                async_client = client.aio
+                try:
+                    async with asyncio.timeout(self._request_timeout_seconds):
+                        response = await async_client.models.generate_content(
+                            model=model,
+                            contents=contents,
+                            config=config,
+                        )
+                    break
+                except Exception as error:
+                    classified = _classify_provider_error(error)
+                    last_error = classified
+                    if classified.status_code not in {429, 503}:
+                        raise classified from None
+                    if attempt < _MAX_RETRIES_PER_MODEL:
+                        delay = _retry_after_seconds(error)
+                        if delay is None:
+                            delay = float(2**attempt)
+                        await self._sleep(delay)
+                finally:
+                    await async_client.aclose()
+                    client.close()
+            if response is not None:
+                break
+        if response is None:
+            assert last_error is not None
+            raise last_error
         try:
-            async with asyncio.timeout(self._request_timeout_seconds):
-                response = await async_client.models.generate_content(
-                    model=self.model_name,
-                    contents=build_investigator_prompt(request),
-                    config=config,
-                )
             if not isinstance(response, genai_types.GenerateContentResponse):
                 raise EvidenceInvestigatorProviderError(
                     "Gemini returned an unexpected Generate Content response",
@@ -587,9 +653,15 @@ class GoogleGenAIEvidenceInvestigator:
                 ) from None
             usage = response.usage_metadata
             returned_model = _normalized_model_name(response.model_version)
+            served_model = returned_model or requested_model
+            LOGGER.info(
+                "Gemini investigator request served model=%s requested_model=%s",
+                served_model,
+                requested_model,
+            )
             return InvestigatorProviderResponse(
                 turn=turn,
-                model_name=returned_model or self.model_name,
+                model_name=served_model,
                 model_version=self._discovered_model_version or returned_model,
                 input_token_count=usage.prompt_token_count if usage else None,
                 output_token_count=usage.candidates_token_count if usage else None,
@@ -599,9 +671,6 @@ class GoogleGenAIEvidenceInvestigator:
             raise
         except Exception as error:
             raise _classify_provider_error(error) from None
-        finally:
-            await async_client.aclose()
-            client.close()
 
 
 def create_gemini_evidence_investigator(
@@ -615,6 +684,7 @@ def create_gemini_evidence_investigator(
     return GoogleGenAIEvidenceInvestigator(
         api_key=api_key,
         model_name=settings.gemini_model_name,
+        fallback_model_name=settings.gemini_fallback_model_name,
         max_output_tokens=settings.gemini_max_output_tokens,
         request_timeout_seconds=settings.gemini_request_timeout_seconds,
         thinking_level=settings.gemini_thinking_level,

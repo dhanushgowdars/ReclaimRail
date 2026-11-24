@@ -9,9 +9,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Final, Protocol
 
-from app.integrations.gemini.evidence_investigator import INVESTIGATOR_SYSTEM_INSTRUCTION
-from app.integrations.groq.evidence_investigator import _tools
-from app.integrations.investigator import EvidenceInvestigatorProviderError
+from app.integrations.groq.evidence_investigator import GROQ_EVALUATION_INSTRUCTION, _tools
+from app.integrations.investigator import (
+    EvidenceInvestigatorFailureKind,
+    EvidenceInvestigatorProviderError,
+)
 
 GROQ_RPM: Final = 30
 GROQ_RPD: Final = 1_000
@@ -48,6 +50,7 @@ class GroqEvaluationGovernor:
     minute_events: deque[tuple[float, int]] = field(default_factory=deque)
     day_events: deque[tuple[float, int]] = field(default_factory=deque)
     stopped: bool = False
+    consecutive_transient_failures: int = 0
 
     def _prune(self, now: float) -> None:
         while self.minute_events and self.minute_events[0][0] <= now - 60:
@@ -84,11 +87,20 @@ class GroqEvaluationGovernor:
         return GovernorReservation(estimated_tokens, wait, now)
 
     def stop_on_error(self, error: object) -> None:
-        self.stopped = True
         if not isinstance(error, EvidenceInvestigatorProviderError):
-            return
-        if error.status_code not in {400, 401, 403, 429, 500, 501, 502, 503, 504}:
             self.stopped = True
+            return
+        if error.kind is EvidenceInvestigatorFailureKind.UNKNOWN_PROVIDER:
+            self.stopped = True
+            return
+        if error.kind in {
+            EvidenceInvestigatorFailureKind.TIMEOUT,
+            EvidenceInvestigatorFailureKind.TRANSIENT_PROVIDER,
+        }:
+            self.consecutive_transient_failures += 1
+            self.stopped = self.consecutive_transient_failures >= 2
+        else:
+            self.consecutive_transient_failures = 0
 
 
 @dataclass(slots=True)
@@ -97,21 +109,42 @@ class GovernedEvaluationProvider:
 
     provider: TurnProvider
     governor: GroqEvaluationGovernor
+    max_attempts: int = 2
 
     async def next_turn(self, request: dict[str, object]) -> object:
         payload = serialized_payload(
             request,
             [
-                {"role": "system", "content": INVESTIGATOR_SYSTEM_INSTRUCTION},
+                {"role": "system", "content": GROQ_EVALUATION_INSTRUCTION},
                 {"role": "user", "content": json.dumps(request, sort_keys=True, default=str)},
             ],
         )
-        await self.governor.reserve(estimate_tokens(payload))
-        try:
-            return await self.provider.next_turn(request)
-        except Exception as error:  # noqa: BLE001 - provider boundary is intentionally fail-closed
-            self.governor.stop_on_error(error)
-            raise
+        for attempt in range(1, self.max_attempts + 1):
+            await self.governor.reserve(estimate_tokens(payload))
+            if hasattr(self.provider, "attempt_number"):
+                setattr(self.provider, "attempt_number", attempt)  # noqa: B010 - optional metered seam
+            try:
+                result = await self.provider.next_turn(request)
+                self.governor.consecutive_transient_failures = 0
+                return result
+            except Exception as error:  # noqa: BLE001 - provider boundary is intentionally fail-closed
+                diagnostic = getattr(
+                    getattr(self.provider, "provider", None), "last_diagnostic_details", None
+                )
+                tool_failure = (
+                    isinstance(diagnostic, dict)
+                    and diagnostic.get("provider_error_code_raw") == "tool_use_failed"
+                )
+                transient = isinstance(error, EvidenceInvestigatorProviderError) and error.kind in {
+                    EvidenceInvestigatorFailureKind.TIMEOUT,
+                    EvidenceInvestigatorFailureKind.TRANSIENT_PROVIDER,
+                }
+                if attempt < self.max_attempts and (tool_failure or transient):
+                    await self.governor.sleeper(2.5)
+                    continue
+                self.governor.stop_on_error(error)
+                raise
+        raise AssertionError("bounded evaluation attempt loop exhausted")
 
 
 def estimate_tokens(payload: dict[str, object]) -> int:

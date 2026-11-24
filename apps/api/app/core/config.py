@@ -22,6 +22,11 @@ class Settings(BaseSettings):
         min_length=1,
         max_length=128,
     )
+    gemini_fallback_model_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+    )
     gemini_thinking_level: Literal["minimal", "low", "medium", "high"] = "minimal"
     gemini_temperature: float = Field(
         default=0.1,

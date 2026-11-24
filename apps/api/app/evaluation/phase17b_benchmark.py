@@ -114,6 +114,7 @@ class BenchmarkScenarioResult:
     provider_status: str | None = None
     provider_reason_code: str | None = None
     rate_limit_metadata: dict[str, object] | None = None
+    diagnostic_receipts: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,7 +344,7 @@ async def run_frozen_scenario(
         citations_valid=False,
         abstention_correct=None,
         provider_failed=False,
-        malformed_output=True,
+        malformed_output=False,
         failed_safe=True,
         terminal_reason="request_budget_exhausted",
     )
@@ -452,6 +453,7 @@ def sanitized_report_json(report: BenchmarkReport) -> str:
                     "provider_status": result.provider_status,
                     "provider_reason_code": result.provider_reason_code,
                     "rate_limit_metadata": result.rate_limit_metadata,
+                    "diagnostic_receipts": result.diagnostic_receipts,
                 }
                 for result in report.scenario_results
             ],

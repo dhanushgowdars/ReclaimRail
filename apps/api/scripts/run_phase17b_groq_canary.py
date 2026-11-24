@@ -124,7 +124,9 @@ async def run_and_write_report(
     metered = _MeteredProvider(provider)
     status = "success"
     try:
-        result = await run_groq_canary(GovernedEvaluationProvider(metered, governor))
+        result = await run_groq_canary(
+            GovernedEvaluationProvider(metered, governor, max_attempts=1)
+        )
         if result.request_count != 3 or result.tool_execution_count != 0:
             raise RuntimeError("canary result violated request or execution bounds")
     except BaseException as error:

@@ -1,0 +1,79 @@
+{
+  "requests_used": 7,
+  "results": [
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "exception_type": "ClientError",
+          "http_status": 429,
+          "sanitized_error_message": "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. * Quo"
+        }
+      ],
+      "eligible": false,
+      "exact_match": false,
+      "model": "gemini-3.6-flash",
+      "served_model": null
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "exception_type": "ServerError",
+          "http_status": 503,
+          "sanitized_error_message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."
+        },
+        {
+          "attempt": 2,
+          "exception_type": "ServerError",
+          "http_status": 503,
+          "sanitized_error_message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."
+        }
+      ],
+      "eligible": false,
+      "exact_match": false,
+      "model": "gemini-3.7-flash",
+      "served_model": null
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "exception_type": "ServerError",
+          "http_status": 503,
+          "sanitized_error_message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."
+        },
+        {
+          "attempt": 2,
+          "exception_type": "ServerError",
+          "http_status": 503,
+          "sanitized_error_message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."
+        }
+      ],
+      "eligible": false,
+      "exact_match": false,
+      "model": "gemini-3.1-flash-lite",
+      "served_model": null
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "exception_type": "ServerError",
+          "http_status": 503,
+          "sanitized_error_message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."
+        },
+        {
+          "attempt": 2,
+          "exception_type": "ServerError",
+          "http_status": 503,
+          "sanitized_error_message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."
+        }
+      ],
+      "eligible": false,
+      "exact_match": false,
+      "model": "gemini-3.8-flash",
+      "served_model": null
+    }
+  ]
+}

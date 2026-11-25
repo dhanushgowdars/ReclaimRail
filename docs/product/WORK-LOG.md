@@ -1610,3 +1610,61 @@ settings, and report survival across cleanup failure. Targeted validation passed
 The full focused gate passed: Ruff format check `262 files already formatted`, Ruff lint passed,
 strict mypy passed for 134 source files, pytest passed `220 passed in 14.05s`, and
 `git diff --check` passed. No API request, live canary, stage, commit, push or deployment occurred.
+
+## 25 November 2026 — owner-authorized submission-roadmap amendment
+
+This documentation-only work order inspected `AGENTS.md`, `CURRENT-STATE.md`,
+`MASTER-EXECUTION-PLAN.md`, active `ACCEPTANCE-MATRIX.md` rows, `DECISIONS.md`,
+the latest `WORK-LOG.md` entries, `UNIFIED-MASTER-ROADMAP.md` and `INVARIANTS.md`.
+Pre-edit PowerShell commands included `git status --porcelain=v1 -uall`,
+`git branch --show-current`, `git rev-parse HEAD`,
+`git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}'`,
+`git diff --name-only`, `git diff --cached --name-only`,
+`git ls-files --others --exclude-standard`, `git log -1 --format=...` and
+`Get-Content`/`rg` reads of the authority documents and local sanitized receipt.
+Branch was `phase17b/investigator-closure` at
+`936b1d6b14e5daa811e260beb85a22ea54996f9f`, tracking
+`origin/phase17b/investigator-closure`; the HEAD author and committer were both
+`Dhanush R S <dhanushrs981@gmail.com>`. Zero paths were staged. One existing
+unstaged spike script and three untracked spike files were preserved exactly.
+
+The latest untracked verification receipt used five starts. Gemini 3.6 Flash
+returned HTTP 200 but failed the exact-text check; 3.7 returned 503/504 and 3.8
+returned 503/503. The chain was empty and no final ten-scenario corpus report
+exists. This is not a Phase 17B quality verdict. No new provider request, corpus,
+application code change, payment action or deployment occurred in this work order.
+
+`DEC-041` records the submission-critical provider-backed recovery and safe block,
+the five minimum pages, same-cutoff comparison, proposed diagnosis/strategy/
+unsent-message contracts and model stop rule. The historical Gate 1A/Gate 2
+closures, all existing IDs, current classifications and mandatory P21 receipt
+gate remain intact. Six product documents were edited; no `AGENTS.md` change,
+stage, commit or push was authorized. The complete six-document `git diff` was
+reviewed for unsupported completion claims, contradictory priority/receipt
+language, leaked secret shapes and lost requirement IDs. A HEAD-to-worktree ID
+set comparison found zero missing IDs in each of the six documents; a scan of
+added lines found zero secret-shaped assignments or keys. `git diff --check`
+passed with exit 0. No test, lint, build, migration, browser or live-provider
+gate ran because this work order changed documentation only; those product
+gates remain open where the acceptance matrix says so.
+
+## 25 November 2026 — four-gap roadmap correction, before commit
+
+Owner authorized documentation-only corrections to DEMO-09–11 and the current
+next-work instruction. Pre-edit `git status --porcelain=v1 -uall`, branch, HEAD
+and staged-name checks found the same `phase17b/investigator-closure` HEAD
+`936b1d6b14e5daa811e260beb85a22ea54996f9f`, six modified product docs,
+one pre-existing modified spike script, three pre-existing untracked spike
+files and zero staged paths. All application/spike work was preserved.
+
+`DEC-042` sets explicit P1 acceptance for verified-field cause diagnosis,
+two-cause feasible-intent differentiation and optional deterministic unsent
+message validation. `MASTER-EXECUTION-PLAN.md` §23 now labels the Gate 2
+instruction historical and names DEC-032 bounded Phase 18 work as current,
+without closing the Phase 17B blocker. No runtime, model, Razorpay, browser,
+test, lint, build, migration, stage, commit or push action was part of this
+documentation correction. The final six-document diff and `git diff --check`
+were reviewed after these edits: `git diff --check` passed with exit 0;
+HEAD-to-worktree comparison found zero lost requirement/decision IDs, the
+roadmap still lists all 50 F-IDs, and the added documentation had zero
+secret-shaped matches. Zero paths were staged.

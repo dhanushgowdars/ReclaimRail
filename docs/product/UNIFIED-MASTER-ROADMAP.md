@@ -1,6 +1,6 @@
 # ReclaimRail — Unified Master Development Roadmap
 
-**Version:** 2.1 — 18 November 2026
+**Version:** 2.2 — 25 November 2026 submission-priority amendment
 **Product:** Evidence-Grounded AI Payment Truth & Revenue Recovery Control Plane
 **Context:** Razorpay AI Buildathon · Track 03 — AI Revenue Recovery
 **GitHub:** https://github.com/dhanushgowdars/ReclaimRail
@@ -33,7 +33,7 @@ Complete **ReclaimRail**, do not rebuild it. Use the existing FastAPI/PostgreSQL
 
 ### Three distinct planning layers
 
-1. **Repository audit gates** are the authority on what can begin and what must pass. Current known gate: **Gate 2 — dependency and access-control stabilization**; Gate 1A is verified and locally committed.
+1. **Repository audit gates** are the authority on what can begin and what must pass. Gate 1A and Gate 2 are closed; Phase 17B remains `PARTIAL`. `DEC-032` permits bounded deterministic Phase 18 work without closing Phase 17B.
 2. **Original functional Phases 14–23** are the architectural dependency map. The previously built Phases 1–13 remain the foundation.
 3. **Feature IDs F-01–F-50** are a complete target inventory; they are not 50 new phases, nor evidence of missing code.
 
@@ -72,7 +72,70 @@ records a later provider-event correction, `22 passed`, and the complete `698 pa
 the full tracked controller passes on a fresh database, and final 1024/1440/1920 plus
 populated-case evidence was manually inspected. The authority documents were finalized,
 the roadmap locked and the exact 23-path local closure commit authorized. Gate 1A is
-`VERIFIED`; Gate 2 is next.
+`VERIFIED`; the statement that Gate 2 was next is historical. See the 25 November amendment below for current priority.
+
+### 25 November 2026 — submission-critical vertical slice
+
+Owner decision `DEC-041` changes delivery priority, not the Gate 1A → Gate 2 → Phase
+17B → Phase 18 → Phase 19 → Phase 20 → Phase 21 → Phase 22 → Phase 23 gate numbering,
+past evidence, or F-01–F-50 scope. Phase 17B is `PARTIAL`; later phases are not
+completed by this amendment. First demonstrate (1) one genuine Razorpay Test Mode
+failed payment through a provider-confirmed, exactly-once attributed paid Payment Link
+and (2) one separate unsafe/uncertain case that policy blocks without mutation.
+
+| Order | Submission work | Backend proof and merchant-facing state |
+| --- | --- | --- |
+| 1 | Truth and case | Provider-emitted signed webhook or verified fetch, source/provenance, failed truth version and eligible case; Command Center and Recovery Cases show the same stored evidence. `UNKNOWN` never becomes `FAILED` from a timeout. |
+| 2 | Investigation and validation | Bounded read-only transcript, citations, same-case/cutoff/freshness/value/contradiction verdicts, abstention or fallback; Investigation Room displays accepted/rejected claims and source IDs. Live model selection still needs its locked Phase 17B gate. |
+| 3 | Policy and review | Feasible coordinate-free intent, deterministic reason codes and hard stops; if required, Human Reviews shows approval bound to case/truth/evidence/action/backend amount and expiry, plus stale invalidation. |
+| 4 | Durable link and payment | Committed intent, lease, idempotency key, provider request/response and ambiguity reconciliation before retry; backend supplies the official Payment Link. Investigation Room shows pending/verified action separately from payment. |
+| 5 | Attributed outcome | Provider-confirmed paid link and payment linked to that intent/case, exactly one attributed Test Mode outcome; Outcome Ledger and Command Center show pending vs recovered, with reload proof. |
+| 6 | Safe block | Captured, unknown, conflicting, stale, consent-denied or otherwise prohibited case; no intent/provider mutation; persisted reason visible in Recovery Cases, Investigation Room and Human Reviews where applicable. |
+
+Minimum demo pages are **Command Center, Recovery Cases, Investigation Room, Human
+Reviews and Outcome Ledger**. Each needs persisted backend read models, loading/empty/
+error/uncertain states, Test Mode provenance, protected actions, refresh persistence and
+visually inspected browser evidence. A successful build alone proves no page complete.
+
+Proposed improvements, pending implementation and provider/account evidence:
+
+- **Cause-specific AI diagnosis — P1 enhancement (DEMO-09):** depends on provider-backed
+  failure-field provenance and Phase 18 same-case validation, with Phase 22 display.
+  Every asserted cause must cite verified provider fields owned by the case and available
+  at the evidence cutoff. Missing, unsupported or ambiguous fields yield `UNKNOWN` or
+  abstention. Test only failure causes actually evidenced by the Test Mode account;
+  no diagnosis establishes payment truth. Core claim validation remains SC.
+- **Cause-sensitive feasible strategy — P1 enhancement (DEMO-10):** depends on two
+  distinct verified causes from DEMO-09, Phase 18 feasible intents and Phase 19 policy.
+  Under the same cutoff and policy, two supported causes must produce meaningfully
+  different feasible intent sets or selected intents when policy allows; unsupported
+  cause text cannot force a different action. Record exclusions and explain them in
+  Phase 22. AI cannot set amount, contact, provider ID or link URL; the backend resolves
+  them. Core feasible-intent safety remains SC; calibrated ranking (F-19) remains P1.
+- **Optional prepared, unsent customer message — P1 (DEMO-11):** follows verified
+  facts, consent/policy and Phase 20 backend link capability; preview in Phase 22 is
+  never a dependency of core recovery. Deterministic checks reject facts outside the
+  approved same-case evidence/cutoff, unsupported language, overlength drafts,
+  credential/PIN/OTP requests, absent consent or missing provenance. Validate the
+  draft before inserting an official Payment Link from trusted backend data; no
+  model-provided URL or send side effect. Show `PREPARED_NOT_SENT` unless actual
+  delivery is separately verified; absent link/consent shows a blocked reason.
+
+Submission measurement first compares rule-only and AI-assisted investigation on a
+small frozen set with identical evidence cutoffs, policy and case-level outputs. Report
+truth/citation/abstention, unsafe/duplicate actions, availability and denominators;
+an unsafe naive strategy may run in isolated simulation only. Simulated outcomes do
+not count as provider-confirmed recovered money. Retain the full four-arm Scenario Lab,
+Rail Intelligence, full Safety Controls, advanced ranking, receipt chain and receipt UI
+in F-01–F-50 and Phases 18–23. The core tamper-evident receipt and verifier remain
+mandatory under P21-07/08; deferring either would keep the release gate open and
+requires a separate owner decision.
+
+After one bounded **complete** model evaluation, report pass or failure against the
+locked Phase 17B thresholds and stop. No further provider search, model additions or
+prompt-tuning round without a separate owner decision. The latest local five-attempt
+verification had no eligible chain and therefore no corpus; it is not a completed
+model-quality evaluation.
 
 ---
 
@@ -417,7 +480,7 @@ These are target requirements, **not assumed missing implementations**. Status c
 | F-25 | Payment Link adapter and lifecycle | M2/M4 | SC | Single active intended link, provider lookup/cancel/expiry verified |
 | F-26 | Crash-window reconciliation | M2/M7 | SC | Crash after provider success creates no second provider action |
 | F-27 | Provider-backed Outcome Ledger | M2/M4 | SC | Money counted only after capture + link/case attribution |
-| F-28 | Tamper-evident Recovery Receipt | M7/M5 | P1 (core audit SC) | Redacted receipt passes hash verification, tampering detected |
+| F-28 | Tamper-evident Recovery Receipt | M7/M5 | SC | Redacted receipt passes hash verification, tampering detected; external anchoring remains stretch |
 | F-29 | Explicit stopping rules | M1/M2 | SC | Already-paid, quota, consent, stale and expired stop reasons recorded |
 
 ### F. Simulation and evaluation
@@ -443,7 +506,7 @@ These are target requirements, **not assumed missing implementations**. Status c
 | F-41 | Rail Radar UI | M5 | P1 | Real observed rail signals, no fabricated provider health |
 | F-42 | Safety Controls UI | M5 | SC | Authorized edits enforced/persisted/audited |
 | F-43 | Outcomes/Waterfall UI | M5/M6 | SC | Proper attribution, denominators, drilldown |
-| F-44 | Receipt verification UI | M7/M5 | P1 | Read-only redacted proof and safe tamper demo |
+| F-44 | Receipt verification UI | M7/M5 | SC | Mandatory P22-10 read-only redacted proof and safe tamper demo before release |
 | F-45 | Verified Run Replay | M4/M5 | SC | Provider-backed historical run only; no new money/actions |
 
 ### H. Operational platform

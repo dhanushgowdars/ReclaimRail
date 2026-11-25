@@ -9,14 +9,14 @@
 > implemented, tested and audited. A phase is not complete because code exists;
 > every mandatory requirement must have runtime evidence and verification evidence.
 
-- **Plan version:** 2.4-unified-roadmap-locked
+- **Plan version:** 2.5-submission-priority-amendment
 - **Locked on:** 31 October 2026
 - **Evidence refreshed:** 18 November 2026 from Gate 1A closure and final Gate 2 Windows/PostgreSQL validation
 - **Unified roadmap status:** owner-approved and locked on 18 November 2026
 - **Product:** Evidence-grounded, policy-bounded payment recovery control plane
 - **Current merged baseline:** `1912645` (Phase 17 core runtime merged through PR #19)
 - **Authoritative continuation:** `gate2/dependency-access-control` at `652e440495ff0d3a9b8c07baa65a24ae2ed2f023`
-- **Current phase:** Gate 2 is `VERIFIED` and `CLOSED`; Phase 17B remains unauthorized pending a separate owner decision.
+- **Current phase:** Gate 2 is `VERIFIED` and `CLOSED`; Phase 17B is `PARTIAL` after owner-authorized diagnostics and an incomplete final model verification. `DEC-032` permits deterministic Phase 18 work; Phase 19 remains unauthorized.
 - **Verified committed foundation:** Phases 1–5, 14–16 at repository level
 - **Partial historical product phases:** 6–13 and 17A
 - **Broken closure gate:** Phase 17B live investigator
@@ -189,6 +189,11 @@ If provider quota prevents a complete run, record the phase as `PARTIAL` with an
 external blocker; do not weaken thresholds or repeat the corpus until the external condition
 and budget are reviewed.
 
+**25 November stop rule:** after one bounded, complete model evaluation, publish the
+pass/failure decision against these unchanged thresholds and stop model search and
+prompt tuning. A verification with no eligible model and no corpus is incomplete,
+not a quality verdict; any further live attempt needs a separate owner decision.
+
 ### Gate 4 — Phase 18: evidence validation and action ranking
 
 Implement the existing P18 specification in this document. In addition to its detailed
@@ -238,6 +243,53 @@ Acceptance additionally requires:
 - README links, architecture, limitations and failure-recovery story;
 - a final evidence bundle containing commands, reports and frontend proof; and
 - owner review before any application is submitted.
+
+### 25 November submission sequence within the existing gates
+
+`DEC-041` prioritizes one provider-backed recovery and one safely blocked case; it
+does not authorize Phase 19–23 implementation or waive any mandatory exit gate.
+Gate 3/Phase 17B stays `PARTIAL`; `DEC-032` allows the first implementation work
+order to be **Phase 18 deterministic claim validation**, especially P18-01–09 and
+F-14/F-18, after this documentation diff is reviewed. Preserve the existing
+contract → persistence → domain → adapters → workers/API → negative/race tests →
+frontend evidence → docs implementation order. Phase 19 then binds approval;
+Phase 20 proves durable intent, link lifecycle and reconciliation; Phase 21 closes
+security and the mandatory receipt; Phase 22 exposes the complete investigation;
+Phase 23 validates the two live demonstrations and comparison. Each phase still
+ends at its own owner review.
+
+The first provider-backed demonstration must retain a single chain of backend IDs:
+genuine Test Mode payment/order → verified failed evidence → truth version → case →
+bounded read-only investigation → validated claims and feasible intent → policy
+verdict and state-bound approval if required → committed provider intent → backend-
+supplied official Payment Link → provider-confirmed paid link/payment → exactly one
+attributed Test Mode ledger outcome. A created link remains pending, not recovered.
+The blocked demonstration must persist a denial or abstention reason and prove zero
+provider mutation. Test Mode capability, actual failure category and notification
+support are `NEEDS INSPECTION` until provider/account evidence is recorded.
+
+| Step | Required frontend proof from persisted backend evidence |
+| --- | --- |
+| Failure, truth, case | Command Center risk and Recovery Cases row/detail show Test Mode provenance, source ID, failed/unknown distinction, truth version, eligibility and case ID. |
+| Investigation, claims | Investigation Room shows tool/claim citations, same-case cutoff and semantic validation results, rejected facts, abstention/fallback and selected feasible alternative. |
+| Policy, review | Investigation Room and Human Reviews show rule codes, hard stops, grant binding, expiry and stale invalidation; blocked case has no actionable link. |
+| Intent, link, payment | Investigation Room shows intent/attempt/idempotency and reconciliation state; only the backend supplies the official link; pending action/payment remain distinct. |
+| Outcome | Outcome Ledger and Command Center show provider confirmation, case/link/payment attribution, one Test Mode recovered amount and reload-safe history. |
+
+Cause-specific diagnosis, strategy selection and a prepared **unsent** customer
+message are proposed improvements with acceptance in DEMO-09–11. DEMO-09 requires
+verified same-case provider fields at the evidence cutoff; unknown or ambiguous
+fields cannot support a specific cause. DEMO-10 requires two distinct verified
+causes to produce different feasible intents when policy allows, while an
+unsupported cause cannot change the action. DEMO-11 is optional P1: deterministic
+fact/language/length/credential/consent/provenance checks precede backend link
+insertion; show `PREPARED_NOT_SENT` until delivery is verified. None of these
+improvements gives AI financial authority or makes message preview a core-recovery
+dependency. A small rule-
+only versus AI-assisted paired comparison uses the same frozen evidence cutoff;
+naive unsafe strategy runs only in isolated simulation. Keep the four-arm Phase 23
+requirement and P21-07/08 receipt/verifier as release gates. Deferring the core
+receipt would leave Phase 21 and release `PARTIAL` pending separate owner approval.
 
 ## 1. Why this document exists
 
@@ -1191,15 +1243,22 @@ reduce stretch scope, not payment-safety proof.
 
 ## 23. Next work order
 
-Gate 1A and Gate 2 are complete. The only active scope is the Gate 2 post-commit
-documentation closure:
+**Historical 19 November Gate 2 instruction, now superseded:** review and commit
+the six-document Gate 2 closure before any Phase 17B work. Gate 1A and Gate 2
+were subsequently closed; later owner decisions authorized bounded Phase 17B
+diagnostics. This paragraph preserves the old sequence as history, not current
+permission or a fresh completion claim.
 
-1. review the exact six-document closure diff without changing application code;
-2. if accepted, separately authorize one documentation-only commit under the required
-   Dhanush identity;
-3. verify the six committed paths, author/committer identity, clean worktree, successful
-   push, matching local/remote hashes and upstream tracking; and
-4. stop before any pull request, merge, deployment or Phase 17B work.
-
-Phase 17B read-only diagnosis requires a separate owner decision. Phase 18 must not begin
-while any P17 requirement is pending, silently deferred or supported only by a screenshot.
+**Current instruction, 25 November 2026:** review this six-document roadmap
+diff first; stage, commit and push only after separate owner authorization.
+Preserve all pre-existing spike changes. Phase 17B remains `PARTIAL` with its
+live model-selection and submission blocker. Under `DEC-032`, bounded
+provider-neutral Phase 18 deterministic claim validation and feasible
+coordinate-free intents (P18-01–09, F-14/F-18) are the first implementation
+work order after roadmap review. That authorization does not select a model,
+count a fallback as Gemini, weaken Phase 17B thresholds or close its blocker.
+Phase 19 and later implementation require their own owner decisions and phase
+gates. Follow the 25 November sequence above; stop for owner review at each
+phase boundary. A further live model evaluation needs a separate bounded owner
+decision, and one complete evaluation ends provider search/prompt tuning until
+another owner decision.

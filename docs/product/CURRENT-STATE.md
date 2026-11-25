@@ -5,7 +5,7 @@
 - Gate 1A evidence dates: 17–18 November 2026
 - Gate 2 final validation evidence date: 18 November 2026
 - Gate 2 Git closure evidence date: 18–19 November 2026
-- Status refresh date: 19 November 2026
+- Status refresh date: 25 November 2026 (local Phase 17B and roadmap addendum below)
 - Audit source: sanitized local snapshot `ReclaimRail-Audit-20261031-220531.zip`
 - Public repository: `https://github.com/dhanushgowdars/ReclaimRail`
 - Remote `main`: `19126456b37d21d1ead659762c5f92916f3a64e1`
@@ -680,3 +680,49 @@ when available and deterministic backoff otherwise, before fallback. Successful 
 the served and requested model names. The canary runner persists its sanitized report before
 client cleanup and retains the result if cleanup fails. Ruff format/lint, strict mypy for 134
 source files, 220 focused tests and `git diff --check` passed. No API request or live canary ran.
+
+## 25 November 2026 local worktree and submission roadmap checkpoint
+
+Live Windows worktree before this documentation amendment: branch
+`phase17b/investigator-closure`, HEAD `936b1d6b14e5daa811e260beb85a22ea54996f9f`,
+upstream `origin/phase17b/investigator-closure`, zero staged paths, one unstaged
+`apps/api/spikes/single_call_investigator/verify_models.py`, and three untracked
+spike files: `final-evaluation-verification-20261125.json`,
+`model-verification-final-20261125.json`, and `run_final_evaluation.py`. All were
+preserved. The HEAD records a Phase 17B single-call spike; it does not close Phase
+17B or the provider-backed product path. Older Gate 2/current-branch statements
+above are historical snapshots, not this worktree's state.
+
+The latest local sanitized verification receipt records five transport starts:
+`gemini-3.6-flash` returned HTTP 200 but failed the exact `working` check;
+`gemini-3.7-flash` returned 503 then 504 after its permitted retry; and
+`gemini-3.8-flash` returned 503 twice. The eligible chain was empty, so no
+ten-scenario corpus report exists from that runner. Earlier session probes had
+three `ConnectError` results and a keyless HTTPS check failed to connect. These
+are access/verification observations, not a complete model-quality evaluation.
+Phase 17B remains `PARTIAL`; P17B-07–11 and F-36 are not promoted. No model is
+selected for the submission path.
+
+`DEC-041` makes one genuine Razorpay Test Mode failed-payment-to-attributed-paid-link
+journey and one safely blocked case the first product demonstrations. Current
+provider-emitted failure provenance, account-specific Test Mode failure/link/
+notification capability, complete durable link path, outcome attribution and
+five merchant-facing page walkthroughs remain `PARTIAL` or `NEEDS INSPECTION` at
+their existing acceptance rows; no roadmap text proves them. Phase 18 deterministic
+work is allowed by `DEC-032`, while Phase 19 and later work require separate owner
+decisions. The core receipt/verifier remains a mandatory release gate.
+
+### 25 November owner correction before roadmap commit
+
+`DEC-042` clarifies three proposed enhancements without changing their runtime
+status: DEMO-09 is P1 and requires a verified, same-case provider field available
+at the evidence cutoff for every asserted cause; missing/ambiguous evidence yields
+`UNKNOWN` or abstention. DEMO-10 is P1 and requires two actually verified causes
+to change feasible intents when policy permits; an unsupported cause cannot force
+an action. DEMO-11 is optional P1, requires deterministic draft checks and
+trusted backend link insertion after validation, and displays
+`PREPARED_NOT_SENT` until delivery proof exists. No current account failure
+categories, two-cause comparison, message contract or delivery result is
+verified by this documentation change. The current next-work instruction in
+`MASTER-EXECUTION-PLAN.md` now reflects `DEC-032`; Phase 17B stays `PARTIAL`
+and a submission blocker.
